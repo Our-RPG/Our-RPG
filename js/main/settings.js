@@ -60,6 +60,31 @@ function initSettingsUi() {
       } catch (e) {}
     });
   }
+  // Community layer toggle — js/main/proposal-overlay.js reads this key at
+  // boot. Checkbox semantics (not a select, so no "auto" third state):
+  // absent or "1" = on (default ON), "0" = off. Applying a change needs a
+  // reload (the overlay only runs once, early in boot), so we just hint that
+  // rather than trying to live-toggle already-patched sprites/sounds.
+  const cs = document.getElementById("communitysel");
+  if (cs) {
+    let cur = null;
+    try { cur = localStorage.getItem("taiao_community_layer_v1"); } catch (e) {}
+    cs.checked = cur !== "0";
+    cs.addEventListener("change", () => {
+      try { localStorage.setItem("taiao_community_layer_v1", cs.checked ? "1" : "0"); } catch (e) {}
+      const st = document.getElementById("community-status");
+      if (st) st.textContent = "Reload to apply.";
+    });
+  }
+  // Taiao Workshop help-tab block — build-time TAIAO_WORKSHOP_URL (empty in
+  // offline builds, tools/build.mjs) decides whether this shows at all.
+  const wsBlock = document.getElementById("help-workshop-block");
+  if (wsBlock) {
+    if (typeof TAIAO_WORKSHOP_URL !== "undefined" && TAIAO_WORKSHOP_URL) {
+      const wsLink = document.getElementById("help-workshop");
+      if (wsLink) wsLink.href = TAIAO_WORKSHOP_URL;
+    } else wsBlock.style.display = "none";
+  }
 }
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initSettingsUi);
 else initSettingsUi();

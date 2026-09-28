@@ -1106,6 +1106,10 @@
           ? "Votes are saved on this device; log in on the Account tab to have them counted with everyone else's."
           : "Votes are saved on this device and can be changed at any time.") +
       " Proposed art shows only here — the in-game sprites don't change."));
+    if (typeof ProposalOverlay !== "undefined") {
+      const cu = ProposalOverlay.credit(desc.type + ":" + desc.key);
+      if (cu) body.appendChild(el("div", "oe-intro", `Community art by @${cu} — made in the Taiao Workshop.`));
+    }
 
     // ---- sprite variant sections (standard / tended / baby) ----
     for (const variant of variantsFor(desc)) {

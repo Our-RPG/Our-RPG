@@ -19,35 +19,29 @@ const QUALITY_MODEL = {
 };
 
 // ---- per-tool craft quality: the right hand tool finally matters ----
-// Each craft skill lists the Toolmaking hand-tools that improve it. Carry one
-// and the quality of what you make rises (the `tool` term above), scaled by the
-// tool's tier; the Master's tool set is UNIVERSAL. Bare-handed stays neutral —
-// pure upside, so this is what finally gives Toolmaking's output a job. A tool
-// can help several trades; a trade can accept several tools (best held wins).
+// Each craft skill has AT MOST ONE hand-tool that improves it (design rule:
+// max one tool per recipe). Carry that tool and the quality of what you make
+// rises (the `tool` term above), scaled by the tool's tier; the Master's tool
+// set is UNIVERSAL (a single special tool that lifts every craft). Bare-handed
+// stays neutral — pure upside — and not every skill needs a tool at all. One
+// tool may still serve several trades, but no trade lists more than one.
 const TOOL_SKILLS = {
-  hammer:     ["Weaponsmithing", "Armoursmithing", "Smelting"],
-  tongs:      ["Weaponsmithing", "Armoursmithing", "Smelting", "Glassblowing", "Assaying"],
-  file:       ["Weaponsmithing", "Armoursmithing", "Toolmaking", "Jewelry", "Wire-drawing"],
-  whetstone:  ["Toolmaking", "Weaponsmithing", "Armoursmithing"],
-  vice:       ["Toolmaking", "Locksmithing", "Jewelry"],
-  saw:        ["Carpentry", "Sawing", "Shipwrighting", "Coopering"],
-  plane:      ["Carpentry", "Sawing"],
-  adze:       ["Carpentry", "Shipwrighting"],
-  mallet:     ["Carpentry", "Masonry", "Cordwaining", "Leatherworking"],
-  chisel:     ["Masonry", "Carpentry", "Toolmaking"],
-  trowel:     ["Masonry", "Limeburning"],
-  shovel:     ["Charcoaling", "Limeburning"],
-  knife:      ["Cooking", "Baking", "Fletching", "Leatherworking", "Cordwaining"],
-  awl:        ["Leatherworking", "Cordwaining", "Saddlery", "Bookbinding"],
-  needle:     ["Tailoring", "Sailmaking", "Saddlery", "Cordwaining", "Weaving", "Textiles"], // the sewing tool
-  pin:        ["Tanning", "Tailoring", "Sailmaking"], // stretch/pin hides on the rack + fasten cloth
-  shears:     ["Tailoring", "Weaving", "Textiles", "Fulling", "Sailmaking", "Ropemaking"],
-  pliers:     ["Jewelry", "Locksmithing", "Wire-drawing"],
-  hand_drill: ["Locksmithing", "Jewelry", "Carpentry"],
-  wrench:     ["Locksmithing"],
-  quill:      ["Bookbinding", "Papermaking"],
-  // a general kit — helps the metal/wood/fitting trades broadly, but not everything
-  toolbox:    ["Weaponsmithing", "Armoursmithing", "Toolmaking", "Carpentry", "Masonry", "Jewelry", "Locksmithing", "Shipwrighting"],
+  hammer:  ["Weaponsmithing", "Armoursmithing"],
+  tongs:   ["Smelting", "Glassblowing", "Assaying"],
+  file:    ["Toolmaking"],
+  vice:    ["Locksmithing"],
+  pliers:  ["Jewelry", "Wire-drawing"],
+  saw:     ["Carpentry", "Sawing", "Coopering"],
+  adze:    ["Shipwrighting"],
+  chisel:  ["Masonry"],
+  trowel:  ["Limeburning"],
+  shovel:  ["Charcoaling"],
+  knife:   ["Cooking", "Baking", "Fletching"],
+  awl:     ["Leatherworking", "Cordwaining", "Saddlery", "Bookbinding"],
+  quill:   ["Papermaking"],
+  needle:  ["Tailoring", "Sailmaking"], // the sewing tool
+  shears:  ["Weaving", "Textiles", "Fulling", "Ropemaking"],
+  pin:     ["Tanning"], // stretch/pin hides on the rack
 };
 const UNIVERSAL_TOOLS = ["master_tools"]; // the Master's tool set lifts every craft
 // build skill -> [tool ids] once (invert TOOL_SKILLS)

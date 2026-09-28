@@ -33,6 +33,27 @@ export async function flaggedQueue(req, env) {
   return json({ ok: true, queue: rows.results });
 }
 
+/* The gap manifest — studio/tools/gen_gaps.mjs pushes the list of subjects
+ * ("gen:ui:<itemId>", "gen:monster:<key>", ...) whose art is missing or weak.
+ * workshop.submitProposal consults it to decide whether a PixelLab proposal
+ * fills a hole (auto-accept) or just adds another option to an already-
+ * covered subject (normal voting lane). */
+export async function setGaps(req, env) {
+  if (!isAdmin(req, env)) return err("Nope.", 403);
+  const b = await readJson(req, 1024 * 1024);
+  if (!b || !Array.isArray(b.subjects) || b.subjects.length > 5000)
+    return err("Need {subjects: string[]} (max 5000).");
+  const subjects = [];
+  for (const s of b.subjects) {
+    if (typeof s !== "string" || !s || s.length > 120) return err("Each subject must be a string ≤120 chars.");
+    subjects.push(s);
+  }
+  await env.VAULT.put("workshop/gaps.json",
+    JSON.stringify({ updated: Date.now(), subjects }),
+    { httpMetadata: { contentType: "application/json" } });
+  return json({ ok: true, count: subjects.length });
+}
+
 export async function setProposalStatus(req, env) {
   if (!isAdmin(req, env)) return err("Nope.", 403);
   const b = await readJson(req);

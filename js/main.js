@@ -284,9 +284,9 @@ async function init() {
   })();
   // first boot of a fresh character on Tūhura Isle: the Guide's welcome
   if (typeof Tutorial !== "undefined") Tutorial.maybeWelcome();
-  // "while you were away" — Pulse already finalized the previous session's
-  // summary at boot-eval time; surface it once, right as the world paints
-  if (typeof Pulse !== "undefined" && Pulse.maybeAwayToast) Pulse.maybeAwayToast();
+  // (no "while you were away" login notification — the game has no passive/
+  // offline progression to report; Pulse still tracks sessions for the I-key
+  // journal, it just doesn't pop a toast on login.)
   M("gameReady");
   // record this boot's real per-stage durations — the loading bar's segment
   // widths next time. Cold (fresh save) and warm boots have wildly different
@@ -324,7 +324,8 @@ async function init() {
       // Bifrost graduation cinematic (gameplay/bifrost.js): the player, action
       // and quest sims pause while the light carries them — but the world keeps
       // turning and render() keeps painting so Newhaven warms up behind the void
-      const cine = typeof Bifrost !== "undefined" && Bifrost.active();
+      const cine = (typeof Bifrost !== "undefined" && Bifrost.active()) ||
+        (typeof Lua !== "undefined" && Lua.ready && Lua.cutsceneActive());
       if (!cine) {
         stepPlayer(dt);
         updateZoom(dt);
@@ -337,7 +338,7 @@ async function init() {
       if (typeof npcChatTick === "function") npcChatTick(); // AI NPC earshot greetings (Nets)
       if (typeof tickPlaced === "function") tickPlaced(); // temporary placed decor withers
       if (!cine && typeof Quests !== "undefined") Quests.tick(); // quest collect/reach objectives
-      if (!cine && typeof QuestScript !== "undefined") QuestScript.tickRoutines(); // NPC daily routines (js/questscript; inert until routine scripts exist)
+      if (!cine && typeof Lua !== "undefined" && Lua.ready) Lua.tickRoutines(); // NPC daily routines (js/lua; inert until the runtime is ready)
       if (!cine && typeof Tutorial !== "undefined" && Tutorial.tick) Tutorial.tick(); // Tūhura source-reach reward
       if (!cine && typeof GoalsArc !== "undefined") GoalsArc.tick(dt); // post-Bifrost "First days in Newhaven" arc
       if (!cine && typeof Eggs !== "undefined") Eggs.tick(dt); // easter-egg condition watchers (1 Hz inside)

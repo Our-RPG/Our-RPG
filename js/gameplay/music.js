@@ -106,6 +106,8 @@ const MUSIC = (() => {
   }
 
   function tick() {
+    // the generative layer is retired — birdsong is the ambience now
+    return;
     if (typeof player === "undefined" || !player || typeof gameReady === "undefined" || !gameReady) return;
     if (now < nextLogicAt) return;
     nextLogicAt = now + 1000;
@@ -134,6 +136,8 @@ const MUSIC = (() => {
 
   // ---------- cinematic themes (recorded tracks) ----------
   function cinematic(name) {
+    // no-op — the user wants no music anywhere, including the Bifrost theme
+    return;
     stopCinematic(0.2);
     theme = new Audio(BASE + name + ".ogg");
     theme.volume = 0;

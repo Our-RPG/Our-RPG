@@ -62,6 +62,12 @@ const CORE_SHEET_KEYS = new Set(SHEET_KEYS.slice());
 // wedge boot). Keys packed into a shared atlas share ONE Image per URL so the
 // atlas is fetched and decoded once, not once per key.
 const _sheetImgByUrl = {};
+// Fired once a sheet finishes decoding, core or deferred. The community
+// overlay (js/main/proposal-overlay.js) listens for this to patch sheets that
+// stream in AFTER it already tried and found IMGS[sheet] not ready yet.
+function _sheetReady(k) {
+  if (typeof document !== "undefined") document.dispatchEvent(new CustomEvent("taiao-sheet-loaded", { detail: { sheet: k } }));
+}
 function _loadSheet(k, done) {
   const url = ASSET_DATA[k];
   let im = _sheetImgByUrl[url];
@@ -69,14 +75,14 @@ function _loadSheet(k, done) {
     IMGS[k] = im;
     if (im.complete) { if (done) done(); }
     else if (done) {
-      im.addEventListener("load", () => done(), { once: true });
+      im.addEventListener("load", () => { _sheetReady(k); done(); }, { once: true });
       im.addEventListener("error", () => done(), { once: true });
     }
     return;
   }
   im = new Image();
   _sheetImgByUrl[url] = im;
-  im.addEventListener("load", () => { if (done) done(); }, { once: true });
+  im.addEventListener("load", () => { _sheetReady(k); if (done) done(); }, { once: true });
   im.addEventListener("error", () => {
     if (!SHEET_OPTIONAL.has(k)) console.error("Failed to load sprite sheet: " + k + " (" + url + ")");
     if (done) done();
@@ -135,12 +141,18 @@ window.addEventListener("resize", resizeCanvas);
 // Callers (2):
 //  main/assets.js:45,79
 const ICONS = {};
+// Studio "play with my changes" preview: a player previewing their own icon
+// proposals (js/main/proposal-overlay.js) drops replacement 32×32 canvases here
+// keyed by SPR key. Checked before ICONS/SPR so it survives the icon-cache
+// wipe that streaming sheets trigger. Empty (and untouched) in normal play.
+const ICON_OVERRIDE = {};
 // Callers (91):
 //  content.js:36,37,60,86,90,103,131,132,152,165,182,208,229,247,248,562,563,564
 //  data.js:294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,311,312,313,314,315,316,317,318,319,320,321,322,323,324,325,326,327,328,329,330,331,332,333,334,335,336,337,338,339,340,341,342,343,344,345,346
 //  main/assets.js:42 main/ui.js:24,54,89,147,171,197,218,239,258,276,296 render3d.js:450,471,496
 //  world.js:9 world/features.js:915,932,934,935
 function icon(key) {
+  if (ICON_OVERRIDE[key]) return ICON_OVERRIDE[key];
   if (ICONS[key]) return ICONS[key];
   const def = SPR[key];
   const [sheet, c, r, extra] = def;
@@ -187,4 +199,53 @@ function icon(key) {
   c2.restore();
   ICONS[key] = cv;
   return cv;
+}
+
+// ---------- community overlay hooks ----------
+// The rect math icon() (above) and render3d's drawSprTo both do independently
+// — pulled out once so the proposal overlay can resolve a SPR key's exact
+// sheet pixel rect without duplicating either of them a third time.
+// Callers: js/main/proposal-overlay.js
+function sprRect(key) {
+  const def = SPR[key];
+  if (!def) return null;
+  const [sheet, c, r, extra] = def;
+  const st = SHEET_TILE[sheet] || 16;
+  const off = SHEET_OFFSET[sheet];
+  const pitch = SHEET_NOPAD.has(sheet) ? st : st + 1;
+  const sx = (extra && extra.sx != null ? extra.sx : c * pitch) + (off ? off.ox : 0);
+  const sy = (extra && extra.sy != null ? extra.sy : r * pitch) + (off ? off.oy : 0);
+  const sw = extra && extra.sw ? extra.sw : st;
+  const sh = extra && extra.sh ? extra.sh : st;
+  return { sheet, sx, sy, sw, sh };
+}
+
+// Bake community art into IMGS[sheet] at the given pixel rects, in place —
+// every 2D consumer (map.js, world.js) reads IMGS directly each draw, so a
+// swapped-in canvas propagates live with no further plumbing. Returns false
+// when the sheet isn't decoded yet (caller should retry on the
+// "taiao-sheet-loaded" event); true once patched. IMGS[sheet] may already be
+// a patched canvas from an earlier call — drawImage happily takes a canvas
+// source, so repeated patches accumulate rather than clobber each other.
+// Callers: js/main/proposal-overlay.js
+function patchSheetRects(sheet, patches) {
+  const img = IMGS[sheet];
+  if (!img || !img.complete || img.naturalWidth === 0) return false;
+  const cv = document.createElement("canvas");
+  cv.width = img.naturalWidth;
+  cv.height = img.naturalHeight;
+  const cx = cv.getContext("2d");
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, 0, 0);
+  for (const p of patches) {
+    cx.clearRect(p.sx, p.sy, p.sw, p.sh);
+    cx.drawImage(p.img, p.sx, p.sy, p.sw, p.sh);
+  }
+  cv.complete = true;
+  cv.naturalWidth = cv.width;
+  cv.naturalHeight = cv.height;
+  IMGS[sheet] = cv;
+  for (const k in ICONS) delete ICONS[k];
+  if (typeof uiDirty !== "undefined") uiDirty = true;
+  return true;
 }

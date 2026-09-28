@@ -370,7 +370,16 @@ function buildTileMenu(t) {
       });
     }
     let exam = null;
-    if (tg.kind === "monster") exam = `It's a ${MONSTERS[tg.mon.kind].name}, level ${MONSTERS[tg.mon.kind].lvl}.`;
+    if (tg.kind === "monster") {
+      const mkind = tg.mon.kind;
+      exam = `It's a ${MONSTERS[mkind].name}, level ${MONSTERS[mkind].lvl}.`;
+      if (typeof ProposalOverlay !== "undefined") {
+        const u = ProposalOverlay.credit("monster:" + mkind);
+        if (u) exam += " Art by @" + u + ".";
+        else if (ProposalOverlay.isGapMonster(mkind))
+          exam += " Its true form is still unpainted — the Workshop seeks an artist.";
+      }
+    }
     else if (tg.kind === "npc") exam = (typeof npcAsleep === "function" && npcAsleep(tg.npc)) ? `${tg.npc.name} is fast asleep.`
       : tg.npc.trader ? (typeof shopClosed === "function" && shopClosed(tg.npc) ? "A merchant — shop's shut for the night." : "A merchant. Fair prices, mostly.")
       : `${tg.npc.name}, a villager.`;
@@ -426,13 +435,26 @@ function buildTileMenu(t) {
     const dk = world.getDecor(t.x, t.y);
     const picked = typeof decorPicked === "function" && decorPicked(t.x, t.y);
     if (dk && !picked) {
-      // QuestScript loc trigger (js/questscript) for this world object? Its
-      // scripted interaction replaces the default Take and becomes the
-      // left-click default (unshifted to the front of the menu).
-      if (typeof QuestScript !== "undefined" && QuestScript.hasLoc(dk))
+      // Lua loc handler (js/lua on_loc) for this world object? Its scripted
+      // interaction replaces the default Take and becomes the left-click
+      // default (unshifted to the front of the menu).
+      if (typeof Lua !== "undefined" && Lua.ready && Lua.hasLoc(dk))
         items.unshift({ label: `Take ${decorName(dk)}`, fn: () => setGoal({ type: "scriptLoc", key: dk.split("#")[0], x: t.x, y: t.y }, t.x, t.y, 1) });
-      else if (typeof decorPickable === "function" && decorPickable(dk))
-        items.push({ label: `Take ${decorName(dk)}`, fn: () => setGoal({ type: "decorPick", x: t.x, y: t.y, key: dk }, t.x, t.y, 1) });
+      else if (typeof decorPickable === "function" && decorPickable(dk)) {
+        // crowbar-gated salvage (Phase 7 item 5): world decor is fixed in
+        // place without one — every "Take <thing>" now runs through a
+        // Toolmaking sink instead of a free grab. Suppression precedent:
+        // the hasTool gate on skill-node gather actions above (input.js
+        // :362). Exempt on the tutorial isle — it teaches by doing, and the
+        // crowbar rule begins on the mainland.
+        const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar") &&
+          !(typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active());
+        if (noCrowbar)
+          items.push({ label: `Take ${decorName(dk)} (needs a crowbar)`,
+            fn: () => log("It's fixed in place. A crowbar would pry it loose — forge one at an anvil (Toolmaking 15).", "warn") });
+        else
+          items.push({ label: `Take ${decorName(dk)}`, fn: () => setGoal({ type: "decorPick", x: t.x, y: t.y, key: dk }, t.x, t.y, 1) });
+      }
       // city plaza fountains double as respawn anchors: "Set respawn point"
       // stores this city; death returns the player here instead of Newhaven
       if (dk.split("#")[0] === "city_fountain") {
@@ -454,6 +476,10 @@ function buildTileMenu(t) {
         if (dex) items.push({ label: `Examine ${decorName(dk)}`, fn: () => {
           log(dex, "sys");
           if (typeof Eggs !== "undefined" && Eggs.onExamine) Eggs.onExamine(dk, t.x, t.y);
+          if (typeof ProposalOverlay !== "undefined") {
+            const u = ProposalOverlay.credit("object:" + dk.split("#")[0]);
+            if (u) log("Made by @" + u + " — Taiao Workshop.", "sys");
+          }
         } });
       }
       pushEdit(items, { type: "decor", key: dk.split("#")[0], name: decorName(dk), exam: decorExamine(dk), x: t.x, y: t.y });

@@ -336,6 +336,7 @@
       a.t += sec;
       if (a.lastSes !== ses.id) { a.sess++; a.lastSes = ses.id; }
       S.totalSec += sec;
+      try { maybeWorkshopIntro(sec); } catch (e) {}
       ses.activeSec += sec;
       ses.share[key] = (ses.share[key] || 0) + sec;
       if (SUBSTANTIVE(key)) lastSub = { key, at: wallNow };
@@ -665,6 +666,88 @@
     const h = Math.floor(lastAway.awayMs / 3600000), m = Math.round((lastAway.awayMs % 3600000) / 60000) % 60;
     const dur = h > 0 ? `${h}h ${m}m` : `${Math.max(1, m)}m`;
     showToast(`Away ${dur} — ${lastAway.text}`);
+  }
+
+  // ---------- first-session Workshop nudge (Phase 6B) ----------
+  // ~12 attentive minutes into a fresh install, a one-time toast: the whole
+  // point being sold here is "this world is not finished, and there's a
+  // bench with your name on it." Gated on a build actually carrying a
+  // Workshop (TAIAO_WORKSHOP_URL, tools/build.mjs), a raw one-time LS flag
+  // (idiom: proposal-overlay.js's FLAG_LS), and its own pre-threshold
+  // accumulator — kept as plain localStorage rather than folded into S so it
+  // survives independently of the Pulse store's own version/reset logic.
+  // Driven straight off sample()'s existing weighted-attentive-second value
+  // (the same `sec` that feeds S.totalSec below) — no separate timer.
+  const WORKSHOP_INTRO_FLAG = "taiao_workshop_intro_v1";
+  const WORKSHOP_INTRO_T = "taiao_workshop_intro_t";
+  const WORKSHOP_INTRO_S = 12 * 60; // ~12 minutes of attentive play
+  let workshopIntroT = 0, workshopIntroInit = false, workshopIntroDone = false, workshopIntroEl = null;
+  function dismissWorkshopIntro() {
+    if (!workshopIntroEl) return;
+    const el = workshopIntroEl; workshopIntroEl = null;
+    el.style.opacity = "0"; el.style.transform = "translate(-50%,-8px)";
+    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 350);
+  }
+  function showWorkshopIntroToast() {
+    if (workshopIntroEl) return; // never stack two
+    const el = document.createElement("div");
+    el.id = "workshop-intro-toast";
+    el.style.cssText = "position:fixed;top:14px;left:50%;z-index:8001;max-width:min(440px,90vw);" +
+      "background:#161a26;border:1px solid #6a5a2a;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.5);" +
+      "padding:12px 14px;color:#dfe6f2;font:13px/1.4 inherit;" +
+      "opacity:0;transform:translate(-50%,-8px);transition:opacity .3s ease, transform .3s ease;";
+    const title = document.createElement("div");
+    title.style.cssText = "color:#ffd75e;font-weight:bold;margin-bottom:4px;";
+    title.textContent = "This world is not finished.";
+    const body = document.createElement("div");
+    body.style.cssText = "color:#b8c4dd;margin-bottom:8px;";
+    body.textContent = "Nearly everything you've met so far — the creatures, the songs, the quests — " +
+      "was put here by players. The Workshop is where it happens, and there's a bench with your name on it.";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;align-items:center;";
+    const openBtn = document.createElement("button");
+    openBtn.textContent = "Open the Workshop ↗";
+    openBtn.style.cssText = "background:#3a2f1a;border:1px solid #6a5a2a;color:#ffd75e;border-radius:4px;" +
+      "cursor:pointer;font-size:12px;padding:4px 10px;";
+    openBtn.onclick = () => { window.open(TAIAO_WORKSHOP_URL, "_blank"); dismissWorkshopIntro(); };
+    const laterBtn = document.createElement("button");
+    laterBtn.textContent = "Later";
+    laterBtn.style.cssText = "background:none;border:1px solid #3a4a6a;color:#8fa3c8;border-radius:4px;" +
+      "cursor:pointer;font-size:12px;padding:4px 10px;";
+    laterBtn.onclick = dismissWorkshopIntro;
+    row.appendChild(openBtn); row.appendChild(laterBtn);
+    const foot = document.createElement("div");
+    foot.style.cssText = "margin-top:6px;color:#6c7690;font-size:10px;";
+    foot.textContent = "It lives in the Help tab whenever you want it.";
+    el.appendChild(title); el.appendChild(body); el.appendChild(row); el.appendChild(foot);
+    document.body.appendChild(el);
+    workshopIntroEl = el;
+    requestAnimationFrame(() => { el.style.opacity = "1"; el.style.transform = "translate(-50%,0)"; });
+    setTimeout(dismissWorkshopIntro, 30000);
+  }
+  // sec: this tick's weighted attentive seconds (same value just folded into
+  // S.totalSec) — only substantive/attributed ticks call this at all.
+  function maybeWorkshopIntro(sec) {
+    if (workshopIntroDone) return;
+    if (typeof TAIAO_WORKSHOP_URL === "undefined" || !TAIAO_WORKSHOP_URL) { workshopIntroDone = true; return; }
+    // never during the Bifrost cinematic, and never stack over the I-key panel
+    if (typeof Bifrost !== "undefined" && Bifrost.active && Bifrost.active()) return;
+    if (isOpen()) return;
+    try {
+      if (!workshopIntroInit) {
+        workshopIntroInit = true;
+        if (localStorage.getItem(WORKSHOP_INTRO_FLAG)) { workshopIntroDone = true; return; }
+        workshopIntroT = parseFloat(localStorage.getItem(WORKSHOP_INTRO_T)) || 0;
+      }
+      workshopIntroT += sec;
+      if (workshopIntroT < WORKSHOP_INTRO_S) {
+        localStorage.setItem(WORKSHOP_INTRO_T, String(Math.round(workshopIntroT)));
+        return;
+      }
+      localStorage.setItem(WORKSHOP_INTRO_FLAG, "1");
+    } catch (e) { workshopIntroDone = true; return; }
+    workshopIntroDone = true;
+    showWorkshopIntroToast();
   }
 
   // ---------- discrete-event intake (goals-arc.js, eggs.js) ----------

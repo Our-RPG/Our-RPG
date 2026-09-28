@@ -303,6 +303,7 @@ const NPC_STARTER_ROLES = {
     "The wheel never lies to you about your mood.",
     "Pottery's not complicated, but it is particular.",
     "I don't have much but I own every pot I've made.",
+    "This world came out of the kiln half-fired, if you ask me. The Workshop folk glaze a little more of it every day.",
   ],
   tanner: [
     "The smell? You stop noticing after a year. Your friends don't, mind.",
@@ -337,6 +338,7 @@ const NPC_STARTER_ROLES = {
     "E hoa, I've woven enough cloth to dress the whole district.",
     "The rhythm of the loom and the rhythm of life — they match if you listen.",
     "Every knot, every pass is small. But small adds up to something.",
+    "Cloth, quests, creatures — all of it woven by many hands. The Workshop keeps a loom free for newcomers.",
   ],
   dyer: [
     "Woad for blue, madder for red — and my hands for proof I use both.",
@@ -643,6 +645,8 @@ const NPC_STARTER_ROLES = {
     "The library is my cathedral. The books are its congregation.",
     "Clean work, quiet work — though my eyes pay the price.",
     "A good scribe is patient first and quick second. Never the reverse.",
+    "Half the pictures in this world were drawn by folk like you. The Workshop takes anyone with steady hands — or clever tools.",
+    "I file every new page the Workshop sends over. There've been many lately. Good sign, that.",
   ],
   storyteller: [
     "Sit a while — every tale's better with one more listener in it.",
@@ -660,6 +664,8 @@ const NPC_STARTER_ROLES = {
     "The tavern after sunset is my temple. The mug is my offering.",
     "A crowd can believe anything for the length of a tale. It's a sacred responsibility.",
     "Laughter, gasps, silence — those are the applause I live for.",
+    "Every tale I tell, somebody wrote — some of them last week, in the Workshop. This world grows while we sleep.",
+    "The best part of an unfinished world? You get to finish it.",
   ],
   elder: [
     "Sit, sit. The young hurry everywhere and arrive nowhere. You can spare a moment.",
@@ -2016,6 +2022,7 @@ const NPC_ROLE_TOPICS = {
       "Folk are starting to notice quality. Makes my work easier to sell.",
       "Someone asked if I could make cloth tight enough to hold water. I said no.",
       "The price of good wool's going up. Shepherds know they've got something good.",
+      "The Workshop crew shipped new work into the world again. Names on everything, like a maker's mark. I check for new ones every market day.",
     ],
     lore: [
       "The loom I use was built by someone's craftsman four generations back.",
@@ -2088,6 +2095,7 @@ const NPC_ROLE_TOPICS = {
       "Someone tried to dye cloth at home once. Don't recommend it.",
       "The tanner wants to know if I can dye leather. Still learning about that.",
       "A visitor came through with questions about my methods. Took hours. Worth it though.",
+      "The aurora over the Workshop? They say it burns brighter the more people are making things. Probably a tall tale. Probably.",
     ],
     lore: [
       "The dye-plants have been known for generations. Knowledge came with the first settlers.",
@@ -3312,6 +3320,7 @@ const NPC_ROLE_TOPICS = {
       "The meeting hall wants a new ledger for settlements records. Good work, steady payment.",
       "Folk are bringing in old family letters to be rebound. Sentiment's good business.",
       "Heard there's a scholar visiting somewhere inland. Probably looking for rare books, they always do.",
+      "They say anyone can put new art or a whole quest into the world through the Taiao Workshop. My cousin's pottery turned up on a market stall a week after she made it — her name still on it.",
     ],
     lore: [
       "The first scriptorium on this isle was in the oldest settlement — three centuries, my mentor said.",
@@ -3384,6 +3393,7 @@ const NPC_ROLE_TOPICS = {
       "The settlement down the coast sent word that their boat came in with an odd catch — haven't heard details yet.",
       "Someone's been asking questions about the old roads. Looking for something they lost, maybe.",
       "The tavern's been full of travellers this season. They bring strange stories, all of them.",
+      "A traveller told me some creatures wear the same face from every side — unfinished, like. The Workshop's offering credit-forever to whoever paints them proper.",
     ],
     lore: [
       "There's an old tale about the first settlement on this isle — they say the storytellers guided them here.",

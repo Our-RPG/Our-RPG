@@ -12,9 +12,9 @@
 
 const AMBIENCE = (() => {
   const BASE = "assets/ambience/";
-  // wind + ocean un-parked 2026-09-16 ("silent skies end here") — all
-  // three beds mix; drop a key here to park a bed again.
-  const KEYS = ["rain", "wind", "ocean"];
+  // beds retired — birdsong alone carries the outdoors; the targets() math
+  // below is kept for the day a bed earns its way back.
+  const KEYS = [];
   const els = {};
   const cur = { rain: 0, wind: 0, ocean: 0 };
   let tgt = { rain: 0, wind: 0, ocean: 0 };

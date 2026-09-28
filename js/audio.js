@@ -11,6 +11,13 @@
 // repeated actions (footsteps, mining) don't machine-gun the same sample.
 "use strict";
 
+// Community overlay: js/main/proposal-overlay.js writes event-id -> src
+// (dataURL or CDN URL) here for adopted community sounds. Mirrors
+// ICON_OVERRIDE's role in main/assets.js — checked first in play(), and
+// unlike SOUNDS it's fine for an id to have no built-in entry: community
+// sounds may target event ids that currently have NO sound at all.
+const SFX_OVERRIDE = {};
+
 const SFX = (() => {
   const BASE = "assets/sfx/";
   // name -> variant count; a count of 0 means a single un-numbered file
@@ -66,12 +73,44 @@ const SFX = (() => {
     return a;
   }
 
+  // Same shape as grab(), but pooled per override name+src rather than per
+  // built-in filename — SFX_OVERRIDE holds a dataURL/CDN URL, not a BASE-
+  // relative variant file.
+  const ovPools = {};
+  function grabOverride(name, src) {
+    const pool = ovPools[name] || (ovPools[name] = []);
+    for (const a of pool) if ((a.paused || a.ended) && a.dataset.src === src) return a;
+    if (pool.length >= 4) return null;
+    const a = new Audio(src);
+    a.dataset.src = src;
+    a.preservesPitch = false;
+    if ("mozPreservesPitch" in a) a.mozPreservesPitch = false;
+    pool.push(a);
+    return a;
+  }
+
   function play(name, vol = 1, rate = 1) {
     const master = gameVol;
     if (master <= 0) return;
+    const t = Date.now();
+    // Community override: a player's own or an adopted community proposal can
+    // target ANY event id, even ones with no built-in SOUNDS entry — checked
+    // before the SOUNDS lookup so it isn't gated on one existing.
+    const ov = SFX_OVERRIDE[name];
+    if (ov) {
+      if (t - (lastAt[name] || 0) < 70) return;
+      lastAt[name] = t;
+      const a = grabOverride(name, ov);
+      if (!a) return;
+      a.volume = Math.pow(Math.min(1, vol * master), 1.25);
+      a.playbackRate = rate * (0.92 + Math.random() * 0.16);
+      a.currentTime = 0;
+      const p = a.play();
+      if (p && p.catch) p.catch(() => {});
+      return;
+    }
     const n = SOUNDS[name];
     if (n === undefined) return;
-    const t = Date.now();
     if (t - (lastAt[name] || 0) < 70) return; // same-frame bursts play once
     lastAt[name] = t;
     const file = name + (n ? Math.floor(Math.random() * n) : "") + ".ogg";

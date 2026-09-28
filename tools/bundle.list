@@ -49,6 +49,14 @@ js/skills/woodcraft.js
 js/nz-extra-birds.js
 js/skills/bestiary-drops.js
 js/skills/seed-drops.js
+# canonical item ids: rename machine ids (forage_12, bar_14, seed_fibriculture_12…)
+# to name-based ids and rewrite every reference. MUST come after everything that
+# builds items/recipes/nodes/crops/drops/shop, and before gameplay + storage.js.
+js/skills/id-canonical.js
+# input cap: split every recipe needing >3 inputs into <=3-input intermediate
+# stages. MUST come after id-canonical (canonical ids) and everything that
+# builds recipes; runs before gameplay/storage. Idempotent.
+js/skills/recipe-split.js
 js/biome-tiles.js
 js/world/terrain.js
 js/world/features.js
@@ -174,22 +182,25 @@ js/gameplay/bestiary.js
 js/gameplay/objedit.js
 js/gameplay/npc-starter-roles.js
 js/gameplay/quests.js
-# QuestScript — the R-flavored quest/interaction scripting VM. Order matters:
-# value model -> lexer -> parser -> interpreter -> stdlib -> (generated sources) -> engine.
-js/questscript/qs-value.js
-js/questscript/qs-lex.js
-js/questscript/qs-parse.js
-js/questscript/qs-interp.js
-js/questscript/qs-stdlib.js
-js/questscript/qs-scripts-gen.js
-js/questscript/qs-engine.js
-js/questscript/qs-routines.js
+# Lua scripting layer — the embedded wasmoon (Lua 5.4) VM that owns all authored
+# game content (quests, NPC dialogue, event triggers, item behaviour, encounters,
+# cutscenes). wasmoon itself (libs/lua/wasmoon.js) is a vendored UMD global loaded
+# via its own <script> tag in index.html (see the VENDOR set in tools/build.mjs).
+# Order matters: modal/coro (no deps) -> host bridge -> engine -> generated
+# sources (LUA_PRELUDE + LUA_SRC) -> boot (kicks off async init).
+js/lua/lua-modal.js
+js/lua/lua-coro.js
+js/lua/lua-host.js
+js/lua/lua-engine.js
+js/lua/lua-src-gen.js
+js/lua/lua-boot.js
 js/gameplay/tutorial.js
 js/gameplay/daynight.js
 js/gameplay/biomeatmos.js
 js/gameplay/weather.js
 js/gameplay/cheats.js
 js/gameplay/armour-overlay.js
+js/gameplay/wardrobe-parts.js
 js/gameplay/dream.js
 js/gameplay/split.js
 js/gameplay/bifrost.js
@@ -212,4 +223,8 @@ js/gameplay/koha.js
 js/gameplay/goals-arc.js
 js/gameplay/eggs.js
 js/gameplay/postcard.js
+# Studio "play with my changes" preview overlay — inert unless the player set
+# the localStorage flag in the studio. Must come after assets.js (ICON_OVERRIDE)
+# and data.js (ITEMS), before main.js.
+js/main/proposal-overlay.js
 js/main.js

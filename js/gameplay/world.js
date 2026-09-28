@@ -1788,6 +1788,13 @@ function applyMapIconArt() {
 // Callers (2):
 //  gameplay/input.js:156 gameplay/world.js:541
 function openWorldMap() {
+  // world map locked until Newhaven (Phase 7 item 6): all entry points (M
+  // key input.js, #mapbtn below) funnel through here, so one guard covers
+  // them all.
+  if (typeof Tutorial !== "undefined" && Tutorial.active()) {
+    log("The wider world will open to you in Newhaven.", "warn");
+    return;
+  }
   applyMapIconArt();
   populateBiomeDropdown();
   wm.open = true;

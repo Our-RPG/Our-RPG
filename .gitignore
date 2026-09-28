@@ -92,4 +92,14 @@ dist/taiao-web*.zip
 analytics/
 
 # QuestScript source map — generated from scripts/**/*.qs by tools/build.mjs
-js/questscript/qs-scripts-gen.js
+js/lua/lua-src-gen.js
+
+# Assembled Workshop site (studio/tools/build_site.mjs) — deploy artifact, not source.
+/studio/dist/
+
+# Deep-zoom zone tile pyramids (~650MB/zone) — never committed, never shipped
+# inline; see studio/DEPLOY.md "Deep-zoom zone tiles are excluded by default".
+/studio/assets/zones/*_tiles/
+
+# Session scratch directory — temp/working files, not source.
+/scratchpad/

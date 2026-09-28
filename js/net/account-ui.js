@@ -54,7 +54,16 @@
 <div class="acc-err${msgOk ? " acc-ok" : ""}">${esc(msg)}</div>
 <button id="acc-login" class="acc-primary">Log in</button>
 <button id="acc-register">Create account</button>
-<button id="acc-pklogin" title="Sign in with a passkey saved on this device">Passkey</button>`;
+<button id="acc-pklogin" title="Sign in with a passkey saved on this device">Passkey</button>
+${workshopHtml("Taiao Workshop ↗ — the open dev room; same account as the game.")}`;
+  }
+
+  // A door to the Workshop, hidden entirely when this build carries no
+  // TAIAO_WORKSHOP_URL (compile-time, tools/build.mjs). Wired once in wire()
+  // below regardless of which copy variant rendered it.
+  function workshopHtml(label) {
+    if (typeof TAIAO_WORKSHOP_URL === "undefined" || !TAIAO_WORKSHOP_URL) return "";
+    return `<button id="acc-workshop">${label}</button>`;
   }
 
   function loggedInHtml(u) {
@@ -71,6 +80,8 @@
 <h3>Passkeys</h3>
 <div class="acc-sub">${(u.passkeys || []).length ? (u.passkeys || []).map(k => esc(k.label || "unnamed") + " (" + new Date(k.created_at).toLocaleDateString() + ")").join(" · ") : "None yet — a passkey signs you in with a touch, no password typed."}</div>
 <button id="acc-pkadd">Add a passkey on this device</button>
+<button id="acc-wscode" title="Sign in on the Taiao Workshop site with this account">Workshop code</button>
+${workshopHtml("Open Taiao Workshop ↗")}
 <h3>Leaderboards</h3>
 <label><input type="checkbox" id="acc-xp" ${typeof SaveSync !== "undefined" && SaveSync.xpOptedIn() ? "checked" : ""}>
 <span>Share my per-skill XP for the public (provisional) leaderboards and skill distributions. Gameplay is unchanged either way; untick any time.</span></label>
@@ -86,6 +97,8 @@
 
   function wire(u) {
     const $ = id => panelEl.querySelector("#" + id);
+    const wsBtn = $("acc-workshop");
+    if (wsBtn) wsBtn.onclick = () => window.open(TAIAO_WORKSHOP_URL, "_blank");
     if (!u) {
       const go = async fn => {
         const name = $("acc-user").value.trim(), pass = $("acc-pass").value;
@@ -115,6 +128,14 @@
       const r = await Server.passkeyAdd((navigator.platform || "device").slice(0, 30));
       if (r.ok) { await Server.refreshMe(); say("Passkey added.", true); }
       else say(r.error || "Couldn't add a passkey.", false);
+    };
+    $("acc-wscode").onclick = async () => {
+      say("Generating code…", true);
+      const r = await Server.linkCode();
+      if (r.ok) {
+        const code = r.code.replace(/^(.{4})(.{4})$/, "$1-$2");
+        say(`Code: ${code} — enter it in Taiao Workshop → Settings within 10 minutes to sign in there as this account.`, true);
+      } else say(r.error || "Couldn't generate a code.", false);
     };
     $("acc-xp").onchange = e => { if (typeof SaveSync !== "undefined") SaveSync.setXpOptIn(e.target.checked); };
     $("acc-logout").onclick = async () => { say("Logging out…", true); await Server.logout(); say("", false); };

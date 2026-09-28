@@ -803,6 +803,7 @@ function killMonster(mon) {
   if (!player.kills) player.kills = {};
   player.kills[mon.kind] = (player.kills[mon.kind] || 0) + 1;
   if (typeof Quests !== "undefined") Quests.onKill(mon.kind);   // quest slay objectives
+  if (typeof Lua !== "undefined" && Lua.ready) Lua.onKill(mon.kind); // Lua on_kill event triggers (js/lua)
   if (typeof Tutorial !== "undefined" && Tutorial.onKill) Tutorial.onKill(mon.kind); // isle stage task
   // Monsters respawn on the same level-based curve as resource nodes
   // (data.js respawnFor): lvl1 ~7s … lvl32 5min, keyed on the monster's

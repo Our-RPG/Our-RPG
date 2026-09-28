@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v7"; // v7 2026-09-17: gameplay telemetry stream (bundle + index.html changed)
+const CACHE_VERSION = "taiao-v15"; // v15: flat plain water tiles (no frosted vein art)
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

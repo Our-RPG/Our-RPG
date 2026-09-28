@@ -32,6 +32,8 @@ bucket_name = "taiao-vault"
 [vars]
 # Comma-separated origins allowed to call the API (no trailing slashes).
 ALLOWED_ORIGINS = "https://html.itch.zone,http://localhost:8899,http://127.0.0.1:8899"
+# + ",https://taiao-workshop.pages.dev" — add the deployed Workshop's origin here once
+# it's known (Phase 5); passkeys.js derives its per-origin RP id from this same list.
 # WebAuthn relying-party id (the domain the GAME is served from, not the API).
 RP_ID = "html.itch.zone" # itch embed origin; passkeys stay unadvertised on this shared domain
 

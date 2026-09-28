@@ -1,11 +1,11 @@
-// ===== Taiao — QuestScript quest anchors for zone[0,0] (Newhaven) =====
+// ===== Taiao — Lua quest anchors for zone[0,0] (Newhaven) =====
 // Hand-authored quest givers + world objects, anchored at deterministic walkable
 // plaza tiles near the origin. Givers are ROOTED (_r:0) and carry a `_script` id
-// (QuestScript matches _script before name — js/questscript/qs-engine.js), so they
+// (Lua matches _script before name — js/lua/lua-engine.js npcSubject), so they
 // are immune to the zone NPC-name churn and never touched by the mix-NPC culler
 // (they're pushed in deriveNpcs, not tracked in render3d's mixKeyed). Quest
 // objects use a UNIQUE decor key aliased into OBJ_MAP to an existing prop sprite,
-// so they render like that prop but their oploc trigger can't collide with real
+// so they render like that prop but their on_loc trigger can't collide with real
 // civic decor. Tiles verified walkable (chunks scan around origin).
 "use strict";
 
@@ -26,7 +26,7 @@ const QUEST_GIVERS = [
     line: `"A city marches on its stomach, and mine's near empty."` },
 ];
 
-// world objects for oploc retrieve quests. `alias` = an existing OBJ_MAP prop to
+// world objects for on_loc retrieve quests. `alias` = an existing OBJ_MAP prop to
 // borrow the sprite from; `key` is the unique trigger key painted at (x,y).
 const QUEST_LOCS = [
   { script: "qloc_locket", alias: "city_planter", x: 5, y: -4 },

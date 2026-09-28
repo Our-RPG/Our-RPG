@@ -117,6 +117,12 @@ function renderUI() {
 function examineItem(s) {
   const def = ITEMS[s.id];
   log(EXAMINE[s.id] || def.name, "sys");
+  if (typeof ProposalOverlay !== "undefined") {
+    const u = ProposalOverlay.credit("item:" + s.id);
+    if (u) log("Made by @" + u + " — Taiao Workshop.", "sys");
+    else if (ProposalOverlay.isGapItem(s.id))
+      log("This icon is a placeholder — the Workshop is looking for its artist.", "sys");
+  }
   if (s.q != null && typeof qualityLabel === "function")
     log(`Quality: ${qualityLabel(s.q)} (${s.q}/100).`, "sys");
   if (s.prov == null || typeof provRegistry === "undefined") return;
@@ -190,6 +196,9 @@ function renderInv() {
       d.onclick = e => {
         // while the bank window is open, the inventory IS the deposit grid
         if (tradeCtx && tradeCtx.mode === "bank") { depositToBank(i, e.altKey ? s.qty : e.shiftKey ? 5 : 1); return; }
+        // Lua-scripted item behaviour (js/lua on_item) takes precedence over the
+        // built-in flag handlers when a handler is registered for this item.
+        if (typeof Lua !== "undefined" && Lua.ready && Lua.hasItem(s.id)) { Lua.runItem(s.id); return; }
         if (def.heals || def.potion) eatItem(i);
         else if (def.equip) equipItem(i);
         else if (def.log && typeof placeLogs === "function") placeLogs(i);
@@ -211,6 +220,7 @@ function renderInv() {
           } });
           items.push({ label: "Deposit all", fn: () => depositToBank(i, s.qty) });
         }
+        if (typeof Lua !== "undefined" && Lua.ready && Lua.hasItem(s.id)) items.push({ label: `Use ${def.name}`, fn: () => Lua.runItem(s.id) });
         if (def.potion) items.push({ label: `Drink ${def.name}`, fn: () => eatItem(i) });
         else if (def.heals) items.push({ label: `Eat ${def.name}`, fn: () => eatItem(i) });
         if (def.equip) items.push({ label: `Equip ${def.name}`, fn: () => equipItem(i) });
@@ -690,12 +700,12 @@ document.addEventListener("keydown", e => {
 // Callers (1):
 //  gameplay/pathing.js:70
 function talkTo(npc) {
-  // QuestScript role scripts (js/questscript) for the bespoke NPCs intercept
-  // BEFORE the built-in JS handlers when one is registered (else fall through).
-  if (typeof QuestScript !== "undefined") {
-    if (npc.tutor && QuestScript.hasRole("tutor", npc)) { QuestScript.runRole("tutor", npc); return; }
-    if (npc.wizard && QuestScript.hasRole("wizard", npc)) { QuestScript.runRole("wizard", npc); return; }
-    if (npc.dreamNpc && QuestScript.hasRole("dream", npc)) { QuestScript.runRole("dream", npc); return; }
+  // Lua role scripts (js/lua) for the bespoke NPCs intercept BEFORE the built-in
+  // JS handlers when one is registered (else fall through, incl. during boot).
+  if (typeof Lua !== "undefined" && Lua.ready) {
+    if (npc.tutor && Lua.hasRole("tutor", npc)) { Lua.runRole("tutor", npc); return; }
+    if (npc.wizard && Lua.hasRole("wizard", npc)) { Lua.runRole("wizard", npc); return; }
+    if (npc.dreamNpc && Lua.hasRole("dream", npc)) { Lua.runRole("dream", npc); return; }
   }
   // Tūhura Isle tutors open their tutorial dialogue (gameplay/tutorial.js)
   if (npc.tutor && typeof Tutorial !== "undefined" && Tutorial.talk(npc)) return;
@@ -711,13 +721,13 @@ function talkTo(npc) {
     CharSelect.open();
     return;
   }
-  // QuestScript role scripts (js/questscript) own the whole interaction for
-  // traders/bankers when registered — they handle the stink/night-closed gates
-  // and opening the shop/vault themselves (scripts/systems/{trader,banker}.qs).
-  // If no such script is registered, we fall through to the built-in JS below.
-  if (typeof QuestScript !== "undefined") {
-    if (npc.trader && QuestScript.hasRole("trader", npc)) { QuestScript.runRole("trader", npc); return; }
-    if (npc.banker && QuestScript.hasRole("banker", npc)) { QuestScript.runRole("banker", npc); return; }
+  // Lua role scripts (js/lua) own the whole interaction for traders/bankers when
+  // registered — they handle the stink/night-closed gates and opening the
+  // shop/vault themselves (scripts/systems/{trader,banker}.lua). If no such
+  // script is registered, we fall through to the built-in JS below.
+  if (typeof Lua !== "undefined" && Lua.ready) {
+    if (npc.trader && Lua.hasRole("trader", npc)) { Lua.runRole("trader", npc); return; }
+    if (npc.banker && Lua.hasRole("banker", npc)) { Lua.runRole("banker", npc); return; }
   }
   // shopkeepers: no trading once the shop is shut for the night — except the
   // few who never sleep (npc.alwaysOpen: the Dream's Pedlar keeps no hours)
@@ -730,10 +740,10 @@ function talkTo(npc) {
     log(`${npc.name} is fast asleep.`, "sys");
     return;
   }
-  // QuestScript: an NPC with an opnpc trigger (js/questscript) owns the whole
-  // conversation — runs its scripted dialogue/quest logic and takes precedence
-  // over the quest-giver and canned-dialogue fallbacks below.
-  if (typeof QuestScript !== "undefined" && QuestScript.hasNpc(npc)) { QuestScript.runNpc(npc); return; }
+  // Lua: an NPC with an on_npc handler (js/lua) owns the whole conversation —
+  // runs its scripted dialogue/quest logic and takes precedence over the
+  // quest-giver and canned-dialogue fallbacks below.
+  if (typeof Lua !== "undefined" && Lua.ready && Lua.hasNpc(npc)) { Lua.runNpc(npc); return; }
   // mix NPCs speak overhead (a bubble the renderer draws above their head).
   // No explicit .line (most ambient villagers) falls to their role's canned
   // dialogue bank (npc-starter-roles.js) instead of a mute "...".

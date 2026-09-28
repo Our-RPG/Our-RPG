@@ -1,8 +1,8 @@
 /* passkeys.js — optional WebAuthn (ES256 only, "none" attestation).
  * Enough for real passkey login on every mainstream authenticator without
  * pulling in a dependency: a ~40-line CBOR reader for the attestation object
- * and WebCrypto for the P-256 verify. RP id comes from env.RP_ID (the domain
- * the GAME is served from). */
+ * and WebCrypto for the P-256 verify. RP id is per-origin (see rpIdFor
+ * below), falling back to env.RP_ID (the domain the GAME is served from). */
 
 import {
   json, err, readJson, now, b64uEncode, b64uDecode, randToken,
@@ -71,6 +71,22 @@ function originAllowed(env, origin) {
   return (env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).includes(origin);
 }
 
+/* WebAuthn scopes a credential to the serving domain, so rp.id has to match
+ * wherever the page actually is — the game (itch) or the Workshop site are
+ * different origins. Trust the request's Origin header when it's on the
+ * allowlist and use its hostname; otherwise fall back to env.RP_ID. This
+ * means credentials stay per-domain: an itch passkey keeps working on itch,
+ * and a Workshop-domain passkey is a separate credential — that's WebAuthn
+ * working as intended, not a bug. Existing itch users see no change (their
+ * origin's hostname IS env.RP_ID). */
+function rpIdFor(req, env) {
+  const origin = req.headers.get("origin") || "";
+  if (originAllowed(env, origin)) {
+    try { return new URL(origin).hostname; } catch { /* malformed origin, fall through */ }
+  }
+  return env.RP_ID;
+}
+
 async function makeChallenge(env, userId, kind) {
   const challenge = randToken(32);
   await env.DB.prepare(
@@ -109,7 +125,7 @@ export async function registerOptions(req, env) {
     ok: true,
     publicKey: {
       challenge,
-      rp: { id: env.RP_ID, name: "Taiao" },
+      rp: { id: rpIdFor(req, env), name: "Taiao" },
       user: { id: b64uEncode(new TextEncoder().encode("u" + user.id)), name: user.username, displayName: user.username },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ES256
       authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
@@ -133,7 +149,7 @@ export async function registerFinish(req, env) {
   catch { return err("Unreadable attestation."); }
   const authData = att.get("authData");
   if (!(authData instanceof Uint8Array) || authData.length < 55) return err("Bad authData.");
-  if (!bytesEq(authData.slice(0, 32), await sha256(env.RP_ID))) return err("RP id mismatch.", 403);
+  if (!bytesEq(authData.slice(0, 32), await sha256(rpIdFor(req, env)))) return err("RP id mismatch.", 403);
   if (!(authData[32] & 0x40)) return err("No credential in authData.");
 
   // authData: rpIdHash(32) flags(1) counter(4) aaguid(16) credIdLen(2) credId cosePubkey
@@ -165,7 +181,7 @@ export async function loginOptions(req, env) {
   }
   return json({
     ok: true,
-    publicKey: { challenge, rpId: env.RP_ID, userVerification: "preferred",
+    publicKey: { challenge, rpId: rpIdFor(req, env), userVerification: "preferred",
                  timeout: 120000, ...(allowCredentials ? { allowCredentials } : {}) },
   });
 }
@@ -183,7 +199,7 @@ export async function loginFinish(req, env) {
   if (!cred) return err("Unknown passkey.", 401);
 
   const authData = b64uDecode(b.response.authenticatorData);
-  if (!bytesEq(authData.slice(0, 32), await sha256(env.RP_ID))) return err("RP id mismatch.", 403);
+  if (!bytesEq(authData.slice(0, 32), await sha256(rpIdFor(req, env)))) return err("RP id mismatch.", 403);
   if (!(authData[32] & 0x01)) return err("User presence flag missing.", 403);
 
   const signed = new Uint8Array(authData.length + 32);

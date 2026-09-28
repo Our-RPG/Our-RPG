@@ -239,7 +239,7 @@
   STATIONS.workbench.lists.push("masonry");
 
   Object.assign(PROD_SKILL_INTRO, {
-    Charcoaling: "Stack wood in a clamp and char it slowly into charcoal — the clean, hot fuel the kilns and forges want — collecting wood tar and ash as by-products, and distilling tar into waterproof pitch. A passive trade.",
+    Charcoaling: "Stack wood in a clamp and char it slowly into charcoal — the clean, hot fuel the kilns and forges want — collecting wood tar and ash as by-products, and distilling tar into waterproof pitch. Charring takes real time at the clamp.",
     Limeburning: "Burn limestone with charcoal in a kiln to make quicklime, slake it into lime, and mix the mortars, plasters, whitewashes and grouts every mason needs — including hydraulic lime that sets underwater.",
     Masonry: "Dress stone and marble, fire clay into bricks and tiles, and raise everything from cobbled roads and brick walls to bread ovens, fountains, marble statues and whole cathedrals — bound with the limeburner's mortar.",
   });

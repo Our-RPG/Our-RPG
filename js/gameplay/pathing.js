@@ -97,8 +97,17 @@ function executeGoal() {
   else if (goal.type === "portal") usePortal(goal.node);
   else if (goal.type === "placedPickup") pickUpPlaced(goal.ent);
   else if (goal.type === "board") boardVessel(goal.ent);
-  else if (goal.type === "decorPick") pickUpDecor(goal.x, goal.y, goal.key);
-  else if (goal.type === "scriptLoc") { if (typeof QuestScript !== "undefined") QuestScript.runLoc(goal.key, goal.x, goal.y); }
+  else if (goal.type === "decorPick") {
+    // crowbar-gated salvage (Phase 7 item 5), belt-and-braces: the menu
+    // entry already swaps to the "needs a crowbar" line when ungated, but
+    // check again here too (the tool could be dropped mid-walk) before the
+    // pickup actually fires. Tutorial isle stays exempt.
+    const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar") &&
+      !(typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active());
+    if (noCrowbar) log("It's fixed in place. A crowbar would pry it loose — forge one at an anvil (Toolmaking 15).", "warn");
+    else pickUpDecor(goal.x, goal.y, goal.key);
+  }
+  else if (goal.type === "scriptLoc") { if (typeof Lua !== "undefined" && Lua.ready) Lua.runLoc(goal.key, goal.x, goal.y); }
   // start CONTINUOUS tending — tickHusb keeps tending each tick until the animal
   // is depleted (husbSpent), then stops. nextAt:now → first tend fires at once.
   else if (goal.type === "husbAction") player.act = { kind: "husb", mon: goal.mon, actId: goal.act, nextAt: now };

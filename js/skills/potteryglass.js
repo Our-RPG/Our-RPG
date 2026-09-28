@@ -127,7 +127,7 @@
   STATIONS.furnace.lists.push("pottery", "glassblowing");
 
   Object.assign(PROD_SKILL_INTRO, {
-    Pottery: "Throw clay into wares and fire them in a kiln — flowerpots and bowls up through amphorae, oil jars, crucibles and a master's vase — finishing the finer pieces with ash, tin or lead glazes. A passive trade.",
+    Pottery: "Throw clay into wares and fire them in a kiln — flowerpots and bowls up through amphorae, oil jars, crucibles and a master's vase — finishing the finer pieces with ash, tin or lead glazes. Firing takes real time at the kiln.",
     Glassblowing: "Melt sand, soda-ash and lime into glass, then blow bottles, panes, drinking glasses, lenses, mirrors and stained glass. Blows the vials the apothecaries need; stains its finest work with the dyer's pigments.",
   });
 

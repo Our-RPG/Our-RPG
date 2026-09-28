@@ -1716,7 +1716,7 @@ const Tutorial = (() => {
       ],
     },
     farm: {
-      reward: { items: [["hoe", 1], ["seed_cerealiculture_0", 10], ["seed_olericulture_0", 10], ["seed_pomiculture_0", 10], ["seed_herbiculture_0", 10], ["seed_fibriculture_0", 10]] },
+      reward: { items: [["hoe", 1], ["seed_wheat", 10], ["seed_potato", 10], ["seed_apple", 10], ["seed_sageleaf", 10], ["seed_flax", 10]] },
       pages: [
         { h: "The land remembers",
           t: ["Welcome to the heart of the isle! See my little farm behind the fence — FIVE ROWS, five plots each, one row for every crop: wheat, potatoes, apples, sageleaves, flax. All ripe and waiting. Take this hoe and TEN SEEDS of each, and step in through the gate.",
@@ -1783,8 +1783,7 @@ const Tutorial = (() => {
               "Here on Tūhura the sky turns as YOU learn — each keeper finished rolls the day forward. You've already walked through the rain. Stay the course and you'll earn the stars."] },
         { h: "Weather is real",
           t: ["Weather fronts drift across the world like the real thing — you can watch the pressure fall before a storm on a barometer. Rain swells the rivers into flood. In the cold lands, heavy snowfall settles white on every roof and field, then melts away after.",
-              "Open the world map (M) and you'll find the day/night bands and a synoptic weather chart. Plan your travels like a sailor. {candle} keeps the hollow just past my knoll."],
-          act: [["Open the world map (M)", "map"]] },
+              "The wide chart of it all is kept in Newhaven — once you've crossed, press M and you'll find the day/night bands and a synoptic weather chart, and you can plan your travels like a sailor. Until then, read the sky itself; it never lies for long. {candle} keeps the hollow just past my knoll."] },
       ],
     },
     candle: {
@@ -2303,6 +2302,17 @@ const Tutorial = (() => {
     }
   }
 
+  // The roster indices (into MIX_NPCS.list) the fifteen keepers use — same
+  // resolution TUT_MIX_DEF applies (tu.mix modulo the live roster length) —
+  // so Newhaven's townsfolk (render3d.js mixDefForBuilding) can exclude
+  // them and never draw a duplicate keeper's face for a shopkeeper or
+  // resident (Phase 7 item 4: the keeper-face collision fix).
+  function keeperMixIdx() {
+    if (typeof MIX_NPCS === "undefined" || !MIX_NPCS || !MIX_NPCS.list || !MIX_NPCS.list.length) return [];
+    const N = MIX_NPCS.list.length;
+    return TUT_TUTORS.filter(tu => tu.mix != null).map(tu => ((tu.mix % N) + N) % N);
+  }
+
   return { START, talk, maybeWelcome, graduate, state, onIsle, active,
     phaseOverride, weatherOverride, flatSky, barred, frontier, refreshBar, goalState,
     skillVisible, riverFlow, tick, onCraft, anvilRecipes,
@@ -2310,6 +2320,6 @@ const Tutorial = (() => {
     sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, tickEscort,
     onGather, onWash, onBank, onKill, onChant,
     onQueue, onBrace, onStoke, onMerge, onChatReply,
-    onHarvest, onTend, onEquip, onPickup, onOutOfArrows };
+    onHarvest, onTend, onEquip, onPickup, onOutOfArrows, keeperMixIdx };
 })();
 if (typeof window !== "undefined") window.Tutorial = Tutorial;

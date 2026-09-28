@@ -10,6 +10,7 @@
 //   call(path, opts)         — authed fetch returning parsed JSON ({error} on failure)
 //   register/login/logout    — password auth (+ Turnstile when built with a sitekey)
 //   passkeyAdd/passkeyLogin  — optional WebAuthn
+//   linkCode                 — one-time code so the Workshop site can sign in
 //   onAuth(fn)               — login/logout listeners (savesync/worksync/UI hook in)
 "use strict";
 
@@ -154,6 +155,12 @@
     return r;
   }
 
+  // ---------- Workshop sign-in code ----------
+  // Mints a one-time code (Account panel button) that the Workshop site — a
+  // different origin, so this device's localStorage token can't cross over —
+  // redeems for a real session there. See server/src/link.js.
+  const linkCode = () => call("/api/link/code", { method: "POST", body: {} });
+
   // Resume a stored session shortly after boot (off the critical path).
   if (URL_ && token) setTimeout(refreshMe, 4000);
 
@@ -162,7 +169,7 @@
     logged: () => !!user,
     get user() { return user; },
     call, register, login, logout, refreshMe,
-    passkeyAdd, passkeyLogin,
+    passkeyAdd, passkeyLogin, linkCode,
     onAuth: fn => authListeners.push(fn),
   };
 })();

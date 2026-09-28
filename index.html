@@ -17,6 +17,7 @@
 		<div id="bootload" role="status" aria-busy="true">
 		  <div id="bl-title">Taiao</div>
 		  <div id="bl-sub">the natural world</div>
+		  <div id="bl-tag">an unfinished world · built by the people who play it</div>
 		  <div id="bl-track"><div id="bl-fill"></div></div>
 		  <div id="bl-stage">Loading game code…</div>
 		  <div id="bl-names"></div>
@@ -29,6 +30,7 @@
 		  #bl-title { font-size: 26px; font-weight: bold; color: #ffd75e;
 		    text-shadow: 0 2px 8px rgba(0,0,0,.6); letter-spacing: 1px; }
 		  #bl-sub { color: #8f96ad; font-size: 13px; letter-spacing: 3px; margin-top: -12px; }
+		  #bl-tag { color: #6c7690; font-size: 11px; letter-spacing: 1px; margin-top: -12px; font-style: italic; }
 		  #bl-track { width: min(420px, 70vw); height: 10px; border: 1px solid #3a3f55;
 		    border-radius: 6px; background: #1c1f2c; overflow: hidden; }
 		  #bl-fill { height: 100%; width: 0%; border-radius: 5px;
@@ -367,14 +369,22 @@
 				      <option value="off">Off</option>
 				    </select></label>
 				  <p class="hint">When on, the game sends anonymous play events (moves, clicks, crafting, fights, menus) to the Taiao server so we can see which parts of the game are fun and which need work. No chat text, no personal data; tied to your account only if you're logged in.</p>
+				  <h4 style="margin:10px 0 4px">Community</h4>
+				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0"><input type="checkbox" id="communitysel"> Community content (adopted art &amp; sounds)</label>
+				  <p class="hint">Sprites and sounds the community's Workshop has adopted quietly replace the placeholder/default art in your own game — a shared coat of paint, no download or install. Turn it off to play with the stock art only. Your own submitted-and-adopted proposals always show for you regardless of this setting.</p>
+				  <small id="community-status"></small>
+				  <div id="help-workshop-block">
+				  <h4 style="margin:10px 0 4px">Taiao Workshop</h4>
+				  <p>The open dev room where this game is made — players generate the art, write the
+				  quests, tune the world, and ship it to everyone. Same account as the game.
+				  <a id="help-workshop" href="#" target="_blank" rel="noopener">Open the Workshop ↗</a></p>
+				  </div>
 				  <h4 style="margin:10px 0 4px">Sound</h4>
 				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0">Game sounds
 				    <input type="range" id="gamevol" min="0" max="100" step="1" style="flex:1"></label>
 				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0">Nature sounds
 				    <input type="range" id="naturevol" min="0" max="100" step="1" style="flex:1"></label>
-				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0">Music
-				    <input type="range" id="musicvol" min="0" max="100" step="1" style="flex:1"></label>
-				  <p class="hint">Nature covers birdsong and the weather beds. Music is generated live from where you're standing — latitude, daylight and the weather shape it.</p>
+				  <p class="hint">Nature covers birdsong and the weather beds.</p>
 				  <p class="hint">Hear something odd in a bird recording — a voice, a siren, a car? Press <b>N</b> the moment you hear it (or the button below): the playing clips and their positions are logged so the stray sounds can be cut out of the recordings.</p>
 				  <button id="soundflagbtn">Flag odd bird sound (N)</button>
 				  <button id="soundflagexport">Export sound flags…</button>
@@ -398,6 +408,10 @@
 			<!-- hidden canvas retained for compatibility (was required by the now-dropped retired prototype engine) -->
 			<canvas id="canvas" width="8" height="8" style="display:none"></canvas>
 			<script src="libs/three.min.js"></script>
+			<!-- Embedded Lua 5.4 runtime (wasmoon, UMD -> window.wasmoon). Loaded
+			     before the bundle so js/lua/ can boot it; the .wasm alongside is
+			     fetched by the runtime and cached by the service worker. -->
+			<script src="libs/lua/wasmoon.js"></script>
 			<!-- All game code + sprite-data stubs, bundled & minified by
 			     tools/build.mjs (run it after editing any js/ file). The disabled
 			     LC3D voxel subsystem is dropped from this bundle. -->

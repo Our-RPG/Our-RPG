@@ -12,6 +12,10 @@ const R3D = (() => {
   let _candleKey;   // resolved candle object sprite for placed village candles (day/night)
   let _bioLights = [];   // per-frame glow points for bioluminescent-biome decor (mushrooms/trees/rocks)
   let atlas; // { canvas, tex, cells: {key:{cx,cy}}, cols, rows, mat }
+  // community overlay: atlas keys patched before the atlas itself exists yet
+  // (boot order — the overlay can run before buildAtlas/buildAtlasAsync has
+  // fired) queue here and flush once _finishAtlas hands back a real atlas.
+  let _pendingAtlasPatches = [];
   let sharedMat, geomCache = {}, shadowMat, shadowGeom;
   // ---- snow cover shading (weather.js snowNow) ----
   // One shared uniform frosts the whole world as snow settles: every surface
@@ -306,6 +310,36 @@ const R3D = (() => {
       map: tex, transparent: true, alphaTest: 0.5, side: THREE.DoubleSide,
     });
     snowPatchUp(sharedMat);   // terrain/decks frost under snow cover (aSnow attr)
+    // drain anything the community overlay tried to patch before the atlas
+    // existed — cells that still don't resolve (unknown key) are dropped
+    if (_pendingAtlasPatches.length) {
+      const pending = _pendingAtlasPatches; _pendingAtlasPatches = [];
+      const c2p = atlas.canvas.getContext("2d");
+      c2p.imageSmoothingEnabled = false;
+      for (const [key, img] of pending) {
+        const cell = atlas.cells[key];
+        if (!cell) continue;
+        c2p.clearRect(cell.cx, cell.cy, CSZ, CSZ);
+        c2p.drawImage(img, cell.cx, cell.cy, CSZ, CSZ);
+      }
+      atlas.tex.needsUpdate = true;
+    }
+  }
+  // Community overlay: bake replacement art for one atlas cell (a plain
+  // sprite key, or a composite key like "mon_<kind>_<dir>") in place on the
+  // already-baked atlas canvas — same trick as main/assets.js patchSheetRects
+  // for the 2D IMGS sheets, since the atlas is baked exactly once and nothing
+  // else ever re-reads it. Queues (and flushes from _finishAtlas, above) when
+  // the atlas hasn't been built yet.
+  function patchAtlasKey(key, img) {
+    if (!atlas || !atlas.cells[key]) { _pendingAtlasPatches.push([key, img]); return false; }
+    const { cx, cy } = atlas.cells[key];
+    const c2 = atlas.canvas.getContext("2d");
+    c2.imageSmoothingEnabled = false;
+    c2.clearRect(cx, cy, CSZ, CSZ);
+    c2.drawImage(img, cx, cy, CSZ, CSZ);
+    atlas.tex.needsUpdate = true;
+    return true;
   }
   function buildAtlas() {
     const P = _planAtlas();
@@ -337,8 +371,10 @@ const R3D = (() => {
   function setUV(geom, key) {
     const { cx, cy } = atlas.cells[key];
     const W = atlas.canvas.width, H = atlas.canvas.height;
-    const u0 = (cx + 0.04) / W, u1 = (cx + CSZ - 0.04) / W;
-    const v1 = 1 - (cy + 0.04) / H, v0 = 1 - (cy + CSZ - 0.04) / H;
+    // half-texel inset — anything smaller lets edge fragments round into the
+    // neighbouring cell.
+    const u0 = (cx + 0.5) / W, u1 = (cx + CSZ - 0.5) / W;
+    const v1 = 1 - (cy + 0.5) / H, v0 = 1 - (cy + CSZ - 0.5) / H;
     const uv = geom.attributes.uv;
     // PlaneGeometry uv order: (0,1) (1,1) (0,0) (1,0)
     uv.setXY(0, u0, v1); uv.setXY(1, u1, v1);
@@ -1069,7 +1105,7 @@ void main() {
       return (hv(x0, z0) * (1 - fx) + hv(x0 + step, z0) * fx) * (1 - fz) +
              (hv(x0, z0 + step) * (1 - fx) + hv(x0 + step, z0 + step) * fx) * fz;
     };
-    const mkStrips = (polys, halfWOf, lift) => {
+    const mkStrips = (polys, halfWOf, lift, clampNear) => {
       const pos = [], idx = [];
       let n = 0;
       for (const pts of polys) {
@@ -1096,7 +1132,13 @@ void main() {
           let dx = b[0] - a[0], dz = b[1] - a[1];
           const dl = Math.hypot(dx, dz) || 1;
           const px = -dz / dl, pz = dx / dl;
-          const y = lodY(gx, gz) + lift;
+          let y = lodY(gx, gz) + lift;
+          // near-field rivers: never float over the real carved channel —
+          // dive to just under the sea-level water surface (rivers gorge to
+          // -½, so loaded tiles cover the ribbon; in the LOD's water holes
+          // the sunken ribbon still colours the notch)
+          if (clampNear && Math.max(Math.abs(gx - cx), Math.abs(gz - cz)) <= FARLOD_HOLE_R)
+            y = Math.min(y, -STEP_H - 0.02);
           pos.push(gx + px * w, y, gz + pz * w, gx - px * w, y, gz - pz * w);
           if (strip >= 0) idx.push(strip, strip + 1, n, n, strip + 1, n + 1);
           strip = n; n += 2;
@@ -1112,7 +1154,7 @@ void main() {
     const mx1 = (cx + outerHalf + 24) / 2, mz1 = (cz + outerHalf + 24) / 2;
     const rivPolys = [];
     for (const rv of world.riversNear(mx0, mz0, mx1, mz1)) for (const p of rv.polys) rivPolys.push(p);
-    const rg = mkStrips(rivPolys, pt => Math.min(8, 2.4 + (pt[2] || 0) * 2), 0.1);
+    const rg = mkStrips(rivPolys, pt => Math.min(8, 2.4 + (pt[2] || 0) * 2), 0.1, true);
     if (rg) {
       const m = new THREE.Mesh(rg, farRivMat);
       m.frustumCulled = false; m.renderOrder = -4;
@@ -1128,8 +1170,65 @@ void main() {
     return out;
   }
 
+  // Near-field water holes: within the radius chunks can actually be loaded
+  // (view reach + the LOD rebuild cell's wander) the ring-0 grid must NOT
+  // bridge carved water — rivers gorge down to sea level while the analytic
+  // heightAt knows only the uncarved surface, so the sunk LOD (0.45 < one
+  // 0.5 terrain step) planes flatly OVER the real river/pond/coast tiles.
+  // Every ring-0 quad a river crosses, every coast-fringe quad (mixed
+  // land/water corners) and every water-POI pocket inside this radius is a
+  // HOLE: loaded chunks show their real tiles through it, unloaded ones show
+  // the sea backdrop, which reads as water anyway. Beyond the radius the LOD
+  // is pure vista and the bridges + draped ribbons stay — they ARE the far
+  // rivers.
+  const FARLOD_HOLE_R = 192;
+  function farHoleCells(cx, cz) {
+    const holes = new Set();
+    const ring = FARLOD_RINGS[0], half = ring.half, step = ring.step;
+    const nq = (2 * half) / step;               // quads per grid side
+    const mark = (gx, gz) => {
+      if (Math.max(Math.abs(gx - cx), Math.abs(gz - cz)) > FARLOD_HOLE_R) return;
+      const qx = Math.floor((gx - (cx - half)) / step), qz = Math.floor((gz - (cz - half)) / step);
+      if (qx >= 0 && qx < nq && qz >= 0 && qz < nq) holes.add(qz * nq + qx);
+    };
+    try {
+      if (world.riversNear) {
+        const m0x = (cx - FARLOD_HOLE_R - 24) / 2, m0z = (cz - FARLOD_HOLE_R - 24) / 2;
+        const m1x = (cx + FARLOD_HOLE_R + 24) / 2, m1z = (cz + FARLOD_HOLE_R + 24) / 2;
+        for (const rv of world.riversNear(m0x, m0z, m1x, m1z))
+          for (const pts of rv.polys) {
+            let px = null, pz = null;
+            for (const pt of pts) {
+              const gx = pt[0] * 2, gz = pt[1] * 2;
+              // stamped half-width (same formula as the ribbon) + bank carve
+              const w = Math.min(8, 2.4 + (pt[2] || 0) * 2) + 4;
+              const stamp = (ix, iz) => {
+                mark(ix - w, iz - w); mark(ix + w, iz - w);
+                mark(ix - w, iz + w); mark(ix + w, iz + w);
+              };
+              if (px !== null) {
+                const d = Math.hypot(gx - px, gz - pz), nSub = Math.max(1, Math.ceil(d / 8));
+                for (let s = 1; s <= nSub; s++)
+                  stamp(px + (gx - px) * s / nSub, pz + (gz - pz) * s / nSub);
+              } else stamp(gx, gz);
+              px = gx; pz = gz;
+            }
+          }
+      }
+      if (world.poisNearForMap) {
+        for (const p of world.poisNearForMap((cx - FARLOD_HOLE_R) / 2, (cz - FARLOD_HOLE_R) / 2,
+                                             (cx + FARLOD_HOLE_R) / 2, (cz + FARLOD_HOLE_R) / 2, 8))
+          if (p && (p.type === "pond" || p.type === "hotspring" || p.type === "geyser" || p.type === "tarpit")) {
+            const gx = p.x * 2, gz = p.y * 2;
+            mark(gx - 6, gz - 6); mark(gx + 6, gz - 6); mark(gx - 6, gz + 6); mark(gx + 6, gz + 6);
+          }
+      }
+    } catch (e) { /* hole set is best-effort — the LOD must never fail to build */ }
+    return holes;
+  }
+
   function startFarBuild(cx, cz) {
-    farJob = { cx, cz, ring: 0, row: 0, parts: [] };
+    farJob = { cx, cz, ring: 0, row: 0, parts: [], holes: farHoleCells(cx, cz) };
     for (const r of FARLOD_RINGS) {
       const n = (2 * r.half) / r.step + 1;
       farJob.parts.push({
@@ -1187,6 +1286,18 @@ void main() {
           if (part.pos[a * 3 + 1] <= WATER_Y && part.pos[(a + 1) * 3 + 1] <= WATER_Y &&
               part.pos[(a + n) * 3 + 1] <= WATER_Y && part.pos[(a + n + 1) * 3 + 1] <= WATER_Y)
             continue;
+          if (farJob.ring === 0) {
+            // near-field water holes (rivers / water POIs — see farHoleCells)
+            if (farJob.holes.has(z * (n - 1) + x)) continue;
+            // near-field coast fringe: a mixed land/water quad slopes across
+            // up to 16 tiles of REAL sea tiles — hole it, the backdrop is sea
+            const wx = farJob.cx - ring.half + x * ring.step + ring.step / 2;
+            const wz = farJob.cz - ring.half + z * ring.step + ring.step / 2;
+            if (Math.max(Math.abs(wx - farJob.cx), Math.abs(wz - farJob.cz)) <= FARLOD_HOLE_R &&
+                (part.pos[a * 3 + 1] <= WATER_Y || part.pos[(a + 1) * 3 + 1] <= WATER_Y ||
+                 part.pos[(a + n) * 3 + 1] <= WATER_Y || part.pos[(a + n + 1) * 3 + 1] <= WATER_Y))
+              continue;
+          }
           part.idx.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
         }
       farJob.ring++; farJob.row = 0;
@@ -2048,7 +2159,10 @@ void main() {
   function ensureCharTex() {
     if (charTex || typeof CHAR_SHEET === "undefined") return;
     charImg = new Image();
-    charImg.onload = () => { charW = charImg.naturalWidth; charH = charImg.naturalHeight; charTex.needsUpdate = true; };
+    charImg.onload = () => {
+      charW = charImg.naturalWidth; charH = charImg.naturalHeight; charTex.needsUpdate = true;
+      _flushCharPatches();   // community overlay: patches queued before the sheet decoded
+    };
     charTex = new THREE.Texture(charImg);
     charTex.magFilter = THREE.NearestFilter;
     charTex.minFilter = THREE.NearestFilter;
@@ -2060,7 +2174,9 @@ void main() {
   function setCharUV(geom, frame) {
     if (!charW) return false;
     const col = frame % CHAR_COLS, row = Math.floor(frame / CHAR_COLS);
-    const cx = col * CHAR_CELL, cy = row * CHAR_CELL, e = 0.06;
+    // half-texel inset — anything smaller lets edge fragments round into the
+    // neighbouring cell.
+    const cx = col * CHAR_CELL, cy = row * CHAR_CELL, e = 0.5;
     const u0 = (cx + e) / charW, u1 = (cx + CHAR_CELL - e) / charW;
     const v1 = 1 - (cy + e) / charH, v0 = 1 - (cy + CHAR_CELL - e) / charH;
     const uv = geom.attributes.uv;
@@ -2082,9 +2198,42 @@ void main() {
     }
     return charMesh;
   }
+  // Community overlay: bake a replacement 8-dir frame straight into the
+  // player character sheet. The texture's .image starts life as the raw
+  // HTMLImageElement (ensureCharTex above) — the FIRST patch hoists it onto a
+  // canvas so it becomes drawable/mutable; later patches just draw into that
+  // same canvas. Queues (per [charIndex,dirIndex,img]) until the sheet has
+  // decoded (charW set), then _flushCharPatches drains it from the onload above.
+  let _pendingCharPatches = [];
+  function _flushCharPatches() {
+    if (!_pendingCharPatches.length) return;
+    const pending = _pendingCharPatches; _pendingCharPatches = [];
+    for (const [ci, di, img] of pending) patchCharFrame(ci, di, img);
+  }
+  function patchCharFrame(charIndex, dirIndex, img) {
+    if (!charTex || !charW) { _pendingCharPatches.push([charIndex, dirIndex, img]); return false; }
+    if (!(charTex.image instanceof HTMLCanvasElement)) {
+      const cv = document.createElement("canvas");
+      cv.width = charW; cv.height = charH;
+      const cx = cv.getContext("2d");
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(charTex.image, 0, 0);
+      charTex.image = cv;
+    }
+    const frame = charIndex * 8 + dirIndex;
+    const col = frame % CHAR_COLS, row = Math.floor(frame / CHAR_COLS);
+    const cx2 = charTex.image.getContext("2d");
+    cx2.imageSmoothingEnabled = false;
+    cx2.clearRect(col * CHAR_CELL, row * CHAR_CELL, CHAR_CELL, CHAR_CELL);
+    cx2.drawImage(img, col * CHAR_CELL, row * CHAR_CELL, CHAR_CELL, CHAR_CELL);
+    charTex.needsUpdate = true;
+    return true;
+  }
   // set a quad's UVs to cell (col,row) of a cols-wide packed sheet (generic setCharUV)
   function setCellUV(geom, col, row, cell, texW, texH) {
-    const e = 0.06, cx = col * cell, cy = row * cell;
+    // half-texel inset — anything smaller lets edge fragments round into the
+    // neighbouring cell (this also covers outfit sheets + the armour overlay).
+    const e = 0.5, cx = col * cell, cy = row * cell;
     const u0 = (cx + e) / texW, u1 = (cx + cell - e) / texW;
     const v1 = 1 - (cy + e) / texH, v0 = 1 - (cy + cell - e) / texH;
     const uv = geom.attributes.uv;
@@ -2108,7 +2257,10 @@ void main() {
     e = { img: null, tex: null, mat: null, shadowMat: null, w: 0, h: 0 };
     _outfitSheets[si] = e;
     e.img = new Image();
-    e.img.onload = () => { e.w = e.img.naturalWidth; e.h = e.img.naturalHeight; e.tex.needsUpdate = true; };
+    e.img.onload = () => {
+      e.w = e.img.naturalWidth; e.h = e.img.naturalHeight; e.tex.needsUpdate = true;
+      _flushOutfitPatches(si);   // community overlay: patches queued before THIS sheet decoded
+    };
     e.tex = new THREE.Texture(e.img);
     e.tex.magFilter = THREE.NearestFilter; e.tex.minFilter = THREE.NearestFilter; e.tex.generateMipmaps = false;
     e.mat = new THREE.MeshBasicMaterial({ map: e.tex, transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
@@ -2120,6 +2272,40 @@ void main() {
   // UV for a frame index in a cols-wide, `cell`-px packed sheet
   function setSheetUV(geom, frame, cols, cell, texW, texH) {
     return setCellUV(geom, frame % cols, Math.floor(frame / cols), cell, texW, texH);
+  }
+  // Community overlay: bake a replacement costume/outfit frame into one of
+  // the packed OUTFIT_SHEETS textures. Queued PER SHEET (a sheet not yet
+  // touched this session has no _outfitSheets[si] entry at all — ensureOutfitSheet
+  // lazy-creates it on first wear/preview) and flushed from that sheet's own
+  // onload above.
+  const _pendingOutfitPatches = [];   // [sheetIndex] -> [[frame, img], ...]
+  function _flushOutfitPatches(si) {
+    const pending = _pendingOutfitPatches[si];
+    if (!pending || !pending.length) return;
+    _pendingOutfitPatches[si] = [];
+    for (const [frame, img] of pending) patchOutfitFrame(si, frame, img);
+  }
+  function patchOutfitFrame(sheetIndex, frame, img) {
+    const e = _outfitSheets[sheetIndex];
+    if (!e || !e.w) {
+      (_pendingOutfitPatches[sheetIndex] || (_pendingOutfitPatches[sheetIndex] = [])).push([frame, img]);
+      return false;
+    }
+    if (!(e.tex.image instanceof HTMLCanvasElement)) {
+      const cv = document.createElement("canvas");
+      cv.width = e.w; cv.height = e.h;
+      const cx = cv.getContext("2d");
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(e.tex.image, 0, 0);
+      e.tex.image = cv;
+    }
+    const col = frame % OUTFIT_SHEET_COLS, row = Math.floor(frame / OUTFIT_SHEET_COLS);
+    const cx2 = e.tex.image.getContext("2d");
+    cx2.imageSmoothingEnabled = false;
+    cx2.clearRect(col * OUTFIT_SHEET_CELL, row * OUTFIT_SHEET_CELL, OUTFIT_SHEET_CELL, OUTFIT_SHEET_CELL);
+    cx2.drawImage(img, col * OUTFIT_SHEET_CELL, row * OUTFIT_SHEET_CELL, OUTFIT_SHEET_CELL, OUTFIT_SHEET_CELL);
+    e.tex.needsUpdate = true;
+    return true;
   }
   // ---------- 8-directional world objects (trees, rocks, stations) ----------
   // Same idea as the character sheet: one packed data-URI texture, foot-anchored
@@ -2148,7 +2334,10 @@ void main() {
   function ensureObjTex() {
     if (objTex || typeof OBJ_SHEET === "undefined") return;
     objImg = new Image();
-    objImg.onload = () => { objW = objImg.naturalWidth; objH = objImg.naturalHeight; objTex.needsUpdate = true; };
+    objImg.onload = () => {
+      objW = objImg.naturalWidth; objH = objImg.naturalHeight; objTex.needsUpdate = true;
+      _flushObjPatches();   // community overlay: patches queued before the sheet decoded
+    };
     objTex = new THREE.Texture(objImg);
     objTex.magFilter = THREE.NearestFilter;
     objTex.minFilter = THREE.NearestFilter;
@@ -2157,10 +2346,39 @@ void main() {
     snowPatchTop(objMat);   // trees/rocks/furniture whiten from the crown down
     objImg.src = OBJ_SHEET;
   }
+  // Community overlay: bake a replacement 8-dir frame into the packed OBJ
+  // sheet — same hoist-to-canvas-then-draw trick as patchCharFrame, above.
+  let _pendingObjPatches = [];
+  function _flushObjPatches() {
+    if (!_pendingObjPatches.length) return;
+    const pending = _pendingObjPatches; _pendingObjPatches = [];
+    for (const [oi, di, img] of pending) patchObjFrame(oi, di, img);
+  }
+  function patchObjFrame(objIndex, dirIndex, img) {
+    if (!objTex || !objW) { _pendingObjPatches.push([objIndex, dirIndex, img]); return false; }
+    if (!(objTex.image instanceof HTMLCanvasElement)) {
+      const cv = document.createElement("canvas");
+      cv.width = objW; cv.height = objH;
+      const cx = cv.getContext("2d");
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(objTex.image, 0, 0);
+      objTex.image = cv;
+    }
+    const frame = objIndex * 8 + dirIndex;
+    const col = frame % OBJ_COLS, row = Math.floor(frame / OBJ_COLS);
+    const cx2 = objTex.image.getContext("2d");
+    cx2.imageSmoothingEnabled = false;
+    cx2.clearRect(col * OBJ_CELL, row * OBJ_CELL, OBJ_CELL, OBJ_CELL);
+    cx2.drawImage(img, col * OBJ_CELL, row * OBJ_CELL, OBJ_CELL, OBJ_CELL);
+    objTex.needsUpdate = true;
+    return true;
+  }
   function objGeomFor(gf) {
     if (!objGeomCache[gf]) {
       const g = new THREE.PlaneGeometry(1, 1);
-      const col = gf % OBJ_COLS, row = Math.floor(gf / OBJ_COLS), e = 0.06;
+      // half-texel inset — anything smaller lets edge fragments round into
+      // the neighbouring cell.
+      const col = gf % OBJ_COLS, row = Math.floor(gf / OBJ_COLS), e = 0.5;
       const cx = col * OBJ_CELL, cy = row * OBJ_CELL;
       const u0 = (cx + e) / objW, u1 = (cx + OBJ_CELL - e) / objW;
       const v1 = 1 - (cy + e) / objH, v0 = 1 - (cy + OBJ_CELL - e) / objH;
@@ -4216,10 +4434,29 @@ void main() {
     _stlBaseCache.set(key, base);
     return base;
   }
+  // Newhaven (and every other settlement) draws its residents/shopkeepers
+  // from the SAME mix-roster the tutorial isle's fifteen keepers are pinned
+  // to (TUT_TUTORS[].mix, gameplay/tutorial.js) — with no exclusion, a
+  // townsfolk NPC could wear a keeper's exact face and name (Phase 7 item 4:
+  // the keeper-face collision fix). TOWN_MIX is MIXR.list's indices with the
+  // keeper set removed, built once lazily; if the isle module isn't loaded
+  // (or the roster's empty), it falls back to the whole list unfiltered —
+  // NPCs aren't persisted, so faces in already-generated towns may shift
+  // once on next load, which is the bug fix taking effect.
+  let _townMix = null;
+  function townMixIdx() {
+    if (_townMix) return _townMix;
+    const N = MIXR.list.length;
+    const keep = (typeof Tutorial !== "undefined" && Tutorial.keeperMixIdx) ? new Set(Tutorial.keeperMixIdx()) : null;
+    const all = Array.from({ length: N }, (_, k) => k);
+    _townMix = (keep && keep.size) ? all.filter(k => !keep.has(k)) : all;
+    return _townMix;
+  }
   // roster def for the occupant of building index i in settlement v
   function mixDefForBuilding(v, i) {
-    const N = MIXR.list.length;
-    return MIXR.list[(((settlementBlockBase(v) + i) % N) + N) % N];
+    const TM = townMixIdx();
+    const N = TM.length;
+    return MIXR.list[TM[(((settlementBlockBase(v) + i) % N) + N) % N]];
   }
   // find the settlement + building index owning tile (x,y) — for chunk shopkeepers,
   // so a shopkeeper shares the same per-building scheme as the residents around it
@@ -4369,10 +4606,10 @@ void main() {
       if ((npc.level | 0) !== (glevel0 | 0)) { npcClimbToward(npc, glevel0, T); return; }
       if (npc.x === gx0 && npc.y === gy0) {
         npc._escortTarget = null; npc._escortStuck = 0;
-        // QuestScript routine NPCs (js/questscript) use _escortTarget too; their
-        // arrival is awaited by the coroutine (via the target clearing), so don't
-        // route them through the tutorial's escort-arrival hook.
-        if (!npc._qsRoutine && typeof Tutorial !== "undefined" && Tutorial.onEscortArrive) Tutorial.onEscortArrive(npc);
+        // Lua routine NPCs (js/lua) use _escortTarget too; their arrival is
+        // awaited by the coroutine (via the target clearing), so don't route
+        // them through the tutorial's escort-arrival hook.
+        if (!npc._luaRoutine && typeof Tutorial !== "undefined" && Tutorial.onEscortArrive) Tutorial.onEscortArrive(npc);
         return;
       }
       if (T < npc._wanderAt) return;
@@ -4396,13 +4633,11 @@ void main() {
       else { npc._lampStuck = (npc._lampStuck || 0) + 1; if (npc._lampStuck > 8) { npc._lampTarget = null; npc._lampStuck = 0; } }
       return;
     }
-    // QuestScript routine NPCs (js/questscript): their coroutine makes every
-    // decision below (wander, bedtime, climb-down) by setting _escortTarget,
-    // handled by the escort branch above. Skip the built-in JS wander/bedtime so
-    // the two don't fight. Locomotion (moving/escort/lamp) above still runs.
-    // The lamplighter dispatch (assignLampTasks) still sets _lampTarget and takes
-    // priority, so lamp errands interleave with routines until it too is ported.
-    if (npc._qsRoutine) return;
+    // Lua routine NPCs (js/lua): their coroutine makes every decision below
+    // (wander, bedtime, climb-down) by setting _escortTarget, handled by the
+    // escort branch above. Skip the built-in JS wander/bedtime so the two don't
+    // fight. Locomotion (moving/escort/lamp) above still runs.
+    if (npc._luaRoutine) return;
     // bedtime (20:00–04:00): head home and stand on the bed (residents) or the
     // home post (shopkeepers), instead of wandering. Overrides the idle wander.
     if (typeof isBedtime === "function" && isBedtime(npc.x)) {   // NPC's own timezone
@@ -4712,15 +4947,38 @@ void main() {
     //    and fan across the settlement; at dawn they gather back to it. Candle
     //    lighting itself is time-driven (daynight.settlementLights) so it stays
     //    consistent when you're away; this just animates the villagers doing it.
-    // Lamplighting is now driven by the QuestScript villager routine
-    // (scripts/routines/villager.qs + qs-routines lamp verbs), so the built-in
-    // dispatcher is disabled. Left defined for reference/fallback. If QuestScript
-    // is somehow absent, re-enable this to keep towns lighting at dusk.
-    if (typeof QuestScript === "undefined") assignLampTasks();
+    // Lamplighting is now driven by the Lua villager routine
+    // (scripts/routines/villager.lua + js/lua lamp verbs), so the built-in
+    // dispatcher is disabled. Left defined for reference/fallback: if the Lua
+    // runtime is somehow absent, re-enable this to keep towns lighting at dusk.
+    if (typeof Lua === "undefined" || !Lua.ready) assignLampTasks();
     // 3) fluid wander for EVERY npc that has a home post — ambient townsfolk,
     //    quest-givers AND shopkeepers (who now step out of their shops too).
     for (const npc of world.npcs) if (npc._home) stepMixNpc(npc);
     tickNpcDoors(performance.now());
+  }
+
+  // Merge the two "second billboard over the player" overlays into the one
+  // canvas armourMesh actually renders: equipped-metal armour (ArmourOverlay,
+  // parked) and equip-triggered wardrobe parts (WardrobeParts, gameplay/
+  // wardrobe-parts.js). Cheap in the common case (at most one active — most
+  // of the time neither): only composites a fresh canvas when BOTH have art
+  // this frame, cached by the joined sig so it doesn't redraw every call.
+  let _overlayJoin = { sig: null, out: null };
+  function _playerOverlayCanvas() {
+    const a = (typeof ArmourOverlay !== "undefined") ? ArmourOverlay.playerCanvas() : null;
+    const p = (typeof WardrobeParts !== "undefined") ? WardrobeParts.playerCanvas() : null;
+    if (!a) return p;
+    if (!p) return a;
+    const sig = a.sig + "␟" + p.sig;
+    if (_overlayJoin.sig === sig) return _overlayJoin.out;
+    const cv = document.createElement("canvas");
+    cv.width = a.w; cv.height = a.h;
+    const ctx = cv.getContext("2d");
+    ctx.drawImage(a.canvas, 0, 0);
+    ctx.drawImage(p.canvas, 0, 0); // parts on top
+    _overlayJoin = { sig, out: { canvas: cv, cols: a.cols, cell: a.cell, w: a.w, h: a.h, sig } };
+    return _overlayJoin.out;
   }
 
   function syncEntities() {
@@ -4909,10 +5167,12 @@ void main() {
       const _ps = CHAR_SCALE / CHAR_FILL_H;
       place(cm, WX(player.px) + lx, WX(player.py) + lz, 1, _ps * _ch, false, false, playerLiftY - CHAR_FEET_FRAC * _ps * _ch);
       cm.scale.x = _ps * _cw;
-      // equipped metal armour, tailored to this character's body + tinted to its
-      // metal tier, drawn as a second billboard exactly over the character.
-      if (typeof ArmourOverlay !== "undefined") {
-        const ov = ArmourOverlay.playerCanvas();
+      // equipped metal armour (tailored to this character's body + tinted to
+      // its metal tier) merged with any equip-triggered wardrobe parts
+      // (WardrobeParts), drawn as a second billboard exactly over the
+      // character — see _playerOverlayCanvas() above.
+      if (typeof ArmourOverlay !== "undefined" || typeof WardrobeParts !== "undefined") {
+        const ov = _playerOverlayCanvas();
         if (!armourMesh) {
           armourMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1),
             new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, alphaTest: 0.02 }));
@@ -6119,9 +6379,15 @@ void main() {
   // 0.55x0.09 streaks at 0.38 alpha were invisible among the water tile art
   // ("rivers lack current animations")
   const FLOW_N = 48;
+  const FLOW_STREAKS_OFF = true;   // pale current streaks retired (read as frosted slabs on the water)
   const flowPool = [];
   let flowMat = null, flowGeom = null, flowLastT = 0;
   function syncFlow() {
+    // Retired: the pale drifting foam streaks read on the water as flat frosted
+    // slabs rather than current, so the rivers now flow through their tile art
+    // alone. Hide any live streaks and skip the spawn/drift work. (Pool + math
+    // kept intact for the day the effect earns a subtler redraw.)
+    if (FLOW_STREAKS_OFF) { for (const p of flowPool) { p.die = 0; if (p.m) p.m.visible = false; } return; }
     if (!flowMat) {
       flowMat = new THREE.MeshBasicMaterial({ color: 0xe8f6ff, transparent: true, opacity: 0.6, depthWrite: false });
       flowGeom = new THREE.PlaneGeometry(0.9, 0.16);
@@ -6217,7 +6483,11 @@ void main() {
     const windMag = wfog && wfog.wind ? Math.min(1, Math.hypot(wfog.wind.x, wfog.wind.y)) : 0.4;
     // atmos.mist: swampland and wetlands breathe ground mist all day, not
     // just when rain or the golden hour bring it (biomeatmos.js)
-    const mistK = Math.min(1, lowSun * 0.75 + mistWet * 0.85 + atmos.mist) * (1 - 0.45 * windMag);
+    // frosted-tiles fog retired (Phase 7 item 3) — forced to 0 so the spawn
+    // loop's >0.05 gate never fires and any existing cards fade out; the
+    // original expression is kept here for the day a mist bed earns its way
+    // back: Math.min(1, lowSun * 0.75 + mistWet * 0.85 + atmos.mist) * (1 - 0.45 * windMag)
+    const mistK = 0;
     // respawn expired cards onto water, rivers or hollows
     for (let tries = 0; tries < 2 && mistK > 0.05; tries++) {
       let slot = mistPool.find(p => p.die <= now);
@@ -6666,6 +6936,12 @@ void main() {
     // stepping onto a two-level tile): walkable ground height / deck height
     groundLevel: (x, y) => groundY(x, y),
     deckLevel: (x, y) => deckAt(x, y),
+    // community overlay (js/main/proposal-overlay.js): live-patch baked
+    // textures with adopted/previewed art. Each queues internally when its
+    // target isn't built yet and flushes itself once it is — see the
+    // patch/flush/pending helpers next to _finishAtlas, ensureCharTex,
+    // ensureObjTex and ensureOutfitSheet above.
+    patchAtlasKey, patchCharFrame, patchObjFrame, patchOutfitFrame,
     get ready() { return ready; },
   };
 })();

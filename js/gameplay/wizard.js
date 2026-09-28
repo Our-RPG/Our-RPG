@@ -75,8 +75,11 @@ const Wizard = (() => {
   const PLAZA_AGAIN = () => [{
     h: "Te Kairaranga — the Weaver",
     t: [`"Sentence not landing? Substance then verb — 'air strike'. Runes pouched, wand in hand, Enter or V."`,
-        `"Want the tower again? The veil remembers the way."`],
-    act: [["To the tower", "tower"], ["Just passing", "close"]],
+        `"Want the tower again? The veil remembers the way."`,
+        `"The veil is not the only weaving here, kaihanga. The world itself is still on the loom — and the Workshop keeps a thread for you."`],
+    act: [["To the tower", "tower"],
+          ...(typeof TAIAO_WORKSHOP_URL !== "undefined" && TAIAO_WORKSHOP_URL ? [["The Workshop?", "workshop"]] : []),
+          ["Just passing", "close"]],
   }];
 
   function gift() {
@@ -85,7 +88,7 @@ const Wizard = (() => {
     player.wizard = { gift: 1, tower: t ? [t.x, t.y] : null };
     addItem("wand", 1);
     addItem("air_rune", 30);
-    addItem("rune_1", 30);  // Strike — the first verb
+    addItem("rune_strike", 30);  // Strike — the first verb
     addItem("fire_rune", 12);
     log("Gift received: Wand, 30× Air rune, 30× Strike rune, 12× Fire rune.", "gold");
     sfx("coins", 0.5);
@@ -155,6 +158,7 @@ const Wizard = (() => {
     next: () => { page++; render(); },
     tower: () => { close(); toTower(); },
     home: () => { close(); home(); },
+    workshop: () => { if (typeof TAIAO_WORKSHOP_URL !== "undefined" && TAIAO_WORKSHOP_URL) window.open(TAIAO_WORKSHOP_URL, "_blank"); },
   };
   function open(pages) { cur = pages; page = 0; render(); }
   function close() { if (el) el.style.display = "none"; cur = null; }

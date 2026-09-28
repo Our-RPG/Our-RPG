@@ -371,7 +371,7 @@ function createWorldChunks(ctx) {
     // Registrar, Weaver, quest givers) keep their curated-unique names.
     const npcName = (x, y, base, culture) =>
       (typeof NpcNames !== "undefined" ? NpcNames.pick(x, y, "npc:" + x + "," + y, base, culture || "villager") : base);
-    // hand-authored QuestScript quest givers near the Newhaven plaza (world/
+    // hand-authored Lua quest givers near the Newhaven plaza (world/
     // quest-anchors.js) — rooted, _script-tagged; each gated to its own chunk.
     if (typeof deriveQuestGivers === "function") deriveQuestGivers(ch, npcs, npcDerived, CHUNK, PX);
     // Tūhura Isle tutors (gameplay/tutorial.js): derived exactly like
@@ -1226,7 +1226,7 @@ function createWorldChunks(ctx) {
         if (inCh(v.x - 4, v.y + 4)) {
           deco(v.x - 4, v.y + 4, "stall_awn", true);
         }
-        // QuestScript oploc quest objects near the plaza (world/quest-anchors.js)
+        // Lua on_loc quest objects near the plaza (world/quest-anchors.js)
         if (typeof paintQuestLocs === "function") paintQuestLocs(deco, inCh);
       }
       if (inCh(v.x, v.y - 2)) labels.push({ x: v.x, y: v.y - 2, label: v.name + (v.kind === "city" ? " (city)" : " (village)"), c: "#ffd75e" });
@@ -1401,7 +1401,9 @@ function createWorldChunks(ctx) {
           for (let dy = -2; dy <= 2; dy++)
             for (let dx = -3; dx <= 3; dx++)
               if (inCh(x + dx, y + dy) && Math.hypot(dx / 1.6, dy) < 1.6 && !decor[li(x + dx, y + dy)]) {
-                ground[li(x + dx, y + dy)] = "water#3";
+                // sea-biome water art (isWaterKey), NOT the legacy flat-cyan
+                // "water#N" sprite — ponds read as the same water as rivers
+                ground[li(x + dx, y + dy)] = biomeGround(1, x + dx, y + dy);
                 blocked[li(x + dx, y + dy)] = 1;
               }
           addFishNode(x, y, "shore");
@@ -1500,7 +1502,7 @@ function createWorldChunks(ctx) {
           break;
         case "hotspring":
           for (const [dx, dy] of [[0, 0], [1, 0], [0, 1]])
-            if (inCh(x + dx, y + dy)) { ground[li(x + dx, y + dy)] = "water#5"; blocked[li(x + dx, y + dy)] = 1; }
+            if (inCh(x + dx, y + dy)) { ground[li(x + dx, y + dy)] = biomeGround(1, x + dx, y + dy); blocked[li(x + dx, y + dy)] = 1; }
           if (openTile(x + 2, y + 2)) deco(x + 2, y + 2, "boulder");
           break;
         case "shack": {
@@ -1589,12 +1591,12 @@ function createWorldChunks(ctx) {
           for (let dy = -2; dy <= 2; dy++)
             for (let dx = -2; dx <= 2; dx++)
               if (inCh(x+dx,y+dy) && Math.hypot(dx,dy) < 2.5 && !decor[li(x+dx,y+dy)]) {
-                ground[li(x+dx,y+dy)] = "water#3"; blocked[li(x+dx,y+dy)] = 1;
+                ground[li(x+dx,y+dy)] = biomeGround(1, x+dx, y+dy); blocked[li(x+dx,y+dy)] = 1;
               }
           break;
         case "geyser":
           for (const [dx, dy] of [[0,0],[1,0],[0,1],[-1,0],[0,-1]])
-            if (inCh(x+dx,y+dy)) { ground[li(x+dx,y+dy)] = "water#5"; blocked[li(x+dx,y+dy)] = 1; }
+            if (inCh(x+dx,y+dy)) { ground[li(x+dx,y+dy)] = biomeGround(1, x+dx, y+dy); blocked[li(x+dx,y+dy)] = 1; }
           if (openTile(x+2,y)) deco(x+2,y,"boulder");
           break;
         case "beacon":
@@ -1897,17 +1899,24 @@ function createWorldChunks(ctx) {
                                    y >= b2.y0 - 1 && y < b2.y0 + b2.h + 1)) continue;
         const shoreAdj = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => inCh(x + dx, y + dy) && !isW(x + dx, y + dy));
         // a river-mouth spot: a coastal fishing tile where a river reaches the
-        // sea (on/next to a river polyline AND with open sea within ~2 tiles).
-        // Whitebait run only here; the open coast yields the shore band.
+        // sea. Whitebait run only here; the open coast yields the shore band.
+        // A TRUE mouth (Phase 7 item 9) — some river tile in the window is
+        // directly (4-adjacent) beside open sea, not just "river somewhere
+        // nearby, sea somewhere else nearby" (that loose pairing classified
+        // plain riverside AND plain shoreline spots as river-mouths alike,
+        // leaking whitebait everywhere). Bails the moment one qualifies.
         const riverMouth = shoreAdj && (() => {
-          let onRiver = false, seaNear = false;
+          const seaAt = (ax, ay) => {
+            const tx = ax - bx, ty = ay - by;
+            const e = (tx >= 0 && tx < CHUNK && ty >= 0 && ty < CHUNK) ? eG[G(tx, ty)] : elevation(ax * 0.5, ay * 0.5);
+            return e < LAND_E;
+          };
           for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-            if (riverAt(x + dx, y + dy)) onRiver = true;
-            const tx = x + dx - bx, ty = y + dy - by;
-            const e = (tx >= 0 && tx < CHUNK && ty >= 0 && ty < CHUNK) ? eG[G(tx, ty)] : elevation((x + dx) * 0.5, (y + dy) * 0.5);
-            if (e < LAND_E) seaNear = true;
+            const rx = x + dx, ry = y + dy;
+            if (!riverAt(rx, ry)) continue;
+            if (seaAt(rx + 1, ry) || seaAt(rx - 1, ry) || seaAt(rx, ry + 1) || seaAt(rx, ry - 1)) return true;
           }
-          return onRiver && seaNear;
+          return false;
         })();
         // FRESHWATER vs the sea: a carved river tile, or any water sitting on BASE
         // land terrain (pure elevation ≥ LAND_E — rivers & lakes are carved INTO

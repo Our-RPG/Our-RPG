@@ -310,10 +310,10 @@ RECIPES.baking = RECIPES.baking || [];
 // (merged into ui.js's SKILL_INTRO at render time — ui.js loads later)
 const PROD_SKILL_INTRO = {
   Sawing: "Saw logs into boards and cut barrel staves at a sawmill or workbench. The wood economy's first stage after felling — sells offcuts as kindling.",
-  Seasoning: "Air-dry green staves and timber so they won't warp. A passive trade: set staves seasoning, walk away, collect them later.",
+  Seasoning: "Air-dry green staves and timber so they won't warp — a slow craft that takes real time to season at the seasoning yard.",
   Coopering: "Assemble staves and iron hoops into 32 vessels across seven families — domestic tubs, food-storage barrels, brewing casks, wine casks, transport barrels, industrial vats and luxury casks. Cheap boards for tubs, seasoned oak for fine casks. Mastery is per-family, so two coopers of the same level can specialise in wholly different niches.",
-  Malting: "Steep, germinate and kiln barley into malt at a malthouse. Passive: start the batch and return for it. Dark malt makes richer ales.",
-  Brewing: "Ferment malt grist into ale (passive), then barrel finished ale into kegs. The barrel remembers everyone who made it.",
+  Malting: "Steep, germinate and kiln barley into malt at a malthouse — a slow craft that takes real time to work. Dark malt makes richer ales.",
+  Brewing: "Ferment malt grist into ale — a slow craft — then barrel finished ale into kegs. The barrel remembers everyone who made it.",
   Baking: "Bake flour into bread and pastries at a bakehouse. Split out of Cooking so a baker can specialise.",
 };
 

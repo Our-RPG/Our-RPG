@@ -145,6 +145,16 @@
         tdN.appendChild(lv);
         if (typeof Eggs !== "undefined" && Eggs.found) Eggs.found("bestiary_lore", null);
       }
+      if (typeof ProposalOverlay !== "undefined") {
+        const u = ProposalOverlay.credit("monster:" + e.kind);
+        const gap = !u && ProposalOverlay.isGapMonster(e.kind);
+        if (u || gap) {
+          const cv = document.createElement("div");
+          cv.style.cssText = "margin-top:2px;font-size:11px;font-style:italic;color:#8fa3c8;font-weight:normal;";
+          cv.textContent = u ? `art by @${u} · made in the Taiao Workshop` : "awaiting an artist — this could be your work";
+          tdN.appendChild(cv);
+        }
+      }
       tr.appendChild(tdN);
       // slain count
       const tdK = document.createElement("td"); tdK.className = "bslain"; tdK.textContent = e.kills > 0 ? "×" + e.kills : "—"; tr.appendChild(tdK);

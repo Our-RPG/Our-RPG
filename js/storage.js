@@ -85,9 +85,12 @@ const DEPRECATED_MIGRATE = {
   gem: "gem_0",
 };
 const migrateBoatId = id => {
-  if (BOAT_MIGRATE[id] && ITEMS[BOAT_MIGRATE[id]]) return BOAT_MIGRATE[id];
-  if (GIANT_MIGRATE[id] && ITEMS[GIANT_MIGRATE[id]]) return GIANT_MIGRATE[id];
-  if (DEPRECATED_MIGRATE[id] && ITEMS[DEPRECATED_MIGRATE[id]]) return DEPRECATED_MIGRATE[id];
+  if (BOAT_MIGRATE[id] && ITEMS[BOAT_MIGRATE[id]]) id = BOAT_MIGRATE[id];
+  else if (GIANT_MIGRATE[id] && ITEMS[GIANT_MIGRATE[id]]) id = GIANT_MIGRATE[id];
+  else if (DEPRECATED_MIGRATE[id] && ITEMS[DEPRECATED_MIGRATE[id]]) id = DEPRECATED_MIGRATE[id];
+  // canonical rename: fold machine ids (bar_14, forage_12, seed_fibriculture_12…)
+  // onto their name-based id. ITEM_ALIAS is published by js/skills/id-canonical.js.
+  if (typeof ITEM_ALIAS !== "undefined" && ITEM_ALIAS[id]) id = ITEM_ALIAS[id];
   return id;
 };
 // Callers (2):
@@ -168,8 +171,8 @@ function buildSaveData() {
     kills: player.kills || {},     // bestiary: monster kind -> number slain
     unlocked: player.unlocked || {}, // opened door/gate locks: canonical "x,y" -> 1 (gameplay/locks.js)
     quests: player.quests || {},   // quest progress (gameplay/quests.js): active/done/flags/revealed
-    scriptVars: player.scriptVars || {}, // QuestScript scripted-quest stages (js/questscript): name -> int
-    questPoints: player.questPoints | 0, // QuestScript quest points (questpoint_add)
+    scriptVars: player.scriptVars || {}, // Lua scripted-quest stages (js/lua, `quest` proxy): name -> int
+    questPoints: player.questPoints | 0, // Lua quest points (quest_point())
     stink: player.stink && player.stink.fl ? player.stink : { fl: {} }, // stink metre (gameplay/stink.js)
     respawn: player.respawn || null, // chosen respawn city fountain {x,y,name}; null = Newhaven
     timeShiftMs: player.timeShiftMs || 0, // persisted world-clock shift (graduation morning)

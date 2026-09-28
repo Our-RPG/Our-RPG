@@ -42,6 +42,16 @@ CREATE TABLE IF NOT EXISTS webauthn_challenges (
   expires_at  INTEGER NOT NULL
 );
 
+-- One-time Workshop sign-in codes (Phase 5). A logged-in player mints a code
+-- in-game; the Workshop site (a different origin — localStorage can't cross
+-- over) redeems it for a real session. Single-use, short-lived.
+CREATE TABLE IF NOT EXISTS link_codes (
+  code_hash   TEXT PRIMARY KEY,                      -- sha256hex of the code
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  created_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL
+);
+
 -- Save vault: metadata here, blobs in R2 at saves/{user_id}/{slot}/{version}.
 CREATE TABLE IF NOT EXISTS saves (
   user_id     INTEGER NOT NULL REFERENCES users(id),
@@ -84,13 +94,27 @@ CREATE TABLE IF NOT EXISTS proposals (
   title       TEXT NOT NULL,
   licence     TEXT NOT NULL,                         -- 'CC-BY-SA-4.0' | 'GPL-3.0-or-later'
   size        INTEGER NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'open',          -- open|flagged|accepted|declined
+  status      TEXT NOT NULL DEFAULT 'open',          -- pending|open|flagged|accepted|declined
+  source      TEXT NOT NULL DEFAULT 'upload',        -- 'pixellab' (auto-open) | 'upload' (needs moderation)
   flags       INTEGER NOT NULL DEFAULT 0,            -- community flag count
   created_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_proposals_subject ON proposals(subject, status);
+-- Curator moderation queue: user-uploaded art lands in 'pending' until a
+-- curator approves it; PixelLab-generated art skips straight to 'open'.
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_proposals_user ON proposals(user_id, created_at);
 
 CREATE TABLE IF NOT EXISTS endorsements (
+  proposal_id INTEGER NOT NULL REFERENCES proposals(id),
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  created_at  INTEGER NOT NULL,
+  PRIMARY KEY (proposal_id, user_id)
+);
+
+-- One community flag per user per proposal. proposals.flags caches the
+-- distinct count; auto-hide needs FLAG_HIDE_AT distinct flaggers.
+CREATE TABLE IF NOT EXISTS proposal_flags (
   proposal_id INTEGER NOT NULL REFERENCES proposals(id),
   user_id     INTEGER NOT NULL REFERENCES users(id),
   created_at  INTEGER NOT NULL,

@@ -80,6 +80,10 @@ export async function authUser(req, env) {
   return row; // user columns + token_hash
 }
 
+/* True when a resolved user row carries the space-separated 'curator' flag.
+ * Curators form the moderation team that reviews user-uploaded proposals. */
+export const isCurator = user => !!user && (user.flags || "").split(" ").includes("curator");
+
 // ---- rate limiting --------------------------------------------------------
 
 /* Coarse fixed-window limiter backed by D1 — plenty at Phase-1 scale.

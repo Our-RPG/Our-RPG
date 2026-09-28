@@ -7,6 +7,7 @@
 import { err, json, now } from "./util.js";
 import * as auth from "./auth.js";
 import * as passkeys from "./passkeys.js";
+import * as link from "./link.js";
 import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
@@ -35,6 +36,9 @@ const ROUTES = {
   "POST /api/passkey/login":            passkeys.loginFinish,
   "POST /api/passkey/remove":           passkeys.removePasskey,
 
+  "POST /api/link/code":                link.makeCode,
+  "POST /api/link/redeem":              link.redeemCode,
+
   "PUT /api/save":                      saves.putSave,
   "GET /api/save/list":                 saves.listSaves,
   "GET /api/save/blob":                 saves.getSaveBlob,
@@ -47,9 +51,13 @@ const ROUTES = {
   "POST /api/workshop/proposal":        workshop.submitProposal,
   "GET /api/workshop/proposals":        workshop.listProposals,
   "GET /api/workshop/proposal":         workshop.getProposal,
+  "GET /api/workshop/mine":             workshop.mine,
   "POST /api/workshop/endorse":         workshop.endorse,
   "POST /api/workshop/flag":            workshop.flag,
+  "GET /api/workshop/pending":          workshop.pendingQueue,
+  "POST /api/workshop/review":          workshop.review,
   "GET /api/workshop/digest/latest":    workshop.latestDigest,
+  "GET /api/workshop/gaps":             workshop.gaps,
 
   "GET /api/koha/transparency":         koha.transparency,
 
@@ -68,6 +76,7 @@ const ROUTES = {
   "POST /api/admin/cost":               admin.setCost,
   "GET /api/admin/flagged":             admin.flaggedQueue,
   "POST /api/admin/proposal":           admin.setProposalStatus,
+  "POST /api/admin/gaps":               admin.setGaps,
 };
 
 function corsHeaders(req, env) {
@@ -124,6 +133,7 @@ export default {
       // Housekeeping: expired sessions + challenges, stale rate windows.
       await env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now()).run();
       await env.DB.prepare("DELETE FROM webauthn_challenges WHERE expires_at < ?").bind(now()).run();
+      await env.DB.prepare("DELETE FROM link_codes WHERE expires_at < ?").bind(now()).run();
       await env.DB.prepare("DELETE FROM rate_limits WHERE win_start < ?").bind(now() - 864e5).run();
     })());
   },

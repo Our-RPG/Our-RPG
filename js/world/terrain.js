@@ -609,6 +609,56 @@ function createWorldTerrain() {
       const w = Math.max(0, Math.min(1, TUT_ISLE.river.waterR + 1 - q.riverLine));
       e = e + (floor - e) * w;
     }
+    // TERRACED FORD (Phase 7 item 8): the feather above drops ~4 stepClimbOK
+    // tiers (STEP_H=0.5 world units each) across just ~2 game tiles —
+    // steeper than the ONE-tier-per-step climb the player (and the
+    // pathfinder) allow, so on foot the only legal crossing was the bridge.
+    // The journey path fords the water once, on the pod-2→gate-2 leg (the
+    // Fisher's camp to the next journey gate — TUT_ISLE.path's s:2→s:2.5
+    // segment; its straight chord crosses the river ray a shade short of
+    // rCross). The ford's own LINE (through pod 2 and gate 2, extended both
+    // ways — not the general path, which also runs alongside the river
+    // elsewhere without fording it, e.g. the river-ride reach near the
+    // source, and would wrongly pull those banks down too) gives a local
+    // "across the ford" axis: fT is position along it (in fractions of the
+    // pod-to-gate span, unclamped so it keeps growing past both ends) and
+    // fPerp the perpendicular offset. fT0 solves analytically for where the
+    // axis crosses the river (perp-to-river == 0), so bankDist below —
+    // along-axis distance from the wading line — stays a sane "distance
+    // from the water" measure all the way out to the dry banks, including
+    // right at pod 2 itself (only ~4.7 map units from the crossing), unlike
+    // q.riverLine (measured from the infinite RIVER line) which diverges
+    // from the true crossing fast off the path. fPerp is gated generously
+    // (8 map units — wider than the ford ever visibly needs) because
+    // Math.min against the natural terrain is what actually bounds the
+    // effect: past the point the staircase would climb above the plateau,
+    // min() just keeps picking the plateau, so a loose fPerp gate costs
+    // nothing — whereas a TIGHT one cuts the staircase off mid-climb
+    // wherever the path's approach to pod 2 (a different angle, and a
+    // different distance-from-water schedule, than a straight crossing)
+    // happens to graze it, reopening the very cliff this is fixing.
+    // Outside fPerp's reach the feather above stands untouched (a
+    // deliberate crossing, not a general riverbank fix).
+    if (q.pRiver >= 0 && q.riverLine > TUT_ISLE.river.waterR) {
+      const fA = TUT_ISLE.pods[2], fB = TUT_ISLE.gates[2];
+      const fvx = fB.x - fA.mx, fvy = fB.y - fA.my, fL = Math.hypot(fvx, fvy);
+      const fdx = x - fA.mx, fdy = y - fA.my;
+      const fT = (fdx * fvx + fdy * fvy) / (fL * fL);
+      const fPerp = Math.abs(fdx * fvy - fdy * fvx) / fL;
+      if (fPerp <= 8.0) {
+        // the line's own perp-to-river at each end (opposite signs — one
+        // end sits on each bank) pin the water crossing at fT0 by lerp
+        const perpAt = (px, py) => -(px - TUT_ISLE.CX) * TUT_ISLE.river.uy + (py - TUT_ISLE.CY) * TUT_ISLE.river.ux;
+        const pA = perpAt(fA.mx, fA.my), pB = perpAt(fB.x, fB.y);
+        const fT0 = pA / (pA - pB);
+        const bankDist = Math.abs(fT - fT0) * fL;   // map units from the ford's wading line
+        const floor = 0.467 - q.pRiver * 0.02;
+        const TIER_E = 0.02 * (1 - LAND_E);   // one stepClimbOK-legal render tier, raw elevation
+        const GAME_TILE = 0.5;                // map units per game tile
+        const step = Math.floor(Math.max(0, bankDist - TUT_ISLE.river.waterR) / GAME_TILE) + 1;
+        e = Math.min(e, floor + step * TIER_E);
+      }
+    }
     return e;
   }
 

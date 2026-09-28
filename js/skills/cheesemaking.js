@@ -49,7 +49,7 @@
   );
 
   // ---------- cheeses (30) — [id, displayName, family, req, inputs, ageSec(0=active)] ----------
-  // Fresh cheeses press quickly (active); aged cheeses go on the passive queue.
+  // Fresh cheeses press quickly; aged cheeses take a much longer craft time.
   // Reuses the existing `cheese` item as basic "Farmhouse cheese".
   const CHEESES = [
     ["cottage_cheese",  "Cottage cheese",    "fresh_cheese", 2,  { curds: 2 }, 0],
@@ -102,7 +102,7 @@
   // (the barn station was removed — cheesemaking lives at the creamery/cauldron)
 
   Object.assign(PROD_SKILL_INTRO, {
-    Cheesemaking: "Curdle milk into curds (and whey), then press fresh cheeses or set aged ones maturing on the passive queue — cottage, feta and mozzarella up through cheddar, gruyère, blue stiltons and long cave-aged wheels. Split out of Cooking; the biggest buyer of a dairy farm's milk.",
+    Cheesemaking: "Curdle milk into curds (and whey), then press fresh cheeses quickly or age the finer ones over a long craft — cottage, feta and mozzarella up through cheddar, gruyère, blue stiltons and long cave-aged wheels. Split out of Cooking; the biggest buyer of a dairy farm's milk.",
   });
 
   for (const cat in RECIPES) RECIPES[cat].forEach((r, i) => {

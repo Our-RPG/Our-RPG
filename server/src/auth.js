@@ -95,6 +95,7 @@ export async function me(req, env) {
   ]);
   return json({
     ok: true,
+    id: user.id,                 // the Workshop wears this as your crew number
     username: user.username,
     created_at: user.created_at,
     hasEmail: !!user.email,
