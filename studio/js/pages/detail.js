@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — asset detail page (all types) =====
+// ===== Our RPG Workshop — asset detail page (all types) =====
 // The communal page for one asset. Shows the game's own art, the raw in-game
 // data, type-specific votes, and every generation the community has shared —
 // with voting. Characters get the full treatment: original prompt, all 8

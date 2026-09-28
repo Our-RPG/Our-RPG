@@ -1,6 +1,9 @@
-# Taiao
+# Our RPG
 
-*Taiao (Māori): the natural world — the living world.*
+*It began as **Taiao** — te reo Māori for the natural world, the living
+world — and its world still carries that whakapapa: the birds, the koha,
+the isle of Tūhura. The new name says the other true thing: this RPG
+belongs to the people who play and build it.*
 
 An offline, single-player RPG in the spirit of old-school tile-based browser MMOs
 (RPG MO / early RuneScape), rendered HD-2D style: a WebGL world with a tilted
@@ -25,7 +28,7 @@ cd Taiao
 python3 tools/serve.py        # http://localhost:8899  (any static server works)
 ```
 
-On a Mac you can just double-click **`Start Taiao.command`**. A local server is
+On a Mac you can just double-click **`Start Our RPG.command`**. A local server is
 required because browsers refuse WebGL textures from `file://` pages. Needs a
 WebGL-capable browser; hardware acceleration on.
 
@@ -164,14 +167,14 @@ panel. This project follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Licensing
 
-Taiao is free — and licensed so that it stays that way, permanently.
+Our RPG is free — and licensed so that it stays that way, permanently.
 No one, including its original creator, can ever close it, take it from
 its community, or sell it out from under the people who play and build it.
 If its stewardship ever went wrong, anyone could fork it and carry on.
 
 - **Code** — [GNU GPL-3.0-or-later](LICENSE). You may play, study, modify
   and share it; anything built from it must stay just as free.
-- **Original assets** made for Taiao (the painted terrain/item/fish
+- **Original assets** made for Our RPG (the painted terrain/item/fish
   tilesheets, generated sprite atlases, docs and dialogue written for the
   game) — [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/):
   share and adapt with credit, under the same terms.

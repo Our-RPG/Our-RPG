@@ -64,7 +64,7 @@
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `taiao-proposal-${cur.type}-${cur.key}.json`;
+    a.href = url; a.download = `our-rpg-proposal-${cur.type}-${cur.key}.json`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
     if (typeof log === "function")
@@ -1108,7 +1108,7 @@
       " Proposed art shows only here — the in-game sprites don't change."));
     if (typeof ProposalOverlay !== "undefined") {
       const cu = ProposalOverlay.credit(desc.type + ":" + desc.key);
-      if (cu) body.appendChild(el("div", "oe-intro", `Community art by @${cu} — made in the Taiao Workshop.`));
+      if (cu) body.appendChild(el("div", "oe-intro", `Community art by @${cu} — made in Our RPG Workshop.`));
     }
 
     // ---- sprite variant sections (standard / tended / baby) ----

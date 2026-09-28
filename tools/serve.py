@@ -11,7 +11,7 @@ This wrapper keeps everything else identical but:
   * immutable assets -> long cache, SAME list as sw.js CACHE_FIRST
     (/assets/sheets/ is content-hashed; sfx/fonts/libs never change in place)
 
-Run from the repo root (Start Taiao.command does):  python3 tools/serve.py [port]
+Run from the repo root (Start Our RPG.command does):  python3 tools/serve.py [port]
 """
 import sys
 from functools import partial

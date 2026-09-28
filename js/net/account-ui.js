@@ -1,4 +1,4 @@
-// ===== Taiao — Account tab (optional accounts, without a shadow of pressure) =====
+// ===== Our RPG — Account tab (optional accounts, without a shadow of pressure) =====
 // A sidebar tab in the cheats.js mould: grabs #panel-account, fills it, wires
 // itself. Hidden entirely unless this build carries a SERVER_URL. The copy
 // leads with what the vision demands: the account is OPTIONAL, email is
@@ -55,7 +55,7 @@
 <button id="acc-login" class="acc-primary">Log in</button>
 <button id="acc-register">Create account</button>
 <button id="acc-pklogin" title="Sign in with a passkey saved on this device">Passkey</button>
-${workshopHtml("Taiao Workshop ↗ — the open dev room; same account as the game.")}`;
+${workshopHtml("Our RPG Workshop ↗ — the room this game is built in; same account as the game.")}`;
   }
 
   // A door to the Workshop, hidden entirely when this build carries no
@@ -80,13 +80,15 @@ ${workshopHtml("Taiao Workshop ↗ — the open dev room; same account as the ga
 <h3>Passkeys</h3>
 <div class="acc-sub">${(u.passkeys || []).length ? (u.passkeys || []).map(k => esc(k.label || "unnamed") + " (" + new Date(k.created_at).toLocaleDateString() + ")").join(" · ") : "None yet — a passkey signs you in with a touch, no password typed."}</div>
 <button id="acc-pkadd">Add a passkey on this device</button>
-<button id="acc-wscode" title="Sign in on the Taiao Workshop site with this account">Workshop code</button>
-${workshopHtml("Open Taiao Workshop ↗")}
+<button id="acc-wscode" title="Sign in on the Our RPG Workshop site with this account">Workshop code</button>
+${workshopHtml("Open Our RPG Workshop ↗")}
 <h3>Leaderboards</h3>
 <label><input type="checkbox" id="acc-xp" ${typeof SaveSync !== "undefined" && SaveSync.xpOptedIn() ? "checked" : ""}>
 <span>Share my per-skill XP for the public (provisional) leaderboards and skill distributions. Gameplay is unchanged either way; untick any time.</span></label>
 <h3>One world</h3>
 <div class="acc-row acc-sub" id="acc-world">…</div>
+<h3>This week in our world</h3>
+<div class="acc-sub" id="acc-digest">…</div>
 <h3>Standing</h3>
 <div class="acc-sub" id="acc-ranks">…</div>
 <h3>Koha</h3>
@@ -134,7 +136,7 @@ ${workshopHtml("Open Taiao Workshop ↗")}
       const r = await Server.linkCode();
       if (r.ok) {
         const code = r.code.replace(/^(.{4})(.{4})$/, "$1-$2");
-        say(`Code: ${code} — enter it in Taiao Workshop → Settings within 10 minutes to sign in there as this account.`, true);
+        say(`Code: ${code} — enter it in Our RPG Workshop → Settings within 10 minutes to sign in there as this account.`, true);
       } else say(r.error || "Couldn't generate a code.", false);
     };
     $("acc-xp").onchange = e => { if (typeof SaveSync !== "undefined") SaveSync.setXpOptIn(e.target.checked); };
@@ -177,15 +179,29 @@ ${workshopHtml("Open Taiao Workshop ↗")}
             `${k.active ? "" : ", provisional: " + (k.qualifying || 0) + "/1000 qualifying"})${esc(grace)}</span></div>`;
         }).join("");
     });
+    // The weekly Workshop digest, read into the game — the crew's changelog
+    // where the players who caused it will actually see it. Quietly absent
+    // when no digest has ever been built.
+    Server.call("/api/workshop/digest/latest").then(r => {
+      const el = $("acc-digest");
+      if (!el) return;
+      const d = r.ok && r.digest;
+      if (!d || !d.markdown) { el.textContent = "A quiet week so far — the Workshop digest lands here when there's news."; return; }
+      const bullets = String(d.markdown).split("\n").filter(l => /^\s*[-*] /.test(l)).slice(0, 5)
+        .map(l => l.replace(/^\s*[-*] /, "").replace(/[*_`#]/g, ""));
+      el.innerHTML = (bullets.length ? bullets : [String(d.markdown).split("\n").find(l => l.trim()) || ""])
+        .map(b => `<div class="acc-row">· ${esc(b)}</div>`).join("") +
+        (d.posted_url ? `<div class="acc-row"><a href="${esc(d.posted_url)}" target="_blank" rel="noopener">the whole week ↗</a></div>` : "");
+    });
     // live transparency line (audit §9: the real number, publicly)
     Server.call("/api/koha/transparency").then(r => {
       const el = $("acc-koha");
       if (!el) return;
+      const kofi = `Koha is welcome and never expected — <a href="https://ko-fi.com/taiao" target="_blank" rel="noopener">ko-fi.com/taiao</a>; docs/koha.md has the whole honest story.`;
       if (r.ok && r.current) {
-        el.textContent = `Running the world cost $${(r.current.usd_cents / 100).toFixed(2)} in ${r.current.month}` +
-          (r.players30d ? `, across ${r.players30d} players this month` : "") +
-          ". Koha is welcome and never expected — docs/koha.md has the whole honest story.";
-      } else el.textContent = "Koha is welcome and never expected — docs/koha.md has the whole honest story.";
+        el.innerHTML = esc(`Running the world cost $${(r.current.usd_cents / 100).toFixed(2)} in ${r.current.month}` +
+          (r.players30d ? `, across ${r.players30d} players this month` : "") + ". ") + kofi;
+      } else el.innerHTML = kofi;
     });
   }
 

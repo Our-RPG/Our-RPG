@@ -14,16 +14,16 @@ function bootFailed() {
   d.style.cssText = "position:fixed;inset:0;z-index:99999;background:#14161f;color:#e8eaf2;" +
     "font:15px/1.5 OpenDyslexic,Verdana,sans-serif;padding:12vh 18vw;overflow:auto";
   d.innerHTML = isFile
-    ? "<h2>Taiao can't run from file:// any more</h2>" +
+    ? "<h2>Our RPG can't run from file:// any more</h2>" +
       "<p>The sprite sheets now live in separate <code>assets/sheets/*.webp</code> files, and " +
       "browsers refuse to feed file:// images to WebGL (the world can't get its textures).</p>" +
-      "<p><b>To play:</b> double-click <code>Start Taiao.command</code> in the game folder — " +
+      "<p><b>To play:</b> double-click <code>Start Our RPG.command</code> in the game folder — " +
       "it starts a tiny local server and opens the game at <code>http://localhost:8899</code>.</p>" +
       "<p>localhost counts as a different browser identity, so your character won't be there on " +
       "first launch. Click the button below to back up this page's save, then use " +
       "<b>Import</b> in the localhost game and pick that file.</p>" +
       "<button id='bf-save' style='font:inherit;padding:8px 16px;cursor:pointer'>Download save backup</button>"
-    : "<h2>Taiao couldn't start its renderer</h2>" +
+    : "<h2>Our RPG couldn't start its renderer</h2>" +
       "<p>WebGL initialisation failed — check the browser console for details.</p>";
   document.body.appendChild(d);
   const btn = document.getElementById("bf-save");
@@ -32,7 +32,7 @@ function bootFailed() {
     if (!raw) { alert("No save found in this browser."); return; }
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([raw], { type: "application/json" }));
-    a.download = "taiao-save-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.download = "our-rpg-save-" + new Date().toISOString().slice(0, 10) + ".json";
     document.body.appendChild(a); a.click(); a.remove();
   };
 }
@@ -85,14 +85,14 @@ async function init() {
       player.respawn = { x: s.x, y: s.y, name: "Tūhura Isle" };
       Tutorial.state(); // seed player.tutorial so the welcome fires post-boot
     }
-    log("Welcome to Taiao — the natural world!", "gold");
+    log("Welcome to Our RPG — the world we're all still building!", "gold");
     log("Click things to interact. Check the ? tab for a guide.", "sys");
   } else {
     // saved-position validation happens BELOW, after preloadSeen: passable()
     // is a world-tile query, and issuing it before the IDB chunk hydration
     // regenerated the spawn chunk from scratch — dragging the road A* and
     // the full world-name pass into every warm reload (~14s of the old boot)
-    log("Welcome back to Taiao!", "gold");
+    log("Welcome back to Our RPG!", "gold");
   }
   // Unconditional build beacon (stale-client diagnosis): shows in EVERY boot,
   // new save or old, and reports whether the current feature wiring is live.

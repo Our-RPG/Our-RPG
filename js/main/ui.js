@@ -119,7 +119,7 @@ function examineItem(s) {
   log(EXAMINE[s.id] || def.name, "sys");
   if (typeof ProposalOverlay !== "undefined") {
     const u = ProposalOverlay.credit("item:" + s.id);
-    if (u) log("Made by @" + u + " — Taiao Workshop.", "sys");
+    if (u) log("Made by @" + u + " — Our RPG Workshop.", "sys");
     else if (ProposalOverlay.isGapItem(s.id))
       log("This icon is a placeholder — the Workshop is looking for its artist.", "sys");
   }
@@ -1063,7 +1063,7 @@ function bankArrFor(net) {
 function bankNetName(net) {
   const info = bankInfoFor(net);
   if (info) return info.title;
-  if (net === "main") return "Bank of Taiao";
+  if (net === "main") return "The Commons Bank";
   let h = 0;
   for (let i = 0; i < net.length; i++) h = (h * 131 + net.charCodeAt(i)) >>> 0;
   const A = ["Gull", "Drift", "Mist", "Storm", "Pearl", "Kelp", "Wreck", "Tide", "Fog", "Salt", "Reef", "Gale"];

@@ -9,8 +9,8 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
 
 ## Setup checklist (itch dashboard)
 
-- **Title:** Taiao — *tagline:* "An endless, living world that can never be
-  taken from you."
+- **Title:** Our RPG — *tagline:* "An endless, living world that can never
+  be taken from you."
 - **Classification:** Game → Role Playing. **Kind of project:** HTML —
   "This file will be played in the browser".
 - **Pricing: $0, donations OFF.** The optional birdsong layer is CC BY-NC-SA
@@ -40,11 +40,12 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
 
 *(lead GIF here — the Bifrost crossing)*
 
-**Taiao** *(Māori: the natural world)* is a single-player, browser-native RPG
-in the spirit of old-school tile-based MMOs — RPG MO, early RuneScape —
-rendered HD-2D: a WebGL world with a tilted chase camera, depth fog, and
-billboarded pixel art. No install, no account, no telemetry. Your save lives
-in your browser.
+**Our RPG** began life as *Taiao*, te reo Māori for the natural world — and
+the natural world is still what it's made of. It's a single-player,
+browser-native RPG in the spirit of old-school tile-based MMOs — RPG MO,
+early RuneScape — rendered HD-2D: a WebGL world with a tilted chase camera,
+depth fog, and billboarded pixel art. No install, no account, no telemetry.
+Your save lives in your browser.
 
 The world is **endless and alive**. Terrain streams in forever across
 15,000²-tile named worlds; weather fronts drift on real isobars; the sun's
@@ -73,7 +74,7 @@ see what the game thinks you love.
 
 ### Yours, forever — that's a feature
 
-Taiao is **free software**: the entire game — code (GPL-3.0), art and audio
+Our RPG is **free software**: the entire game — code (GPL-3.0), art and audio
 (CC BY-SA) — lives at
 **[github.com/dataversion5372/Taiao](https://github.com/dataversion5372/Taiao)**.
 Clone it and it runs from a folder on your machine, offline, for as long as
@@ -105,8 +106,10 @@ promise. If this game matters to you, the repo *is* the game.
 
 Click to walk · click things to use them · **right-click everything** ·
 **Enter** talk · **X** split · **Tab** switch selves · **V** speak a spell ·
-**M** map · **J** journal · **B** bestiary · **I** Play Pulse · **?** full
-guide in the sidebar.
+**M** map · **J** journal · **B** bestiary · **I** Play Pulse ·
+**K** postcard (a framed, shareable snapshot — everyone plays the same
+world, so its coordinates work for any friend) · **?** full guide in the
+sidebar.
 
 ### Credits & licensing
 

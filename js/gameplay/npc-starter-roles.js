@@ -3320,7 +3320,7 @@ const NPC_ROLE_TOPICS = {
       "The meeting hall wants a new ledger for settlements records. Good work, steady payment.",
       "Folk are bringing in old family letters to be rebound. Sentiment's good business.",
       "Heard there's a scholar visiting somewhere inland. Probably looking for rare books, they always do.",
-      "They say anyone can put new art or a whole quest into the world through the Taiao Workshop. My cousin's pottery turned up on a market stall a week after she made it — her name still on it.",
+      "They say anyone can put new art or a whole quest into the world through the Workshop. My cousin's pottery turned up on a market stall a week after she made it — her name still on it.",
     ],
     lore: [
       "The first scriptorium on this isle was in the oldest settlement — three centuries, my mentor said.",

@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — tiny DOM + helper kit =====
+// ===== Our RPG Workshop — tiny DOM + helper kit =====
 // No framework: the app is a handful of classic scripts sharing one global
 // scope, exactly like the game it serves. This file is the toolbox everyone
 // else leans on.
@@ -149,7 +149,7 @@ function askProvenance(kind) {
       "<b>AI-made</b> — I generated it and I'm saying so.<br><br>" +
       "Either answer is welcome here — hand-made and AI-made work both ship. The only thing that doesn't is " +
       "AI work passed off as hand-made: that gets removed when found, and repeat offenders lose the bench. " +
-      "We ask because credit in Taiao means something." }));
+      "We ask because credit in Our RPG means something." }));
     m.appendChild(el("div.btn-row", { style: "margin-top:.8rem;justify-content:flex-end" }, [
       el("button.btn.ghost.sm", { text: "Cancel", onclick: () => done(null) }),
       el("button.btn.sm", { text: "AI-made — disclosed", onclick: () => done("ai") }),

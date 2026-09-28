@@ -1,4 +1,4 @@
-// ===== Taiao — the keepers' letter (koha, without a shadow of pressure) =====
+// ===== Our RPG — the keepers' letter (koha, without a shadow of pressure) =====
 // Audit §9, implemented to the letter of its absolute rules:
 //   · Triggers on ATTENTIVE hours (Play Pulse's AFK-weighted totalSec), not
 //     wall clock: first mention at 10 attentive hours, repeats every 40.
@@ -112,11 +112,22 @@
         costLine = `Running the world — the vault, the tallies, the lists — cost <b>$${(r.current.usd_cents / 100).toFixed(2)}</b> in ${r.current.month}` +
           (r.players30d > 1 ? `, shared across ${r.players30d} players` : "") + `. That's the whole bill; the numbers are public.`;
     } catch (e) {}
+    // Ground the ask in something already true on this player's screen: the
+    // newest community-adopted work, by name. Strictly honest — whatever made
+    // the art, the wires that deliver it to every player are what koha funds.
+    try {
+      const l = typeof ProposalOverlay !== "undefined" && ProposalOverlay.latest && ProposalOverlay.latest();
+      if (l) {
+        const who = l.username ? "@" + l.username : "one of us";
+        const what = l.title || String(l.subject || "").split(":").pop().replace(/_/g, " ");
+        costLine += ` The wires that carried ${who}'s “${what}” into everyone's world are the same ones koha keeps lit.`;
+      }
+    } catch (e) {}
     letterEl.querySelector("#koha-paper").innerHTML = `
 <div style="color:#ffe97a;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">From the keepers of Tūhura Isle</div>
 <p>You've walked this world for ${hrs} attentive hours now. Thank you — a world is only real while someone is in it.</p>
 <p>${costLine}</p>
-<p>If you ever feel like leaving a koha, it is welcome and never expected. Nothing in Taiao is metered, gated, or worse without it — the licence makes that a structural promise, not a polite one. <span style="color:#7d90a8;">(docs/koha.md in the repository tells the whole honest story, including where giving isn't possible yet.)</span></p>
+<p>If you ever feel like leaving a koha, it is welcome and never expected — <a href="https://ko-fi.com/taiao" target="_blank" rel="noopener" style="color:#ffd75e;">ko-fi.com/taiao</a> is the road. Nothing in Our RPG is metered, gated, or worse without it; the licence makes that a structural promise, not a polite one. <span style="color:#7d90a8;">(docs/koha.md in the repository tells the whole honest story of what it funds — and what it never will.)</span></p>
 <p style="color:#7d90a8;">This letter returns, at most, every forty attentive hours. Or never again, if you prefer — we will honour that without another word.</p>
 <div style="margin-top:14px;">
 <button id="koha-close" style="background:#241c38;border:1px solid #3a3050;color:#d8d2e8;border-radius:4px;cursor:pointer;padding:4px 12px;font-size:12px;">Fold it away</button>

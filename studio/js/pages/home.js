@@ -1,15 +1,17 @@
-// ===== Taiao Workshop — Home: the atelier =====
+// ===== Our RPG Workshop — Home: the atelier =====
 // The front door of the room where the world is being made. This page has one
 // job: make whoever walks in feel like they just found the dev team's own
 // workbench with their name already on a badge. The order of the room:
 //   the SKY (hero: the game's night over the wordmark, real sprites on the
 //   horizon) → the PULSE (a live ticker of what the crew just shipped) →
 //   YOUR BADGE (crew card with a real builder number) → the CENSUS (how much
-//   world there already is — and the +1 that is you) → THE BOARD (open
-//   proposals) → SHIPPED (the ledger, credited forever) → THE GAPS (holes in
-//   the world that ship instantly when filled) → THE BENCHES (every door in)
-//   → THE CHARTER (the promise that nobody can ever take this from you).
-// Deliberately no heavy payload fetches — detail pages do the lifting.
+//   world there already is — and the +1 that is you) → YOUR FIRST MARK (three
+//   ten-minute, no-skills-needed doors in) → THE BOARD (open proposals) →
+//   SHIPPED (the ledger, credited forever) → THE GAPS (holes in the world
+//   that ship instantly when filled) → THE BENCHES (every door in) → THE
+//   ENGINE ROOM (what one shared world costs, to the cent, and where koha
+//   goes) → THE CHARTER (the promise that nobody can ever take this from
+//   you). Deliberately no heavy payload fetches — detail pages do the lifting.
 "use strict";
 
 function pageHome(root) {
@@ -20,10 +22,12 @@ function pageHome(root) {
     page.appendChild(pulseTicker());
     page.appendChild(crewBlock());
     page.appendChild(censusBlock());
+    page.appendChild(firstMarksBlock());
     page.appendChild(boardBlock());
     page.appendChild(shippedBlock());
     page.appendChild(gapsBlock());
     page.appendChild(benchesBlock());
+    page.appendChild(engineRoomBlock());
     page.appendChild(charterBlock());
     root.appendChild(page);
     if (typeof FX !== "undefined") FX.reveal(root);
@@ -80,7 +84,8 @@ function heroBlock() {
       el("div.over", { html: "you found it &nbsp;·&nbsp; <span class='k'>nau mai, kaihanga</span> — welcome, builder" }),
       el("h1.hero-word", { html: "This world is<br><span class='aur'>not finished.</span>" }),
       el("p.hero-manifesto", { html:
-        "Taiao is a living RPG being built in the open — and this is the room it's built in. " +
+        "Our RPG means exactly what it says: a living world that belongs to the people " +
+        "who play it — and this is the room it's built in. " +
         "Every sprite, sound, quest and mechanic in the game came through these benches. " +
         "<em>The next one is yours.</em>" }),
       el("div.hero-sub", { text: "real tools · real credit · shipped to every player" }),
@@ -139,7 +144,7 @@ function crewBlock() {
   if (!Taiao.logged()) {
     box.appendChild(el("div.crew-card.fxr", null, [
       el("div.cc-top", null, [
-        el("span", { text: "Taiao · worldbuilding crew" }),
+        el("span", { text: "Our RPG · worldbuilding crew" }),
         el("span", { text: "badge unclaimed" }),
       ]),
       el("h2.cc-name", { text: "This badge is blank." }),
@@ -161,13 +166,13 @@ function crewBlock() {
   try { statVotes.textContent = String(Object.keys(JSON.parse(localStorage.getItem("studio_myvotes_v1") || "{}")).length); } catch (_) {}
   box.appendChild(el("div.crew-card.fxr", null, [
     el("div.cc-top", null, [
-      el("span", { text: "Taiao · worldbuilding crew" }),
+      el("span", { text: "Our RPG · worldbuilding crew" }),
       el("span", { text: u.curator ? "curator clearance" : "full bench access" }),
     ]),
     el("div", { style: "display:flex;justify-content:space-between;align-items:flex-end;gap:1rem;flex-wrap:wrap" }, [
       el("div", null, [
         el("h2.cc-name", { text: "@" + Taiao.username() }),
-        el("div.cc-role", { text: "worldbuilder — taiao dev crew" }),
+        el("div.cc-role", { text: "worldbuilder — our dev crew" }),
       ]),
       el("div.cc-no", null, [el("small", { text: "crew nº" }), document.createTextNode(no)]),
     ]),
@@ -213,10 +218,34 @@ function censusBlock() {
   return box;
 }
 
+// ---------- your first mark ----------
+// The niche-finder: three doors that need no code, no drawing skill, and no
+// prior anything — each one a real, countable change to the shared world.
+// The overwhelm-antidote is specificity: not "contribute!", but "here are
+// three ten-minute things, pick the one that sounds like you".
+function firstMarksBlock() {
+  const box = el("div");
+  box.appendChild(homeSectH("01 /", "Your first mark", "ten minutes · no skills needed"));
+  const grid = el("div.benches");
+  const door = (no, title, desc, href) => el("a.bench.fxr", { href }, [
+    el("span.b-no", { text: no }),
+    el("span.b-go", { text: "→" }),
+    el("div.b-t", { text: title }),
+    el("div.b-d", { text: desc }),
+  ]);
+  grid.appendChild(door("FIRST MARK", "Cast a vote", "Open any creature or item and tap 🗳 on the look you'd want in your game. It counts the moment you click, and a curator reads the tally before anything ships.", "#/monsters"));
+  grid.appendChild(door("FIRST MARK", "Name something", "Plenty of the world still wears placeholder names. Propose a better one and the community votes it in — a whole contribution, no tools required.", "#/items"));
+  grid.appendChild(door("FIRST MARK", "Judge the board", "Read what's up for adoption right now and endorse the ones that deserve to exist. Taste is a skill the Workshop is short of.", "#/sprites"));
+  box.appendChild(grid);
+  box.appendChild(el("p.tagline", { style: "margin:.6rem 0 0", text:
+    "The account is free and takes a minute, whenever you decide to act. Nothing here needs experience — the world was built by people who started with none." }));
+  return box;
+}
+
 // ---------- the board (open proposals) ----------
 function boardBlock() {
   const box = el("div");
-  box.appendChild(homeSectH("01 /", "The board", "open for votes now"));
+  box.appendChild(homeSectH("02 /", "The board", "open for votes now"));
   const card = el("div.card.fxr");
   const body = el("div.ledger", null, [el("div.tagline", { text: "Reading the board…" })]);
   card.appendChild(body);
@@ -225,7 +254,7 @@ function boardBlock() {
     const r = await Taiao.listProposalsRaw();
     clear(body);
     if (!r || r.error || !Array.isArray(r.proposals)) {
-      body.appendChild(el("div.banner.warn", { text: "Couldn't reach the Taiao server — the board will be back." }));
+      body.appendChild(el("div.banner.warn", { text: "Couldn't reach the server — the board will be back." }));
       return;
     }
     const rows = r.proposals.slice(0, 10);
@@ -245,7 +274,7 @@ function boardBlock() {
 // ---------- shipped (the credited ledger) ----------
 function shippedBlock() {
   const box = el("div");
-  box.appendChild(homeSectH("02 /", "Shipped", "credited forever"));
+  box.appendChild(homeSectH("03 /", "Shipped", "credited forever"));
   const card = el("div.card.fxr");
   const body = el("div.ledger", null, [el("div.tagline", { text: "Opening the ledger…" })]);
   card.appendChild(body);
@@ -254,7 +283,7 @@ function shippedBlock() {
     const r = await Taiao.listProposalsRaw("accepted");
     clear(body);
     if (!r || r.error || !Array.isArray(r.proposals)) {
-      body.appendChild(el("div.banner.warn", { text: "Couldn't reach the Taiao server — the ledger will be back." }));
+      body.appendChild(el("div.banner.warn", { text: "Couldn't reach the server — the ledger will be back." }));
       return;
     }
     const rows = r.proposals.slice(0, 10);
@@ -271,6 +300,12 @@ function shippedBlock() {
       ]),
       el("span.by", { text: "@" + (p.username || "someone") }),
     ])));
+    // the crew, counted: distinct makers across the WHOLE accepted ledger,
+    // not just the ten rows shown — the game is provably many hands' work
+    const makers = new Set(r.proposals.map(p => p.username).filter(Boolean));
+    if (makers.size)
+      body.appendChild(el("div.tagline", { style: "margin-top:.6rem", text:
+        makers.size + " builder" + (makers.size === 1 ? " has" : "s have") + " work living in everyone's game." }));
   })();
   return box;
 }
@@ -279,7 +314,7 @@ function shippedBlock() {
 function gapsBlock() {
   const gaps = (typeof WORKSHOP_GAPS !== "undefined" && WORKSHOP_GAPS.gaps) || [];
   const box = el("div");
-  box.appendChild(homeSectH("03 /", "The gaps", gaps.length ? gaps.length + " holes in the world" : "surveyed"));
+  box.appendChild(homeSectH("04 /", "The gaps", gaps.length ? gaps.length + " holes in the world" : "surveyed"));
   const card = el("div.card.fxr");
   if (!gaps.length) {
     card.appendChild(el("p.tagline", { style: "margin:0", text: "Every surveyed gap is currently filled. New ones appear as the world grows — check back, or open a bench below." }));
@@ -301,7 +336,7 @@ function gapsBlock() {
 // ---------- the benches ----------
 function benchesBlock() {
   const box = el("div");
-  box.appendChild(homeSectH("04 /", "The benches", "pick up a tool"));
+  box.appendChild(homeSectH("05 /", "The benches", "pick up a tool"));
   const grid = el("div.benches");
   const bench = (no, title, desc, href) => el("a.bench.fxr", { href }, [
     el("span.b-no", { text: no }),
@@ -319,6 +354,47 @@ function benchesBlock() {
     grid.appendChild(bench("THE DESK", "Curator review", "The moderation desk: approve uploads, adopt winners into everyone's game.", "#/review"));
   }
   box.appendChild(grid);
+  return box;
+}
+
+// ---------- the engine room ----------
+// Koha, shown rather than asked for: the real monthly bill, published to the
+// cent, next to what it keeps running. No paywall exists to soften, no perk
+// is for sale — the only persuasion here is a machine room with the door
+// open. (docs/koha.md is the governing text; this section must never promise
+// recognition or reward — the game remembers helpers, not payers.)
+function engineRoomBlock() {
+  const box = el("div");
+  box.appendChild(homeSectH("06 /", "The engine room", "one shared world, kept lit"));
+  const card = el("div.card.fxr");
+  const live = el("p", { style: "margin:0 0 .6rem", text: "Reading the meter…" });
+  card.appendChild(live);
+  card.appendChild(el("p", { style: "margin:0 0 .6rem", html:
+    "That bill — and the PixelLab generation credits that fire the gaps board's art into everyone's game — " +
+    "is what <b>koha</b> pays for. A koha is a gift, never a fee: nothing in the game or this room is metered, " +
+    "gated, or better for those who give, and the licence makes that permanent. " +
+    "The server is GPL and self-hostable if you'd rather bring your own." }));
+  card.appendChild(el("div.btn-row", null, [
+    el("a.btn.ghost", { href: "https://ko-fi.com/taiao", rel: "noopener", target: "_blank", text: "leave a koha ↗" }),
+    el("a", { href: "https://github.com/dataversion5372/Taiao/blob/main/docs/koha.md", rel: "noopener", target: "_blank",
+      style: "align-self:center", text: "the whole honest ledger →" }),
+  ]));
+  box.appendChild(card);
+  (async () => {
+    try {
+      const r = await Taiao.call("/api/koha/transparency");
+      if (r && r.ok && r.current) {
+        const usd = (r.current.usd_cents / 100).toFixed(2);
+        const per = r.players30d > 0 ? (r.current.usd_cents / r.players30d).toFixed(1) : null;
+        live.innerHTML = "Running the whole shared world — the save vault, the vote tallies, the town ledgers, this site — cost " +
+          "<b>$" + usd + "</b> in " + r.current.month +
+          (r.players30d > 1 ? ", across <b>" + r.players30d + "</b> players: about <b>" + per + "¢ each</b>. " : ". ") +
+          "The meter is public, to the cent.";
+        return;
+      }
+    } catch (_) {}
+    live.textContent = "The live meter publishes at /api/koha/transparency whenever the server is reachable — a real dollar figure, to the cent, updated monthly.";
+  })();
   return box;
 }
 

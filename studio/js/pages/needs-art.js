@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — "Needs art" hub =====
+// ===== Our RPG Workshop — "Needs art" hub =====
 // The instant-ship lane, front and centre. studio/tools/gen_gaps.mjs audits
 // the live game data for items with no icon and monsters stuck on one
 // billboard sprite, and writes the result to WORKSHOP_GAPS (gaps-data.js,

@@ -156,8 +156,8 @@ const DIRS = [
 
 // ---------------- architecture preamble (verbatim per spec) ----------------
 
-const PREAMBLE = `# Taiao — codebase orientation
-Taiao is an open-source (GPL-3.0 + CC BY-SA) cozy multiplayer browser RPG. Plain-JS, no
+const PREAMBLE = `# Our RPG (formerly Taiao) — codebase orientation
+Our RPG (formerly Taiao) is an open-source (GPL-3.0 + CC BY-SA) cozy multiplayer browser RPG. Plain-JS, no
 framework: every file in tools/bundle.list is concatenated + minified by tools/build.mjs
 into dist/bundle.js, which index.html loads. Rendering is js/render3d.js — a three.js
 scene of billboard sprites over generated terrain, with structural 3D walls/roofs.

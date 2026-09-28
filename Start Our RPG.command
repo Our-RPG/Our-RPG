@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch Taiao over a tiny local web server.
+# Launch Our RPG over a tiny local web server.
 # The sprite sheets live in separate assets/sheets/*.webp files, and browsers
 # refuse to feed file:// images to WebGL -- so the game must be served over
 # http. Double-click this instead of opening index.html directly.
@@ -11,7 +11,7 @@
 # PRINTS what went wrong and keeps the window open, instead of hiding every
 # error in /dev/null.
 
-cd "$(dirname "$0")" || { echo "Taiao: couldn't enter the game folder."; read -r -p "Press Return to close. " _; exit 1; }
+cd "$(dirname "$0")" || { echo "Our RPG: couldn't enter the game folder."; read -r -p "Press Return to close. " _; exit 1; }
 PORT=8899
 URL="http://localhost:$PORT/index.html"
 LOG="${TMPDIR:-/tmp}/taiao-server.log"
@@ -24,7 +24,7 @@ if [ -z "$PY" ]; then
   done
 fi
 if [ -z "$PY" ]; then
-  echo "Taiao: python3 wasn't found. Install Python 3, then double-click again."
+  echo "Our RPG: python3 wasn't found. Install Python 3, then double-click again."
   echo "(Or start any local web server in this folder and open $URL)"
   read -r -p "Press Return to close. " _; exit 1
 fi
@@ -33,10 +33,10 @@ fi
 responds() { [ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' "$URL" 2>/dev/null)" = "200" ]; }
 
 start_server() {
-  echo "Taiao: starting the local server on port $PORT..."
+  echo "Our RPG: starting the local server on port $PORT..."
   nohup "$PY" tools/serve.py "$PORT" >"$LOG" 2>&1 &
   for _ in $(seq 1 40); do responds && return 0; sleep 0.15; done
-  echo "Taiao: serve.py didn't come up -- trying the built-in server instead..."
+  echo "Our RPG: serve.py didn't come up -- trying the built-in server instead..."
   nohup "$PY" -m http.server "$PORT" >"$LOG" 2>&1 &
   for _ in $(seq 1 40); do responds && return 0; sleep 0.15; done
   return 1
@@ -61,27 +61,27 @@ elif [ -n "$(find js tools/bundle.list tools/build.mjs -newer dist/bundle.js -pr
 fi
 if [ -n "$STALE" ]; then
   if [ -n "$NODE_BIN" ]; then
-    echo "Taiao: source files changed -- rebuilding dist/bundle.js..."
+    echo "Our RPG: source files changed -- rebuilding dist/bundle.js..."
     if ! "$NODE_BIN" tools/build.mjs; then
-      echo "Taiao: THE BUILD FAILED -- the game will run the PREVIOUS bundle."
+      echo "Our RPG: THE BUILD FAILED -- the game will run the PREVIOUS bundle."
       echo "Fix the error above and double-click again."
     fi
   else
-    echo "Taiao: WARNING -- source files are newer than dist/bundle.js, but node"
+    echo "Our RPG: WARNING -- source files are newer than dist/bundle.js, but node"
     echo "wasn't found, so your edits are NOT in the game. Install Node.js or run:"
     echo "    node tools/build.mjs"
   fi
 fi
 
 if responds; then
-  echo "Taiao: a server is already running on port $PORT."
+  echo "Our RPG: a server is already running on port $PORT."
 else
   # nothing answered -- clear anything wedged on the port, then (re)start fresh
   PIDS="$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null)"
-  [ -n "$PIDS" ] && { echo "Taiao: clearing an unresponsive server on port $PORT..."; kill $PIDS 2>/dev/null; sleep 0.5; }
+  [ -n "$PIDS" ] && { echo "Our RPG: clearing an unresponsive server on port $PORT..."; kill $PIDS 2>/dev/null; sleep 0.5; }
   if ! start_server; then
     echo
-    echo "Taiao: couldn't start the web server. Last output:"
+    echo "Our RPG: couldn't start the web server. Last output:"
     echo "------------------------------------------------------------"
     [ -f "$LOG" ] && tail -n 20 "$LOG"
     echo "------------------------------------------------------------"
@@ -89,6 +89,6 @@ else
   fi
 fi
 
-echo "Taiao is running. Opening $URL"
+echo "Our RPG is running. Opening $URL"
 echo "(If the page is blank or looks broken, press Shift-Reload once -- that clears an old cached version.)"
 open "$URL"

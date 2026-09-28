@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — the ubiquitous vote symbol =====
+// ===== Our RPG Workshop — the ubiquitous vote symbol =====
 // One reusable ballot control used anywhere in the studio. Call
 // VoteWidget.symbol(opts) to get a small clickable "🗳" glyph; clicking it opens
 // a popover with the right input for the field — a number box, a free-text box,

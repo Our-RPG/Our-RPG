@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — game-data shim =====
+// ===== Our RPG Workshop — game-data shim =====
 // The studio loads a slice of the game's own data layer (data.js, content.js,
 // biome-tiles.js, the icon atlases, …) so every in-game asset is browsable
 // here. Those files normally sit after js/main/assets.js, which defines the

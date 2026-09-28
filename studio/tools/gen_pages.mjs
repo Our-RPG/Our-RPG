@@ -52,12 +52,12 @@ const page = (title, cfg) =>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title ? "Taiao Workshop — " + title : "Taiao Workshop"}</title>
+  <title>${title ? "Our RPG Workshop — " + title : "Our RPG Workshop"}</title>
   ${iconTag}
   <link rel="stylesheet" href="{{ROOT}}css/studio.css">
 </head>
 <body>
-  <noscript><p style="padding:2rem">Taiao Workshop needs JavaScript.</p></noscript>
+  <noscript><p style="padding:2rem">Our RPG Workshop needs JavaScript.</p></noscript>
   <script>window.STUDIO_ROOT = "{{ROOT}}"; window.STUDIO_PAGE = ${JSON.stringify(cfg)};</script>
   <script src="{{ROOT}}${SITE_OUT ? "dist/workshop-bundle.js" : "js/page-loader.js"}"></script>
 </body>

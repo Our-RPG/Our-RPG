@@ -801,7 +801,15 @@ function killMonster(mon) {
   mon.target = null;
   // bestiary: record the slaying so this creature is revealed in the bestiary
   if (!player.kills) player.kills = {};
+  const firstOfKind = !player.kills[mon.kind];
   player.kills[mon.kind] = (player.kills[mon.kind] || 0) + 1;
+  // a species' first fall is a discovery, not just a kill — the bestiary
+  // used to unlock silently; now the moment is named while it's happening
+  if (firstOfKind) {
+    const seen = Object.keys(player.kills).length;
+    log(`First ${(typeof monName === "function" ? monName(mon) : def.name)} — bestiary page ${seen} (press B).`, "gold");
+    sfx("quest", 0.35);
+  }
   if (typeof Quests !== "undefined") Quests.onKill(mon.kind);   // quest slay objectives
   if (typeof Lua !== "undefined" && Lua.ready) Lua.onKill(mon.kind); // Lua on_kill event triggers (js/lua)
   if (typeof Tutorial !== "undefined" && Tutorial.onKill) Tutorial.onKill(mon.kind); // isle stage task

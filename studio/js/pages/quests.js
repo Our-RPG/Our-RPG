@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Quests =====
+// ===== Our RPG Workshop — Quests =====
 // Every quest in the game (currently everything loaded from zone[0,0]). Two kinds:
 //   • hand-authored quests (Newhaven givers + world objects) — the real Lua,
 //     inlined by tools/build.mjs into js/lua/lua-src-gen.js as LUA_SRC["quests/<id>"].

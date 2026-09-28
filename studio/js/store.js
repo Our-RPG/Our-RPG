@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — local project library (IndexedDB) =====
+// ===== Our RPG Workshop — local project library (IndexedDB) =====
 // Everything a player generates lives here on their own device: characters &
 // objects, each with variant states/costumes, animations and direction sets,
 // plus the design metadata the game needs (name, bio, spawning rules,

@@ -1,4 +1,4 @@
-// ===== Taiao — postcards =====
+// ===== Our RPG — postcards =====
 // A shareable snapshot with a caption baked in: world seed, tile coordinates
 // and the nearest named place (or biome, in the wilds). Three entry points:
 //   - the minimap "Postcard" button — a screenshot of wherever you're standing
@@ -39,7 +39,7 @@ const Postcard = (function () {
     const biome = biomeLabel(x, y);
     const where = place ? (place.dist < 6 ? place.name : `near ${place.name}`) : (biome || "the wilds");
     return {
-      title: "Taiao",
+      title: "Our RPG",
       where,
       coordsLabel: `(${x}, ${y})`,
       seedLabel: `world ${seed}`,
@@ -57,7 +57,7 @@ const Postcard = (function () {
   }
 
   function drawCaptionBar(ctx, w, h, meta) {
-    const barH = Math.max(56, Math.round(h * 0.09));
+    const barH = Math.max(68, Math.round(h * 0.115));
     const y0 = h - barH;
     const g = ctx.createLinearGradient(0, y0, 0, h);
     g.addColorStop(0, "rgba(10,8,16,0)");
@@ -65,16 +65,22 @@ const Postcard = (function () {
     g.addColorStop(1, "rgba(10,8,16,0.92)");
     ctx.fillStyle = g;
     ctx.fillRect(0, y0, w, barH);
-    const fs1 = Math.max(14, Math.round(barH * 0.34));
-    const fs2 = Math.max(10, Math.round(barH * 0.22));
-    const padX = barH * 0.35;
+    const fs1 = Math.max(14, Math.round(barH * 0.28));
+    const fs2 = Math.max(10, Math.round(barH * 0.18));
+    const fs3 = Math.max(9, Math.round(barH * 0.15));
+    const padX = barH * 0.3;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#ffe97a";
     ctx.font = `bold ${fs1}px sans-serif`;
-    ctx.fillText(`${meta.title} — ${meta.where}`, padX, h - barH * 0.42);
+    ctx.fillText(`${meta.title} — ${meta.where}`, padX, h - barH * 0.58);
     ctx.fillStyle = "#c9c0dd";
     ctx.font = `${fs2}px sans-serif`;
-    ctx.fillText(`${meta.coordsLabel} · ${meta.seedLabel} · ${meta.dateLabel}`, padX, h - barH * 0.14);
+    ctx.fillText(`${meta.coordsLabel} · ${meta.seedLabel} · ${meta.dateLabel}`, padX, h - barH * 0.36);
+    // the quiet invitation: every postcard doubles as a working set of
+    // directions, because the whole community plays the one seed
+    ctx.fillStyle = "#8f86a8";
+    ctx.font = `italic ${fs3}px sans-serif`;
+    ctx.fillText("everyone plays this same world — a place you find is a place a friend can visit", padX, h - barH * 0.16);
   }
 
   function download(canvas, filename) {
@@ -107,8 +113,8 @@ const Postcard = (function () {
       const meta = captionMeta();
       drawCaptionBar(ctx, cv.width, cv.height, meta);
       drawFrame(ctx, cv.width, cv.height);
-      download(cv, `taiao-postcard-${meta.x}_${meta.y}.png`);
-      toast("Postcard saved.");
+      download(cv, `our-rpg-postcard-${meta.x}_${meta.y}.png`);
+      toast("Postcard saved — its coordinates work in any copy of the world.");
     } catch (e) { console.error("postcard capture:", e); toast("Couldn't save a postcard this time.", "warn"); }
   }
 
@@ -131,7 +137,7 @@ const Postcard = (function () {
       const overlay = document.getElementById("overlay");
       if (overlay && overlay.width) ctx.drawImage(overlay, 0, 0, cv.width, cv.height);
       const meta = captionMeta();
-      meta.title = "Taiao — crossed the Bifrost";
+      meta.title = "Our RPG — crossed the Bifrost";
       drawCaptionBar(ctx, cv.width, cv.height, meta);
       drawFrame(ctx, cv.width, cv.height);
       return cv;
@@ -146,7 +152,7 @@ const Postcard = (function () {
     el.style.cssText = "position:absolute;right:14px;bottom:64px;z-index:60;background:#241d38;border:1px solid #6b5c8a;color:#ffe97a;padding:8px 12px;font-size:12px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.4);";
     el.textContent = "🌈 Save this crossing";
     el.onclick = () => {
-      if (keepsakeCv) download(keepsakeCv, "taiao-bifrost-crossing.png");
+      if (keepsakeCv) download(keepsakeCv, "our-rpg-bifrost-crossing.png");
       el.remove();
     };
     (document.getElementById("gamecol") || document.body).appendChild(el);
@@ -209,13 +215,13 @@ const Postcard = (function () {
     }
     ctx.fillStyle = "#5d5478";
     ctx.font = "11px sans-serif";
-    ctx.fillText(`Taiao — world ${(typeof WORLD_SEED !== "undefined") ? WORLD_SEED : 1337} — ${new Date().toLocaleDateString()}`, 36, H - 24);
+    ctx.fillText(`Our RPG — world ${(typeof WORLD_SEED !== "undefined") ? WORLD_SEED : 1337} — ${new Date().toLocaleDateString()}`, 36, H - 24);
     return cv;
   }
 
   function exportPulseCard(report) {
     const cv = renderPulseCard(report);
-    download(cv, "taiao-pulse-card.png");
+    download(cv, "our-rpg-pulse-card.png");
     toast("Pulse card saved.");
   }
 

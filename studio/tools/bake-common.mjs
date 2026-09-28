@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — shared zone-bake pieces =====
+// ===== Our RPG Workshop — shared zone-bake pieces =====
 // The pass list, per-pass runner, and per-zone page template shared by
 // bake-server.mjs (the Zones tab's "Generate zone" button — a local HTTP
 // server) and bake-zone.mjs (its CLI twin: `node studio/tools/bake-zone.mjs
@@ -58,12 +58,12 @@ export const zonePage = (zx, zy) =>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Taiao Workshop — Zone ${zx},${zy}</title>
+  <title>Our RPG Workshop — Zone ${zx},${zy}</title>
   ${ICON}
   <link rel="stylesheet" href="../css/studio.css">
 </head>
 <body>
-  <noscript><p style="padding:2rem">Taiao Workshop needs JavaScript.</p></noscript>
+  <noscript><p style="padding:2rem">Our RPG Workshop needs JavaScript.</p></noscript>
   <script>window.STUDIO_PAGE = ${JSON.stringify({ kind: "zones", tab: "zones", zx, zy })};</script>
   <script src="../js/page-loader.js"></script>
 </body>

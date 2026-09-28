@@ -1,7 +1,7 @@
-// ===== Taiao Workshop — Settings page =====
+// ===== Our RPG Workshop — Settings page =====
 // Three keys/accounts meet here and never mix: the PixelLab API key (local-
 // only, for generating art), the Anthropic API key (local-only, for the Ideas
-// tab's design copilot), and the Taiao account (for community voting). Plus
+// tab's design copilot), and the game account (for community voting). Plus
 // the server origin and an optional Turnstile sitekey for self-hosters.
 "use strict";
 
@@ -14,7 +14,7 @@ function pageSettings(root) {
   keyCard.appendChild(el("h3", null, ["PixelLab API key ", el("span.hint", { text: "generates the art" })]));
   keyCard.appendChild(el("p.tagline", { html:
     'Get a key at <a href="https://pixellab.ai/account" target="_blank" rel="noopener">pixellab.ai/account</a>. ' +
-    'It is stored <b>only in this browser</b> and sent <b>only to api.pixellab.ai</b> — never to the Taiao server. ' +
+    'It is stored <b>only in this browser</b> and sent <b>only to api.pixellab.ai</b> — never to the game server. ' +
     'On a shared computer, clear it when you\'re done.' }));
 
   const status = el("div.banner");
@@ -50,7 +50,7 @@ function pageSettings(root) {
   llmCard.appendChild(el("h3", null, ["AI copilot key ", el("span.hint", { text: "develops Ideas into design docs" })]));
   llmCard.appendChild(el("p.tagline", { text:
     "Powers the Ideas tab's design copilot. Your Anthropic API key is stored only in this browser and sent only to " +
-    "api.anthropic.com — never to the Taiao server. Get one at console.anthropic.com. Usage is billed to YOUR " +
+    "api.anthropic.com — never to the game server. Get one at console.anthropic.com. Usage is billed to YOUR " +
     "Anthropic account." }));
 
   const llmStatus = el("div.banner");
@@ -87,9 +87,9 @@ function pageSettings(root) {
   const clearLlmKey = el("button.btn.danger", { text: "Forget key", onclick: () => { LLM.setKey(""); refreshLlmStatus(); toast("Key removed from this browser.", "ok"); } });
   llmCard.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [saveLlmKey, testLlmKey, clearLlmKey]));
 
-  // ---- Taiao account ----
+  // ---- game account ----
   const acctCard = el("div.card");
-  acctCard.appendChild(el("h3", null, ["Taiao account ", el("span.hint", { text: "for community voting & credit" })]));
+  acctCard.appendChild(el("h3", null, ["Game account ", el("span.hint", { text: "for community voting & credit" })]));
   const acctBody = el("div");
   acctCard.appendChild(acctBody);
   renderAccount(acctBody);
@@ -100,7 +100,7 @@ function pageSettings(root) {
   advCard.appendChild(el("h3", null, ["Advanced ", el("span.hint", { text: "self-hosting" })]));
   const srv = el("input", { type: "text", value: Taiao.getServerUrl(), placeholder: CFG.TAIAO_SERVER_DEFAULT });
   const site = el("input", { type: "text", value: Taiao.sitekey(), placeholder: "Turnstile sitekey (optional)" });
-  advCard.appendChild(el("label.field", null, [el("span", { text: "Taiao server origin" }), srv]));
+  advCard.appendChild(el("label.field", null, [el("span", { text: "Game server origin" }), srv]));
   advCard.appendChild(el("label.field", null, [el("span", { text: "Turnstile sitekey — only if your worker enforces it" }), site]));
   advCard.appendChild(el("button.btn", { text: "Save server settings", onclick: () => {
     Taiao.setServerUrl(srv.value.trim() || CFG.TAIAO_SERVER_DEFAULT);
@@ -184,7 +184,7 @@ function renderAccount(host) {
     if (!r.ok) toast(r.error || "Passkey sign-in failed.", "err", 5000);
   } });
   host.appendChild(el("div.btn-row", null, [doLogin, doReg, doPasskey]));
-  host.appendChild(el("p.tagline", { style: "margin-top:.5rem", html: "It's the same account as the Taiao game — sign in with what you already use, or make one here." }));
+  host.appendChild(el("p.tagline", { style: "margin-top:.5rem", html: "It's the same account as the game — sign in with what you already use, or make one here." }));
 
   // Itch runs the game on a different origin, so this browser can't see a
   // session started there — a one-time code (minted in-game, Account →

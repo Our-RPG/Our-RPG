@@ -125,7 +125,7 @@ export async function registerOptions(req, env) {
     ok: true,
     publicKey: {
       challenge,
-      rp: { id: rpIdFor(req, env), name: "Taiao" },
+      rp: { id: rpIdFor(req, env), name: "Our RPG" },
       user: { id: b64uEncode(new TextEncoder().encode("u" + user.id)), name: user.username, displayName: user.username },
       pubKeyCredParams: [{ type: "public-key", alg: -7 }], // ES256
       authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },

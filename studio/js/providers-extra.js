@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — providers for monsters, tiles, UI & sounds =====
+// ===== Our RPG Workshop — providers for monsters, tiles, UI & sounds =====
 // These read the game's own data layer (loaded in index.html): the universal
 // SPR sprite table, the MONSTERS registry, biome/flat tiles, the map-icon &
 // gear-icon atlases, and the audio manifest. A self-contained port of the

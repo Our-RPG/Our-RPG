@@ -3,7 +3,7 @@
 *Koha (Māori): a gift, given without obligation, that carries its own
 mana — freely given, and freely able to be declined.*
 
-Taiao began with no server, no accounts, and no telemetry — and the game
+Our RPG began with no server, no accounts, and no telemetry — and the game
 still works exactly that way, offline, forever: the license guarantees it
 keeps working regardless of who's paying for what (see
 [Licensing](../README.md#licensing)). Nothing about the game is metered,
@@ -23,7 +23,7 @@ it live. Anyone can also self-host it, which is the strongest form of the
 - **The server bill.** The vault, the tallies, the lists — a few dollars a
   month, shown to the cent on the transparency endpoint. As the community
   grows, cost-per-player falls; the numbers tell that story themselves.
-- **Cultural consultation.** Taiao's identity draws on te ao Māori; doing
+- **Cultural consultation.** Our RPG's identity draws on te ao Māori; doing
   that right at community scale means paying practitioners for guidance,
   review, and partnership — the most important koha line there is.
 - **Generation credits.** New creatures, items and biome art are generated

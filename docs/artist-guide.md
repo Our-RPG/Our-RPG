@@ -1,6 +1,6 @@
 # Artist walkthrough: the object workshop
 
-You don't need to touch a line of code to put art or ideas into Taiao. This
+You don't need to touch a line of code to put art or ideas into Our RPG. This
 walks through the whole loop, start to finish, for someone who's never
 opened a repository before.
 
@@ -55,7 +55,7 @@ until a maintainer folds it in by hand.
 
 Happy with your changes to a particular object? Click **"Export my
 proposal"** at the top of the panel. It downloads one file,
-`taiao-proposal-<type>-<key>.json`, holding everything you did for that
+`our-rpg-proposal-<type>-<key>.json`, holding everything you did for that
 object: your votes, your suggested properties, and your uploaded art
 (embedded as image data, so the file is self-contained).
 

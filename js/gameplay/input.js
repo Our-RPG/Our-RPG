@@ -1,4 +1,4 @@
-// ===== Taiao — mouse, keyboard, target picking, and context menus =====
+// ===== Our RPG — mouse, keyboard, target picking, and context menus =====
 "use strict";
 
 // ---------- input ----------
@@ -397,6 +397,10 @@ function buildTileMenu(t) {
       : `Tilled ${tg.node.skill || "farm"} soil, ready for ${tg.node.skill || "any"} seed.`;
     else if (tg.kind === "placed") {
       exam = EXAMINE[tg.ent.id] || ITEMS[tg.ent.id].name;
+      if (typeof ProposalOverlay !== "undefined") {
+        const u = ProposalOverlay.credit("item:" + tg.ent.id);
+        if (u) exam += " Made by @" + u + " — Our RPG Workshop.";
+      }
       if (ITEMS[tg.ent.id].ride)
         items.push({ label: `Pick up ${ITEMS[tg.ent.id].name}`,
           fn: () => {
@@ -478,7 +482,7 @@ function buildTileMenu(t) {
           if (typeof Eggs !== "undefined" && Eggs.onExamine) Eggs.onExamine(dk, t.x, t.y);
           if (typeof ProposalOverlay !== "undefined") {
             const u = ProposalOverlay.credit("object:" + dk.split("#")[0]);
-            if (u) log("Made by @" + u + " — Taiao Workshop.", "sys");
+            if (u) log("Made by @" + u + " — Our RPG Workshop.", "sys");
           }
         } });
       }
@@ -606,6 +610,14 @@ window.addEventListener("keydown", e => {
     return;
   }
   if (e.key === "m" || e.key === "M") { wm.open ? closeWorldMap() : openWorldMap(); return; }
+  // K saves a postcard: a framed snapshot with the place, coordinates and
+  // world seed baked in (gameplay/postcard.js). One shared seed means every
+  // postcard is a working set of directions for a friend.
+  if ((e.key === "k" || e.key === "K") && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    if (typeof Postcard !== "undefined") Postcard.captureWorld();
+    e.preventDefault();
+    return;
+  }
   // N notes an odd sound in the bird recordings (a voice, a siren) — logs the
   // playing clips + offsets for the clean-up tool (gameplay/birdsong.js)
   if ((e.key === "n" || e.key === "N") && !e.altKey && !e.ctrlKey && !e.metaKey) {

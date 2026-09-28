@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8">
-		<title>Taiao — Offline RPG</title>
+		<title>Our RPG — an endless world, built by everyone who plays it</title>
 		<link rel="stylesheet" href="css/style.css">
 	</head>
 	<body>
@@ -15,8 +15,8 @@
 		     per hydrated chunk, per generated chunk). main.js drives it via
 		     window.__boot.stage()/sub()/done(). -->
 		<div id="bootload" role="status" aria-busy="true">
-		  <div id="bl-title">Taiao</div>
-		  <div id="bl-sub">the natural world</div>
+		  <div id="bl-title">Our RPG</div>
+		  <div id="bl-sub">free · endless · ours</div>
 		  <div id="bl-tag">an unfinished world · built by the people who play it</div>
 		  <div id="bl-track"><div id="bl-fill"></div></div>
 		  <div id="bl-stage">Loading game code…</div>
@@ -86,7 +86,7 @@
 		    ["atlas", "Baking the sprite atlas…", 2500, 650],
 		    ["firstChunks", "Raising the terrain…", 500, 550],
 		    ["renderer", null, 10, 10],
-		    ["gameReady", "Entering Taiao…", 5, 5],
+		    ["gameReady", "Entering our world…", 5, 5],
 		  ];
 		  // a save in storage means the NEXT boot is warm-shaped — the same test
 		  // that decides which shape the boot will actually take. Either mode's
@@ -331,8 +331,8 @@
 			<div id="panel-account" class="panel"><!-- built by js/net/account-ui.js in server-enabled builds --></div>
 			<div id="panel-cheats" class="panel"><!-- built by js/gameplay/cheats.js in DEV_MODE builds --></div>
 			<div id="panel-help" class="panel">
-			  <h3>Taiao</h3>
-				  <p>An offline single-player tribute to old-school tile MMOs. You start in the city of <b>Newhaven</b>; 37 biomes stretch out forever in every direction, each with its own creatures.</p>
+			  <h3>Our RPG</h3>
+				  <p>An offline single-player tribute to old-school tile MMOs — built, piece by piece, by the people who play it. You start in the city of <b>Newhaven</b>; 37 biomes stretch out forever in every direction, each with its own creatures.</p>
 			  <ul>
 				<li><b>Left-click</b>: walk / gather / attack / talk</li>
 				<li><b>Right-click</b>: context menu · <b>WASD</b>: walk</li>
@@ -349,6 +349,7 @@
 				<li><b>Villages</b> dot the wilderness — talk to villagers, trade with their merchants.</li>
 				<li><b>Sailing</b>: build a canoe/sailboat/ship at a shipyard (Shipwrighting), then click across rivers, lakes and seas. Deep-water fishing spots hold the best fish.</li>
 				<li><b>World map (M)</b>: everywhere you've explored, with hover icons for banks, villages, resources and mob camps. Scroll to zoom, drag to pan.</li>
+				<li><b>Postcard (K)</b>: saves a framed snapshot of the view, stamped with the place, coordinates and world. Everyone plays the same world — a postcard is an invitation, and its coordinates work in any copy of the game.</li>
 				<li>Trade at the <b>general store</b>. Bank at the <b>chest</b>. Eat food to heal. Autosaves.</li>
 				<li>Resources get richer with distance: 32 tiers each of trees, ores, fish, herbs, crops, runes and more.</li>
 			  </ul>
@@ -368,15 +369,16 @@
 				      <option value="on">On — help improve the game</option>
 				      <option value="off">Off</option>
 				    </select></label>
-				  <p class="hint">When on, the game sends anonymous play events (moves, clicks, crafting, fights, menus) to the Taiao server so we can see which parts of the game are fun and which need work. No chat text, no personal data; tied to your account only if you're logged in.</p>
+				  <p class="hint">When on, the game sends anonymous play events (moves, clicks, crafting, fights, menus) to the game's server so we can see which parts of the game are fun and which need work. No chat text, no personal data; tied to your account only if you're logged in.</p>
 				  <h4 style="margin:10px 0 4px">Community</h4>
 				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0"><input type="checkbox" id="communitysel"> Community content (adopted art &amp; sounds)</label>
 				  <p class="hint">Sprites and sounds the community's Workshop has adopted quietly replace the placeholder/default art in your own game — a shared coat of paint, no download or install. Turn it off to play with the stock art only. Your own submitted-and-adopted proposals always show for you regardless of this setting.</p>
 				  <small id="community-status"></small>
 				  <div id="help-workshop-block">
-				  <h4 style="margin:10px 0 4px">Taiao Workshop</h4>
-				  <p>The open dev room where this game is made — players generate the art, write the
-				  quests, tune the world, and ship it to everyone. Same account as the game.
+				  <h4 style="margin:10px 0 4px">Our RPG Workshop</h4>
+				  <p>The room this game is built in — players generate the art, write the
+				  quests, tune the world, and ship it to everyone. No coding or drawing skill needed:
+				  votes, names and ideas count as much as sprites. Same account as the game.
 				  <a id="help-workshop" href="#" target="_blank" rel="noopener">Open the Workshop ↗</a></p>
 				  </div>
 				  <h4 style="margin:10px 0 4px">Sound</h4>
@@ -397,7 +399,7 @@
 				  <p class="hint">Save/load a real <code>.json</code> file on disk, independent of browser storage — use it as a backup or to move your character between browsers/computers.</p>
 				  <p class="hint">3D needs WebGL: hard-refresh (Cmd+Shift+R), enable hardware acceleration in your browser's performance settings, and allow this page in any canvas/fingerprint-blocking extension.</p>
 			  <h4 style="margin:10px 0 4px">Credits &amp; licences</h4>
-			  <p class="credits">Art: Kenney.nl roguelike packs (CC0) · "Tiny Creatures" by Clint Bellanger (CC0) · custom sprites made for Taiao (PixelLab + hand-drawn, CC BY-SA). Sounds: CC0 from Kenney.nl &amp; OpenGameArt — every file credited in <code>assets/sfx/CREDITS.txt</code>. Birdsong: real xeno-canto recordings (CC BY-NC-SA), each recordist credited in <code>assets/birdsong/CREDITS.txt</code>. Music: Bifrost theme "Frozen Star" by Kevin MacLeod, incompetech.com (CC BY 4.0, <code>assets/music/CREDITS.txt</code>); exploration music is generated live by the game itself. Font: OpenDyslexic (SIL OFL). Engines: three.js (MIT). Code: GPL-3.0-or-later — Taiao is free and licensed to stay that way, forever.</p>
+			  <p class="credits">Art: Kenney.nl roguelike packs (CC0) · "Tiny Creatures" by Clint Bellanger (CC0) · custom sprites made for Our RPG (PixelLab + hand-drawn, CC BY-SA). Sounds: CC0 from Kenney.nl &amp; OpenGameArt — every file credited in <code>assets/sfx/CREDITS.txt</code>. Birdsong: real xeno-canto recordings (CC BY-NC-SA), each recordist credited in <code>assets/birdsong/CREDITS.txt</code>. Music: Bifrost theme "Frozen Star" by Kevin MacLeod, incompetech.com (CC BY 4.0, <code>assets/music/CREDITS.txt</code>); exploration music is generated live by the game itself. Font: OpenDyslexic (SIL OFL). Engines: three.js (MIT). Code: GPL-3.0-or-later — Our RPG is free and licensed to stay that way, forever. It began as <i>Taiao</i>, te reo Māori for the natural world, and its world still carries that whakapapa.</p>
 				  <h4 style="margin:10px 0 4px">Community &amp; contributing</h4>
 				  <p class="credits">Source, issues and the object workshop's submission path: <a href="https://github.com/dataversion5372/Taiao" target="_blank" rel="noopener">github.com/dataversion5372/Taiao</a>. Questions, ideas, or just want to talk about the world — <a href="https://github.com/dataversion5372/Taiao/discussions" target="_blank" rel="noopener">GitHub Discussions</a> is the one community channel.</p>
 			</div>

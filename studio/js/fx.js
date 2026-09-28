@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — atmosphere =====
+// ===== Our RPG Workshop — atmosphere =====
 // The little bits of life that make the atelier feel like the game's world
 // leaking into the page: the night-sky canvas behind the Home hero (stars +
 // aurora ribbons, the same sky the game hangs over the ngahere), staggered

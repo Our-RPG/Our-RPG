@@ -16,6 +16,6 @@ export async function transparency(req, env) {
     current: history[0] || null,      // newest entered month
     history,
     players30d: players?.n || 0,
-    note: "Koha is welcome and never expected. Nothing in Taiao is metered, gated, or worse without it.",
+    note: "Koha is welcome and never expected. Nothing in Our RPG is metered, gated, or worse without it.",
   }, 200, { "cache-control": "public, max-age=3600" });
 }

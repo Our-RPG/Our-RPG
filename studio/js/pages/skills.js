@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Skills catalog + detail =====
+// ===== Our RPG Workshop — Skills catalog + detail =====
 // A communal, public browser of every SKILL in the game and the recipes that
 // train it. Each skill shows its milestones (level → unlock, from recipes) and,
 // per recipe, the required level, exp, crafting station, tool, craft time,

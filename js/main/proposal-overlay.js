@@ -1,4 +1,4 @@
-// ===== Taiao — community + "play with my changes" overlay =====
+// ===== Our RPG — community + "play with my changes" overlay =====
 // Two flags, one pipeline. At boot the game can overlay workshop proposals
 // onto the LIVE sprite/sound pipeline:
 //   - Community layer (default ON, settings key taiao_community_layer_v1):
@@ -378,6 +378,10 @@ const ProposalOverlay = (function () {
 
   // ---------- run ----------
   let lastStats = null;
+  // newest community-accepted proposal (the server lists accepted newest-
+  // first) — the koha letter and the crew pulse both quote it, so "the
+  // community is alive" is always said with a real name and a real work.
+  let latestAccepted = null, acceptedCount = 0;
   async function run() {
     const commOn = communityEnabled();
     const mineOn = previewEnabled() && hasSession();
@@ -391,8 +395,10 @@ const ProposalOverlay = (function () {
       const comm = await api("/api/workshop/proposals?status=accepted");
       if (comm && comm.ok && Array.isArray(comm.proposals)) {
         for (const meta of comm.proposals) if (!bySubject.has(meta.subject)) bySubject.set(meta.subject, meta);
+        latestAccepted = comm.proposals[0] || null;
+        acceptedCount = comm.proposals.length;
       } else {
-        console.info("[Taiao] Community layer: couldn't load accepted proposals (" + ((comm && comm.error) || "?") + ").");
+        console.info("[Our RPG] Community layer: couldn't load accepted proposals (" + ((comm && comm.error) || "?") + ").");
       }
     }
     if (mineOn) {
@@ -403,7 +409,7 @@ const ProposalOverlay = (function () {
           bySubject.set(meta.subject, meta);
         }
       } else {
-        console.info("[Taiao] Preview: couldn't load your proposals (" + ((mine && mine.error) || "?") + ").");
+        console.info("[Our RPG] Preview: couldn't load your proposals (" + ((mine && mine.error) || "?") + ").");
       }
     }
 
@@ -417,7 +423,7 @@ const ProposalOverlay = (function () {
       if (!payload) continue;
       await applyProposal(meta, payload, stats, credits);
     }
-    if (skipped) console.info("[Taiao] Community layer: skipped " + skipped + " proposal(s) past the local preview cap (" + MAX_PROPOSALS + " proposals / ~" + Math.round(MAX_BYTES / 1e6) + "MB).");
+    if (skipped) console.info("[Our RPG] Community layer: skipped " + skipped + " proposal(s) past the local preview cap (" + MAX_PROPOSALS + " proposals / ~" + Math.round(MAX_BYTES / 1e6) + "MB).");
 
     if (stats.icons) {
       // Drop the icon cache and repaint so overridden icons show immediately.
@@ -432,10 +438,10 @@ const ProposalOverlay = (function () {
     if (stats.sounds) parts.push(stats.sounds + " sound" + (stats.sounds === 1 ? "" : "s"));
     if (stats.icons) parts.push(stats.icons + " icon" + (stats.icons === 1 ? "" : "s"));
     const pending = stats.costumesPending + stats.dataPending;
-    const summary = "[Taiao] Community layer: " + (parts.length ? parts.join(", ") : "nothing new") +
+    const summary = "Community layer: " + (parts.length ? parts.join(", ") : "nothing new") +
       (names.length ? " — art by " + names.map(n => "@" + n).join(", ") + "." : ".") +
       (pending ? " " + pending + " proposal(s) recognised but not appliable yet (costume state or data — a later phase)." : "");
-    console.info(summary);
+    console.info("[Our RPG] " + summary);
     lastStats = { ...stats, credits: names, applied, skipped, summary };
     return { applied: true, ...lastStats };
   }
@@ -458,8 +464,35 @@ const ProposalOverlay = (function () {
     previewEnabled, communityEnabled, hasSession, run, stats: () => lastStats,
     credit: k => creditMap.get(k) || null,
     isGapMonster, isGapItem,
+    latest: () => latestAccepted,
+    acceptedCount: () => acceptedCount,
   };
 })();
+
+// The crew pulse: one line in the log when the shared world has visibly
+// changed since this player's last boot. It only speaks when there is a real
+// beat — a newly adopted work it can name, by a maker it can name — and says
+// nothing at all on a quiet week, so it never becomes wallpaper.
+function _crewPulse() {
+  try {
+    const latest = ProposalOverlay.latest();
+    const st = ProposalOverlay.stats();
+    if (!latest || !st || !st.applied) return;
+    const KEY = "taiao_crewpulse_v1";
+    let seen = null;
+    try { seen = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) {}
+    if (seen && seen.id === latest.id) return;               // nothing new — stay quiet
+    const who = latest.username ? "@" + latest.username : "one of us";
+    const what = latest.title || String(latest.subject || "").split(":").pop().replace(/_/g, " ") || "new work";
+    const wait = () => {
+      if (typeof gameReady === "undefined" || !gameReady || typeof log !== "function") { setTimeout(wait, 1500); return; }
+      if (seen) log(`While you were away, ${who}'s "${what}" was adopted into everyone's world.`, "gold");
+      else log(`${st.applied} pieces of this world were made by players like you — the newest by ${who}.`, "sys");
+      try { localStorage.setItem(KEY, JSON.stringify({ id: latest.id, t: Date.now() })); } catch (e) {}
+    };
+    wait();
+  } catch (e) { /* the pulse is decoration — never let it break a boot */ }
+}
 
 // Kick off after boot without blocking it. icon()/SFX.play() consult their
 // overrides first, so applied patches take effect the moment they land,
@@ -470,6 +503,7 @@ if (typeof ProposalOverlay !== "undefined" &&
     const r = await ProposalOverlay.run();
     const st = typeof document !== "undefined" && document.getElementById("community-status");
     if (st && r && r.summary) st.textContent = r.summary;
+    _crewPulse();
   }, 1200); };
   if (typeof window !== "undefined") {
     if (document.readyState === "complete") _kick();

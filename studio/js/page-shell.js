@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — multi-page shell =====
+// ===== Our RPG Workshop — multi-page shell =====
 // The studio is a set of static HTML pages (one folder per tab, detail pages
 // nested under their tab). Every content page loads js/page-loader.js (which
 // pulls in the whole data layer + render code + this file) and declares what to
@@ -132,7 +132,7 @@ const App = (function () {
       status,
       el("div.mainbar", null, [
         el("a.brand", { href: ROOT, style: "color:inherit;text-decoration:none;cursor:pointer" }, [
-          el("span.word", { html: "Taiao&thinsp;<span class='aur'>Workshop</span>" }),
+          el("span.word", { html: "Our&thinsp;RPG&thinsp;<span class='aur'>Workshop</span>" }),
         ]),
         nav,
         el("div.spacer"),

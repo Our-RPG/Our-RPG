@@ -18,7 +18,7 @@ labels: workshop-proposal
 
 **What you're proposing, in a sentence or two**: 
 
-**Proposal file**: attach the exported `taiao-proposal-<type>-<key>.json`
+**Proposal file**: attach the exported `our-rpg-proposal-<type>-<key>.json`
 below by dragging it into this box. If your browser or GitHub won't accept
 the `.json` attachment, either rename it to `.txt` and attach that, or paste
 its contents in a fenced code block instead.

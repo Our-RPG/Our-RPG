@@ -1,4 +1,4 @@
-# Deploying the Taiao Workshop
+# Deploying Our RPG Workshop
 
 The Workshop (`studio/`) is plain HTML/JS with no build step for local dev
 (`python3 -m http.server 8899` at the repo root, see `studio/README.md`), but

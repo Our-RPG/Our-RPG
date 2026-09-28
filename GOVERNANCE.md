@@ -1,6 +1,6 @@
 # Governance
 
-Taiao is, today, a single-maintainer project — decisions about what ships
+Our RPG is, today, a single-maintainer project — decisions about what ships
 are made by [@dataversion5372](https://github.com/dataversion5372), who
 started it and keeps the lights on. This document says how that works now,
 and how it's meant to change.

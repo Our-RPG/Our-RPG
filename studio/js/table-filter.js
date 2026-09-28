@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — the ubiquitous table filter/sort control =====
+// ===== Our RPG Workshop — the ubiquitous table filter/sort control =====
 // One reusable helper that turns any plain <table> into a sortable, filterable
 // one. Call TableFilter.enhance(tableEl) after you've built a table and it will,
 // per column, decide what kind of data the column holds and wire the right

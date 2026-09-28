@@ -1,6 +1,6 @@
-# Contributing to Taiao
+# Contributing to Our RPG
 
-Taiao is built to be forked, extended and argued with — that's what the
+Our RPG is built to be forked, extended and argued with — that's what the
 license is for (see [Licensing](README.md#licensing)). There are two roads
 in: **code and docs**, and **in-game art and design**, via the object
 workshop. Both end up as ordinary GitHub issues or pull requests.
@@ -41,7 +41,7 @@ proposals come in.
 
 When you have something you're happy with, click **"Export my proposal"**
 in the workshop panel's header. That bundles your votes, suggestions and any
-uploaded art for *that object* into a single `taiao-proposal-<type>-<key>.json`
+uploaded art for *that object* into a single `our-rpg-proposal-<type>-<key>.json`
 file — nothing is sent anywhere; it's a local download, the same as a save
 file.
 

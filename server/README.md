@@ -1,4 +1,4 @@
-# Taiao server (Phase 1)
+# Our RPG server (Phase 1)
 
 See [docs/SPEC.md](../docs/SPEC.md) for the full Phase 0-2 systems spec —
 this file is the deploy/run guide; that one is the "what it does and why."
@@ -43,7 +43,7 @@ npx wrangler secret put ADMIN_TOKEN        # enables /api/admin/*
 npx wrangler secret put GITHUB_TOKEN       # + GITHUB_REPO var: weekly digest → Discussions
 
 # 4. Set ALLOWED_ORIGINS and RP_ID in wrangler.toml for the real game origin
-#    (RP_ID is the bare domain the GAME is served from, e.g. taiao.example).
+#    (RP_ID is the bare domain the GAME is served from, e.g. our-rpg.example).
 
 npx wrangler deploy
 ```

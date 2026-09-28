@@ -1,4 +1,4 @@
-// ===== Taiao — actual per-biome spawn ranges (6-axis Whittaker model) =====
+// ===== Our RPG — actual per-biome spawn ranges (6-axis Whittaker model) =====
 // Derived by tracing the game's classifier classify(e,hum,temp,f,c,w) in
 // js/world/terrain.js (biome ids from js/data.js `B`), with the real constants
 // LAND_E = 0.483 (sea level) and ROCK_E = 0.655 (rock line). Each biome's rule

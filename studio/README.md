@@ -1,6 +1,6 @@
-# Taiao Workshop
+# Our RPG Workshop
 
-A standalone companion app for the Taiao game — formerly "PixelLab Studio":
+A standalone companion app for Our RPG — formerly "PixelLab Studio":
 generate and customise the game's sprites with the
 [PixelLab.ai](https://www.pixellab.ai) API, give characters names, bios,
 spawning rules and triggers, design alternative **costumes / states**, and let
@@ -19,11 +19,11 @@ the studio can read the game's roster data at `../js/sprites/…`) and open
 
 ```bash
 cd /Users/finndwyer/RPG
-python3 -m http.server 8899        # origin the Taiao worker already allows
+python3 -m http.server 8899        # origin the game's worker already allows
 # → http://localhost:8899/studio/
 ```
 
-Port **8899** matters: the Taiao worker's `ALLOWED_ORIGINS` already permits
+Port **8899** matters: the `taiao-server` worker's `ALLOWED_ORIGINS` already permits
 `http://localhost:8899`, so community voting works in dev. When you deploy the
 studio somewhere public, add that origin to the worker's `ALLOWED_ORIGINS`.
 
@@ -39,9 +39,9 @@ into the server, and why passkeys are per-domain by design.
 - **PixelLab API key** — generates the art. Stored **only in this browser**
   (localStorage, obfuscated at rest) and sent **only** to `api.pixellab.ai`
   over TLS. Get one at [pixellab.ai/account](https://pixellab.ai/account).
-  Never sent to the Taiao server. Clear it on shared machines (Settings →
+  Never sent to the game's server. Clear it on shared machines (Settings →
   Forget key).
-- **Taiao account** — the same login as the game, used for community voting and
+- **Our RPG account** — the same login as the game, used for community voting and
   crediting. Only needed to vote or share a costume; browsing is public.
 
 ## Ideas — mechanic proposals + a BYO-key AI copilot
@@ -49,7 +49,7 @@ into the server, and why passkeys are per-domain by design.
 The **Ideas** tab is a fourth proposal pillar alongside art/data/sounds/quests: a player
 pitches a rough mechanic or system idea and, optionally, develops it into a grounded design
 doc with an AI copilot — their **own Anthropic API key**, entered in Settings, stored only in
-this browser and sent only to `api.anthropic.com`, never to the Taiao server — before
+this browser and sent only to `api.anthropic.com`, never to the game's server — before
 submitting it as a normal `taiao-mechanic/1` proposal on the existing "data" lane (auto-open
 for voting; curators can adopt, same as everything else here). The copilot is grounded in
 `js/context-pack.js`, a codebase digest (every real source file's own narrated header
@@ -224,7 +224,7 @@ studio/
     util.js             DOM kit, image/base64 + lazy-thumbnail helpers
     store.js            IndexedDB draft library
     pixellab.js         PixelLab client + in-browser key storage
-    taiao.js            Taiao auth + workshop (proposals, endorsements, ballots)
+    taiao.js            game-account auth + workshop (proposals, endorsements, ballots)
     fx.js               atmosphere: hero night-sky canvas, reveals, sprite frieze
     roster.js           game characters/objects: catalog, states×dirs, stats
     providers.js        per-type providers (character/object) + registry

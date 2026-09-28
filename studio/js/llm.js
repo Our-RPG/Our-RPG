@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Anthropic API client (BYO key) =====
+// ===== Our RPG Workshop — Anthropic API client (BYO key) =====
 // The one place the app talks to Claude. The user's own Anthropic API key is
 // theirs and theirs alone: it is kept only in this browser (localStorage),
 // sent ONLY to api.anthropic.com over TLS with an x-api-key header, and never

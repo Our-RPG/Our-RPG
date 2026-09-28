@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — real chunk generator (deep-zoom tile view) =====
+// ===== Our RPG Workshop — real chunk generator (deep-zoom tile view) =====
 // Boots the game's ACTUAL world engine off-thread — data + content + terrain +
 // features + erosion + chunks — and streams fully generated chunks so the Zones
 // map can draw real ground tiles and world objects (trees, rocks, buildings,

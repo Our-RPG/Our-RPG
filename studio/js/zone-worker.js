@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — zone terrain render worker =====
+// ===== Our RPG Workshop — zone terrain render worker =====
 // Runs the game's REAL world generation off the main thread (exactly like the
 // game's own js/world/roadworker.js): importScripts the deterministic terrain +
 // feature code, then renders a zone's macro-tile pixels and queries its

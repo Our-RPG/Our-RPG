@@ -2,7 +2,7 @@
 
 ## Our pledge
 
-We want Taiao's issues, discussions, pull requests and workshop submissions
+We want Our RPG's issues, discussions, pull requests and workshop submissions
 to be a place people actually enjoy showing up to — contributors of every
 background and experience level, treated with respect. Be someone people
 want to build a world with.

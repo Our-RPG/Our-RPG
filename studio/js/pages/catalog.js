@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — generic asset catalog (any type) =====
+// ===== Our RPG Workshop — generic asset catalog (any type) =====
 // One page for every tab. Driven entirely by a provider (js/providers.js):
 // lists every in-game asset of its type, shows the community's shared
 // generations, and (where generation makes sense) a collapsible creator plus
@@ -1237,7 +1237,7 @@ const SND_SRC = {
   rubberduck: { who: "rubberduck · OpenGameArt", license: "CC0", url: "https://opengameart.org/content/40-cc0-water-splash-slime-sfx" },
   tito: { who: "tito · OpenGameArt", license: "CC0", url: "https://opengameart.org/content/7-eating-crunches" },
   macleod: { who: "Kevin MacLeod · incompetech", license: "CC BY 4.0", url: "https://incompetech.com/music/royalty-free/mp3-royaltyfree/Frozen%20Star.mp3" },
-  synth: { who: "Taiao — synthesized (make_ambience.py)", license: "CC BY-SA 4.0", url: null },
+  synth: { who: "Our RPG — synthesized (make_ambience.py)", license: "CC BY-SA 4.0", url: null },
 };
 // sfx event-id (base name) → source key. Kenney packs cover almost everything;
 // the water/slime + eating sounds are the two OpenGameArt CC0 packs.

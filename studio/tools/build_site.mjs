@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — static site builder (Phase 5) =====
+// ===== Our RPG Workshop — static site builder (Phase 5) =====
 // Assembles studio/dist/site/: a fully self-contained deployable copy of the
 // Workshop — one prebuilt <script> bundle instead of ~150 dev <script> tags,
 // pages generated in "site mode" (studio/tools/gen_pages.mjs --site), plus
@@ -34,7 +34,7 @@ const M = n => (n / (1024 * 1024)).toFixed(1) + "M";
 let counts = {};                       // step label -> {files, bytes}
 const tally = (label, files, bytes) => { counts[label] = { files, bytes }; };
 
-console.log(`\n=== Taiao Workshop site build ===`);
+console.log(`\n=== Our RPG Workshop site build ===`);
 console.log(`out: ${OUTDIR}${INCLUDE_TILES ? "  (deep-zoom tiles INCLUDED — big!)" : ""}`);
 
 // ---- 1. Preflight -----------------------------------------------------------
@@ -197,11 +197,11 @@ fs.writeFileSync(path.join(OUTDIR, "index.html"), `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta http-equiv="refresh" content="0; url=./workshop/">
-  <title>Taiao Workshop</title>
+  <title>Our RPG Workshop</title>
   <link rel="canonical" href="./workshop/">
 </head>
 <body>
-  <p>Redirecting to <a href="./workshop/">the Taiao Workshop</a>…</p>
+  <p>Redirecting to <a href="./workshop/">Our RPG Workshop</a>…</p>
   <script>location.replace("./workshop/");</script>
 </body>
 </html>

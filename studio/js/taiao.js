@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Taiao account + community workshop =====
+// ===== Our RPG Workshop — game account + community workshop =====
 // The costume gallery is the game's existing "ballot box" (server/src/
 // workshop.js) reached from here: players sign in with the SAME Taiao account
 // they use in game, submit a costume as a workshop *proposal* (art + author,
@@ -34,7 +34,7 @@ const Taiao = (function () {
   function setToken(t) { token = t; try { t ? localStorage.setItem(TOKEN_LS, t) : localStorage.removeItem(TOKEN_LS); } catch (_) {} }
 
   async function call(path, opts = {}) {
-    if (!serverUrl) return { error: "No Taiao server configured." };
+    if (!serverUrl) return { error: "No game server configured." };
     try {
       const res = await fetch(serverUrl + path, {
         method: opts.method || (opts.body ? "POST" : "GET"),
@@ -49,7 +49,7 @@ const Taiao = (function () {
       if (res.status === 401 && token && !path.startsWith("/api/login")) { setToken(null); user = null; fire(); }
       return data;
     } catch (e) {
-      return { error: "Couldn't reach the Taiao server. Your work is safe locally." };
+      return { error: "Couldn't reach the server. Your work is safe locally." };
     }
   }
 
@@ -299,6 +299,7 @@ const Taiao = (function () {
   if (token) setTimeout(refreshMe, 300);
 
   return {
+    call,
     getServerUrl, setServerUrl, sitekey, setSitekey,
     onAuth, refreshMe, register, login, logout, logged, username,
     passkeyLogin, redeemLinkCode,

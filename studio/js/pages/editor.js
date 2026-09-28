@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — project editor =====
+// ===== Our RPG Workshop — project editor =====
 // One character or object, fully dressed: its base art, its design data
 // (name, bio, spawning rules, animation-event triggers, state-change
 // triggers), its variant states / costumes, its animations, and its

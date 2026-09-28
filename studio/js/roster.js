@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — the game's existing characters & objects =====
+// ===== Our RPG Workshop — the game's existing characters & objects =====
 // index.html pulls in the game's generated data as plain scripts:
 //   ../js/sprites/characters-data.js → CHAR_LIST, CHAR_CELL, CHAR_COLS,
 //                                      CHAR_DIRS, CHAR_SHEET

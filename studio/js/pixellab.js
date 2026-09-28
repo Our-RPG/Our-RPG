@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — PixelLab.ai API client =====
+// ===== Our RPG Workshop — PixelLab.ai API client =====
 // The one place the app talks to PixelLab. The user's API token is theirs and
 // theirs alone: it is kept only in this browser (localStorage), sent ONLY to
 // api.pixellab.ai over TLS with an Authorization: Bearer header, and never to

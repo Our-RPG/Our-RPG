@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — real in-game trigger vocabularies =====
+// ===== Our RPG Workshop — real in-game trigger vocabularies =====
 // Dropdown options for the trigger categories a character/monster/object can
 // declare, drawn from the game's own data where it exists: sound-effect ids
 // come straight from the SFX manifest; movement/behaviour verbs and lifecycle

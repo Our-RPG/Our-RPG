@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — the dupe-direction audit =====
+// ===== Our RPG Workshop — the dupe-direction audit =====
 // gen_gaps.mjs's "needs-directions" gap only catches a monster that HONESTLY
 // admits it has one sprite (MONSTERS[key].dirSpr is falsy). It misses the
 // sneakier case: something that DECLARES eight directions (occupies 8 dir-

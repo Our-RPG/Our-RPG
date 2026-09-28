@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — configuration & shared vocabulary =====
+// ===== Our RPG Workshop — configuration & shared vocabulary =====
 // A standalone companion app to the Taiao game: generate and customise the
 // game's sprites through the PixelLab.ai API, propose player-made costumes,
 // and let the community vote on which ones make it into the game.

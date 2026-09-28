@@ -216,7 +216,7 @@ function exportSave() {
   const a = document.createElement("a");
   const date = new Date().toISOString().slice(0, 10);
   a.href = url;
-  a.download = `taiao-save-${date}.json`;
+  a.download = `our-rpg-save-${date}.json`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -228,7 +228,7 @@ function exportSave() {
 function importSaveFromText(text) {
   let d;
   try { d = JSON.parse(text); } catch (e) { alert("That file isn't a valid save (bad JSON)."); return; }
-  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That file doesn't look like a Taiao save."); return; }
+  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That file doesn't look like a save from this game."); return; }
   if (!confirm("Load this save? Your current in-browser character will be overwritten.")) return;
   resetting = true; // prevent beforeunload autosave from clobbering the imported data before reload
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) { alert("Couldn't write the save to browser storage: " + e.message); resetting = false; return; }

@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — asset-type providers =====
+// ===== Our RPG Workshop — asset-type providers =====
 // One registry, one entry per in-game asset type. Each provider knows how to
 // LIST every asset of its type (straight from the game's own data), draw a
 // thumbnail, and hand back the raw in-game DATA for that asset — so every

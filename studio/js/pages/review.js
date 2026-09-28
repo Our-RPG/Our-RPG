@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — curator moderation queue =====
+// ===== Our RPG Workshop — curator moderation queue =====
 // The moderation team (users carrying the 'curator' flag) reviews here.
 // Two things land in the queue, both hidden from the public vote dialogues
 // until a curator acts (server: workshop.pendingQueue / review):

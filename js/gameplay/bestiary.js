@@ -151,7 +151,7 @@
         if (u || gap) {
           const cv = document.createElement("div");
           cv.style.cssText = "margin-top:2px;font-size:11px;font-style:italic;color:#8fa3c8;font-weight:normal;";
-          cv.textContent = u ? `art by @${u} · made in the Taiao Workshop` : "awaiting an artist — this could be your work";
+          cv.textContent = u ? `art by @${u} · made in Our RPG Workshop` : "awaiting an artist — this could be your work";
           tdN.appendChild(cv);
         }
       }

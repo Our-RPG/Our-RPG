@@ -4382,7 +4382,7 @@ void main() {
     "Well met, traveller.", "Fine day on the isle, isn't it?",
     "Mind how you go out there.", "New face around here?",
     "The roads have been quiet lately.", "Safe travels, friend.",
-    "Taiao's a big place — easy to get lost.", "Trouble's always brewing somewhere.",
+    "This world's a big place — easy to get lost.", "Trouble's always brewing somewhere.",
   ];
   const MIX_QUEST_LINES = [
     "You there — I could use some help.", "A word, adventurer? There's work to be done.",

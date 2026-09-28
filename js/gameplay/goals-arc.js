@@ -234,7 +234,24 @@ var GoalsArc = (() => {
     // stand-in-N-biomes steps whether or not their chapter is open yet
     try {
       const b = world.biomeAt(player.x, player.y);
-      if (b != null && !NEVER_NEW().has(b)) { if (!a.bio) a.bio = {}; a.bio[b] = 1; }
+      if (b != null && !NEVER_NEW().has(b)) {
+        if (!a.bio) a.bio = {};
+        if (!a.bio[b]) {
+          a.bio[b] = 1;
+          // first footfall in a biome beyond the home lowland: name the
+          // moment — the endless map is the game's best surprise, so say so
+          // (once ever per biome; the ledger persists in the save)
+          const n = Object.keys(a.bio).length;
+          if (n > 1 && !HOME_LOWLAND().has(b)) {
+            const nm = (world.BIOME_NAMES && world.BIOME_NAMES[b]) || null;
+            if (nm && typeof log === "function") {
+              const ord = k => k + (k % 10 === 1 && k % 100 !== 11 ? "st" : k % 10 === 2 && k % 100 !== 12 ? "nd" : k % 10 === 3 && k % 100 !== 13 ? "rd" : "th");
+              log(`New country: ${nm} — the ${ord(n)} biome you've stood in.`, "gold");
+              if (typeof sfx === "function") sfx("quest", 0.35);
+            }
+          }
+        }
+      }
     } catch (e) {}
     const chBefore = chapterIx(a);
     if (chBefore >= CHAPTERS.length) return;

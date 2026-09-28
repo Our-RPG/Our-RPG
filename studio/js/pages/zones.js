@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Zones dossier =====
+// ===== Our RPG Workshop — Zones dossier =====
 // Enter zone coordinates (default 0,0) and get the whole zone: a rendered
 // terrain map (the game's REAL world-gen, run off-thread in js/zone-worker.js —
 // biomes, coastlines, hillshade, settlements, POIs, roads, rivers, labels), plus
@@ -163,7 +163,7 @@ function pageZones(root, params) {
 function pageSpecialZone(root) {
   const page = el("div.page");
   page.appendChild(el("div.banner.info", { html:
-    "<b>zone[special]</b> — sealed locations that exist in Taiao but are <b>not part of any world-map zone</b>. They can't be reached by navigating the seed map (no coordinates lead here); each is entered only by its own in-game mechanic." }));
+    "<b>zone[special]</b> — sealed locations that exist in Our RPG but are <b>not part of any world-map zone</b>. They can't be reached by navigating the seed map (no coordinates lead here); each is entered only by its own in-game mechanic." }));
   page.appendChild(el("div.card", null, [el("div.btn-row", null, [
     el("a.btn.sm", { text: "← Back to the world map", href: "#/zones?zx=0&zy=0" }),
   ])]));

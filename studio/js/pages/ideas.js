@@ -1,4 +1,4 @@
-// ===== Taiao Workshop — Ideas =====
+// ===== Our RPG Workshop — Ideas =====
 // A pillar for MECHANIC/SYSTEM proposals, distinct from the art/data pipelines
 // the rest of the studio serves: a player pitches a rough idea, optionally
 // develops it with an AI copilot — their OWN Anthropic API key (js/llm.js),
@@ -11,7 +11,7 @@
 "use strict";
 
 const IDEAS_SYSTEM_PROMPT =
-  "You are a game-design collaborator for Taiao, an open-source cozy multiplayer browser " +
+  "You are a game-design collaborator for Our RPG (formerly Taiao), an open-source cozy multiplayer browser " +
   "RPG. A player will pitch a rough mechanic idea. First reply with at most 3 short " +
   "clarifying questions. After they answer, produce a design doc in EXACTLY this markdown " +
   "skeleton: # <mechanic name> / ## Summary / ## Player experience / ## Systems touched " +
@@ -46,7 +46,7 @@ function ideasHeroCard(onNewIdea) {
   const c = el("div.card");
   c.appendChild(el("h2", { text: "Ideas" }));
   c.appendChild(el("p.tagline", { text:
-    "Propose new mechanics and systems for Taiao. Sketch the itch, develop it into a real design doc — with an AI " +
+    "Propose new mechanics and systems for Our RPG. Sketch the itch, develop it into a real design doc — with an AI " +
     "copilot grounded in the game's actual codebase if you link a key in Settings — and put it to the community. " +
     "Adopted ideas become the roadmap." }));
   c.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [
@@ -215,7 +215,7 @@ async function renderIdeaBoard(host) {
   clear(body);
   const bad = r => !r || r.error || !Array.isArray(r.proposals);
   if (bad(openR) || bad(acceptedR)) {
-    body.appendChild(el("div.banner.warn", { text: "Couldn't reach the Taiao server — the idea board will be back." }));
+    body.appendChild(el("div.banner.warn", { text: "Couldn't reach the server — the idea board will be back." }));
     return;
   }
   const mechanics = openR.proposals.filter(p => p._subj.kind === "mechanic")
