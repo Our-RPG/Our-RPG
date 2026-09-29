@@ -529,6 +529,8 @@ function createWorldFeatures(ctx) {
   function _roadCellInject(key, out) {
     if (!roadCache.has(key)) roadCache.set(key, out);
   }
+  // cache growth beacon: the far-LOD road ribbon redraws only when this moves
+  const _roadCacheSize = () => roadCache.size;
   const ROAD_SCAN = Math.ceil(CITY_MAX_LEN / VCELL);
   // Non-forcing roadsNear for the far-LOD vista (render3d buildFarRibbons):
   // reads ONLY village cells the road cache already holds (computed locally or
@@ -2341,7 +2343,7 @@ function createWorldFeatures(ctx) {
   return {
     DEEP_E, GRID8, ROAD_W, gridRoute, shapePath, polyBBox, waterBody, riverTrace,
     lakeFill, lakeOutflows, riversNear, roadsNear, roadsNearCached, nearPoly, riverNearPt, riverSourceAt,
-    riverAtPt, solidDoorX, riverDoors, riverFlowAt, _roadWarm, _roadCellInject,
+    riverAtPt, solidDoorX, riverDoors, riverFlowAt, _roadWarm, _roadCellInject, _roadCacheSize,
     roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, macroPixels, genName, villageInfo, villagesNear,
     poiInfo, wildIcon, atlasVariantAt, personalityAt, biomeGround, BIOME_VEG,
     dreamGateSite, dreamGatesNear, dreamGateClearAt,

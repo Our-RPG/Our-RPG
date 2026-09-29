@@ -32,4 +32,28 @@ onmessage = e => {
       postMessage({ key: c.cx + "," + c.cy, eG: f.eG.buffer, bG: f.bG.buffer, tfG: f.tfG.buffer },
         [f.eG.buffer, f.bG.buffer, f.tfG.buffer]);
     }
+  // far-LOD vista grids (render3d syncFarLod): raw elevation + biome id for
+  // each ring vertex. Pure terrain noise, but ~3800 biome classifications per
+  // recentre — sampled here so the main thread only pays for colour lookups
+  // and geometry. Heights are (n+1)² — the hillshade needs the +1,+1 diagonal
+  // neighbour of every vertex, including the last row/column.
+  if (d.type === "far" && T) {
+    const grids = [], tr = [];
+    for (const ring of d.rings) {
+      const n = (2 * ring.half) / ring.step + 1;
+      const h = new Float32Array((n + 1) * (n + 1));
+      const b = new Int16Array(n * n);
+      for (let r = 0; r <= n; r++) {
+        const wz = d.cz - ring.half + r * ring.step;
+        for (let i = 0; i <= n; i++) {
+          const wx = d.cx - ring.half + i * ring.step;
+          h[r * (n + 1) + i] = T.elevation(wx / 2, wz / 2);
+          if (r < n && i < n) b[r * n + i] = T.biomeAtTile(wx / 2, wz / 2);
+        }
+      }
+      grids.push({ n, h: h.buffer, b: b.buffer });
+      tr.push(h.buffer, b.buffer);
+    }
+    postMessage({ far: { cx: d.cx, cz: d.cz }, grids }, tr);
+  }
 };

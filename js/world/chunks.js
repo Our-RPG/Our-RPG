@@ -883,7 +883,8 @@ function createWorldChunks(ctx) {
     // A fishing spot for a specific fish, procedurally chosen for its depth band
     // (rarer fish rarer) with a 5-10 catch counter before it depletes.
     const addFishNode = (x, y, band) => {
-      if (typeof fishForBand !== "function") return addNode("fishspot_0", x, y, false, { left: 8, leftMax: 8 });
+      // (fallback fish is the mullet, 1, NOT whitebait, 0 — whitebait is estuary-only)
+      if (typeof fishForBand !== "function") return addNode("fishspot_1", x, y, false, { left: 8, leftMax: 8 });
       const idx = fishForBand(band, rng());
       const left = 5 + Math.floor(rng() * 6);   // 5-10 fish before depletion
       return addNode("fishspot_" + idx, x, y, false, { left, leftMax: left });
@@ -2055,7 +2056,12 @@ function createWorldChunks(ctx) {
                  n.type === "copper") { nodes.splice(ni, 1); continue; }
         else {
           const fm = n.type.match(/^fishspot_(\d+)$/);
-          if (fm && +fm[1] > 1) n.type = "fishspot_" + ((n.x + n.y) & 1);
+          // Whitebait (0) is ESTUARY-ONLY — never mint it here. Demote to the
+          // two low-level open-water catches instead: shrimp (32, req 1) and
+          // yellow-eyed mullet (1, req 2). The scripted rivermouth-run spots
+          // (tutorial.js pod-2 stamps) are the isle's only whitebait.
+          if (fm && +fm[1] > 1 && +fm[1] !== 32)
+            n.type = "fishspot_" + (((n.x + n.y) & 1) ? 1 : 32);
         }
       }
       // RINGED-ISLE painting (user redesign 2026-09-16): terrain.js is the

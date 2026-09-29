@@ -1022,11 +1022,12 @@ void main() {
   // far road/river ribbons live apart from the terrain grid so they can be
   // redrawn alone: roads come from the CACHED cells only (roadsNearCached) —
   // cells the road worker hasn't finished yet are skipped, counted here, and
-  // the ribbons redraw every couple of seconds until nothing is missing.
+  // the ROAD ribbon alone redraws when the worker has injected new cells.
   // Forcing them synchronously (the old way) ran the per-cell city-link A*
   // for a ±1176-tile rect on the main thread: a 5+ second freeze every time
   // the far vista recentred over a freshly visited region.
-  let farRibbonMeshes = [], farRibbonsMissing = false, farRibbonRetryAt = 0;
+  let farRivMesh = null, farRoadMesh = null;
+  let farRibbonsMissing = false, farRibbonRetryAt = 0, farRibbonCacheN = -1;
   // ACCURATE distant terrain colour: the biome the world would actually
   // classify there (world.biomeAt — the same pure classify the chunks use),
   // coloured with the mean pixel of that biome's own ground tile art from
@@ -1035,6 +1036,19 @@ void main() {
   // so the biome mean IS what a resolved chunk reads as from afar — deserts
   // tan, farmland gold, forests deep green, snowfields white.
   const _farBiomeCol = new Map();
+  // One whole-canvas pixel snapshot shared by every atlas colour average:
+  // a getImageData PER CELL forces a full canvas readback each call —
+  // measured 100-500 ms apiece, and the ~37 biome misses of a far build in
+  // fresh territory summed to ~8 s of frame stalls. The snapshot is dropped
+  // shortly after the burst (it's canvas-sized — tens of MB).
+  let _farSnap = null;
+  function _farAtlasSnap() {
+    if (!_farSnap) {
+      _farSnap = atlas.canvas.getContext("2d").getImageData(0, 0, atlas.canvas.width, atlas.canvas.height);
+      setTimeout(() => { _farSnap = null; }, 4000);
+    }
+    return _farSnap;
+  }
   function farColorForBiome(b) {
     let c = _farBiomeCol.get(b);
     if (c) return c;
@@ -1043,14 +1057,16 @@ void main() {
       let keys = Object.keys(atlas.cells).filter(k => k.startsWith(`at_${b}_`));
       if (!keys.length) keys = Object.keys(atlas.cells).filter(k => k.startsWith(`bg_${b}_`));
       if (keys.length) {
-        const ctx2 = atlas.canvas.getContext("2d");
+        const snap = _farAtlasSnap(), W = snap.width, px = snap.data;
         let r = 0, g = 0, bl = 0, n = 0;
         for (const k of keys) {
           const cell = atlas.cells[k];
-          const px = ctx2.getImageData(cell.cx, cell.cy, CSZ, CSZ).data;
-          for (let i = 0; i < px.length; i += 16) {   // every 4th pixel
-            if (px[i + 3] < 128) continue;
-            r += px[i]; g += px[i + 1]; bl += px[i + 2]; n++;
+          for (let y = 0; y < CSZ; y++) {
+            let o = ((cell.cy + y) * W + cell.cx) * 4;
+            for (let x = 0; x < CSZ; x += 4, o += 16) {   // every 4th pixel
+              if (px[o + 3] < 128) continue;
+              r += px[o]; g += px[o + 1]; bl += px[o + 2]; n++;
+            }
           }
         }
         if (n) c = [r / n / 255, g / n / 255, bl / n / 255];
@@ -1059,8 +1075,8 @@ void main() {
     _farBiomeCol.set(b, c);
     return c;
   }
-  function farColor(shade, wx, wz, out, o) {
-    const c = farColorForBiome(world.biomeAt(wx, wz));
+  function farColor(shade, b, wx, wz, out, o) {
+    const c = farColorForBiome(b);
     const s = Math.sin(wx * 12.9898 + wz * 78.233) * 43758.5453;
     const j = shade * (0.96 + ((s - Math.floor(s)) - 0.5) * 0.08);
     out[o] = Math.min(1, c[0] * j);
@@ -1077,23 +1093,25 @@ void main() {
   let farRivMat = null, farRoadMat = null;
   function _farCellAvg(keys, fallback) {
     if (atlas && atlas.canvas && atlas.cells) {
-      const ctx2 = atlas.canvas.getContext("2d");
+      const snap = _farAtlasSnap(), W = snap.width, px = snap.data;
       for (const k of keys) {
         const cell = atlas.cells[k];
         if (!cell) continue;
-        const px = ctx2.getImageData(cell.cx, cell.cy, CSZ, CSZ).data;
         let r = 0, g = 0, b = 0, n = 0;
-        for (let i = 0; i < px.length; i += 16) {
-          if (px[i + 3] < 128) continue;
-          r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+        for (let y = 0; y < CSZ; y++) {
+          let o = ((cell.cy + y) * W + cell.cx) * 4;
+          for (let x = 0; x < CSZ; x += 4, o += 16) {
+            if (px[o + 3] < 128) continue;
+            r += px[o]; g += px[o + 1]; b += px[o + 2]; n++;
+          }
         }
         if (n) return new THREE.Color(r / n / 255, g / n / 255, b / n / 255);
       }
     }
     return new THREE.Color(fallback);
   }
-  function buildFarRibbons(cx, cz) {
-    const out = [];
+  function buildFarRibbons(cx, cz, roadsOnly) {
+    const out = { riv: null, road: null };
     if (!world.riversNear || !world.roadsNear) return out;
     if (!farRivMat) {
       const rc = farColorForBiome(1);   // B.WATER's own painted art
@@ -1165,13 +1183,15 @@ void main() {
     };
     const mx0 = (cx - outerHalf - 24) / 2, mz0 = (cz - outerHalf - 24) / 2;
     const mx1 = (cx + outerHalf + 24) / 2, mz1 = (cz + outerHalf + 24) / 2;
-    const rivPolys = [];
-    for (const rv of world.riversNear(mx0, mz0, mx1, mz1)) for (const p of rv.polys) rivPolys.push(p);
-    const rg = mkStrips(rivPolys, pt => Math.min(8, 2.4 + (pt[2] || 0) * 2), 0.1, true);
-    if (rg) {
-      const m = new THREE.Mesh(rg, farRivMat);
-      m.frustumCulled = false; m.renderOrder = -4;
-      out.push(m);
+    if (!roadsOnly) {
+      const rivPolys = [];
+      for (const rv of world.riversNear(mx0, mz0, mx1, mz1)) for (const p of rv.polys) rivPolys.push(p);
+      const rg = mkStrips(rivPolys, pt => Math.min(8, 2.4 + (pt[2] || 0) * 2), 0.1, true);
+      if (rg) {
+        const m = new THREE.Mesh(rg, farRivMat);
+        m.frustumCulled = false; m.renderOrder = -4;
+        out.riv = m;
+      }
     }
     const roadQ = world.roadsNearCached ? world.roadsNearCached(mx0, mz0, mx1, mz1)
       : { roads: world.roadsNear(mx0, mz0, mx1, mz1), missing: 0 };
@@ -1181,7 +1201,7 @@ void main() {
     if (dg) {
       const m = new THREE.Mesh(dg, farRoadMat);
       m.frustumCulled = false; m.renderOrder = -3;
-      out.push(m);
+      out.road = m;
     }
     return out;
   }
@@ -1251,18 +1271,67 @@ void main() {
         n, pos: new Float32Array(n * n * 3), col: new Float32Array(n * n * 3), idx: [],
       });
     }
+    // sample the ring grids on the far worker when it's up: the ~3800 biome
+    // classifications of a recentre are tens of ms per ROW on the main
+    // thread (each is a full noise-stack classify). A DEDICATED chunkworker
+    // instance — the shared field warmer's queue runs 100-300 ms per chunk
+    // and a teleport floods it, which starved far requests past any timeout.
+    // Until the grids arrive the job idles and the previous vista stays up;
+    // worker down or slow (5 s) falls back to inline sampling as before.
+    const fw = farWorkerGet();
+    if (fw) {
+      farJob.waiting = performance.now();
+      try { fw.postMessage({ type: "far", cx, cz, rings: FARLOD_RINGS }); }
+      catch (e) { farJob.waiting = 0; }
+    }
+  }
+  let farWorker = null;
+  function farWorkerGet() {
+    if (farWorker === false) return null;
+    if (farWorker) return farWorker;
+    if (typeof Worker === "undefined" || !world || !world._workerInit) { farWorker = false; return null; }
+    try {
+      farWorker = new Worker("js/world/chunkworker.js");
+      farWorker.onmessage = e => { if (e.data && e.data.far) farGridsArrived(e.data); };
+      farWorker.onerror = err => {
+        console.warn("far worker unavailable:", err.message || err);
+        try { farWorker.terminate(); } catch (e2) { /* already dead */ }
+        farWorker = false;
+      };
+      farWorker.postMessage({ type: "init", ...world._workerInit });
+    } catch (e) { farWorker = false; return null; }
+    return farWorker;
+  }
+  function farGridsArrived(d) {
+    _sec("farGridsMsg", 1);
+    if (!farJob || farJob.cx !== d.far.cx || farJob.cz !== d.far.cz) return; // stale recentre
+    farJob.grids = d.grids.map(g => ({ n: g.n, h: new Float32Array(g.h), b: new Int16Array(g.b) }));
+    farJob.waiting = 0;
+    _sec("farGridsUsed", 1);
   }
   function stepFarBuild() {
+    // grids requested from the chunk worker: idle until they arrive (the old
+    // vista stays up), then fill rows from them below. 5 s with no reply =
+    // worker dead or drowning — sample inline exactly as the old code did.
+    if (farJob && farJob.waiting) {
+      if (performance.now() - farJob.waiting < 5000) return;
+      farJob.waiting = 0;
+      _sec("farTimeout", 1);
+    }
     const t0 = performance.now();
     const LE = world.LAND_ELEVATION;
+    let _rows = 0;
     while (farJob && performance.now() - t0 < 3) {
+      _rows++;
       const ring = FARLOD_RINGS[farJob.ring], part = farJob.parts[farJob.ring];
       const n = part.n, r = farJob.row;
       if (r < n) {
+        const grid = farJob.grids && farJob.grids[farJob.ring];
+        const _rt = performance.now();
         const wz = farJob.cz - ring.half + r * ring.step;
         for (let i = 0; i < n; i++) {
           const wx = farJob.cx - ring.half + i * ring.step;
-          const h = world.heightAt(wx, wz);
+          const h = grid ? grid.h[r * (n + 1) + i] : world.heightAt(wx, wz);
           const k = (r * n + i) * 3;
           part.pos[k] = wx; part.pos[k + 2] = wz;
           if (h < LE) {                      // open water: flat, colour by depth
@@ -1276,12 +1345,15 @@ void main() {
             part.pos[k + 1] = rel * 50 * STEP_H - FARLOD_SINK;
             // NW-lit hillshade (like the world map): slopes rising toward
             // the south-east catch the light, falling ones sit in shade
-            const dse = (world.heightAt(wx + ring.step, wz + ring.step) - h) / (1 - LE) * 50;
+            const hSE = grid ? grid.h[(r + 1) * (n + 1) + i + 1]
+              : world.heightAt(wx + ring.step, wz + ring.step);
+            const dse = (hSE - h) / (1 - LE) * 50;
             const shade = Math.max(0.8, Math.min(1.18, 1 + dse * 0.05));
-            farColor(shade, wx, wz, part.col, k);
+            farColor(shade, grid ? grid.b[r * n + i] : world.biomeAt(wx, wz), wx, wz, part.col, k);
           }
         }
         farJob.row++;
+        _sec(grid ? "farRowGrid" : "farRowLive", performance.now() - _rt);
         continue;
       }
       // ring rows done: build indices (outer ring skips quads the inner
@@ -1309,10 +1381,26 @@ void main() {
             // up to 16 tiles of REAL sea tiles — hole it, the backdrop is sea
             const wx = farJob.cx - ring.half + x * ring.step + ring.step / 2;
             const wz = farJob.cz - ring.half + z * ring.step + ring.step / 2;
-            if (Math.max(Math.abs(wx - farJob.cx), Math.abs(wz - farJob.cz)) <= FARLOD_HOLE_R &&
+            const nearField = Math.max(Math.abs(wx - farJob.cx), Math.abs(wz - farJob.cz)) <= FARLOD_HOLE_R;
+            if (nearField &&
                 (part.pos[a * 3 + 1] <= WATER_Y || part.pos[(a + 1) * 3 + 1] <= WATER_Y ||
                  part.pos[(a + n) * 3 + 1] <= WATER_Y || part.pos[(a + n + 1) * 3 + 1] <= WATER_Y))
               continue;
+            // near-field RELIEF holes: same failure mode as the carved water
+            // above, but on steep LAND — across a 16-tile quad the interpolated
+            // surface bridges terrace steps the real chunks quantize, so the
+            // chord rides ABOVE the lower terraces (the 0.45 sink covers less
+            // than one 0.5 step) and pokes through the loaded ground as flat
+            // biome-colour wedges. Any quad spanning terrace-scale relief
+            // inside the loaded-chunk field is a HOLE; the real tiles (or,
+            // past view reach, depth fog) own it. Beyond FARLOD_HOLE_R the
+            // vista keeps its slopes — there's no near mesh to fight.
+            if (nearField) {
+              const y00 = part.pos[a * 3 + 1], y10 = part.pos[(a + 1) * 3 + 1],
+                    y01 = part.pos[(a + n) * 3 + 1], y11 = part.pos[(a + n + 1) * 3 + 1];
+              if (Math.max(y00, y10, y01, y11) - Math.min(y00, y10, y01, y11) > STEP_H * 0.55)
+                continue;
+            }
           }
           part.idx.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
         }
@@ -1341,28 +1429,46 @@ void main() {
       farJob = null;
       refreshFarRibbons(farCenter.x, farCenter.z);
     }
+    _sec("farRows", performance.now() - t0);
+    _sec("farRowN", _rows);
   }
-  function refreshFarRibbons(cx, cz) {
-    let fresh = [];
-    try { fresh = buildFarRibbons(cx, cz); }
+  function refreshFarRibbons(cx, cz, roadsOnly) {
+    const _t0 = performance.now();
+    let built = null;
+    try { built = buildFarRibbons(cx, cz, roadsOnly); }
     catch (e) { /* distant roads/rivers are decoration — never fail the LOD */ }
-    for (const m of farRibbonMeshes) { scene.remove(m); m.geometry.dispose(); }
-    farRibbonMeshes = fresh;
-    for (const m of fresh) scene.add(m);
+    if (built) {
+      if (!roadsOnly) {
+        if (farRivMesh) { scene.remove(farRivMesh); farRivMesh.geometry.dispose(); }
+        farRivMesh = built.riv;
+        if (farRivMesh) scene.add(farRivMesh);
+      }
+      if (farRoadMesh) { scene.remove(farRoadMesh); farRoadMesh.geometry.dispose(); }
+      farRoadMesh = built.road;
+      if (farRoadMesh) scene.add(farRoadMesh);
+    }
+    farRibbonCacheN = world._roadCacheSize ? world._roadCacheSize() : -1;
+    _sec("farRibbons", performance.now() - _t0);
   }
   function syncFarLod() {
     if (!world || !world.heightAt) return;
     const qx = Math.round(player.x / FARLOD_CELL) * FARLOD_CELL;
     const qz = Math.round(player.y / FARLOD_CELL) * FARLOD_CELL;
     if ((!farCenter || farCenter.x !== qx || farCenter.z !== qz) &&
-        (!farJob || farJob.cx !== qx || farJob.cz !== qz)) startFarBuild(qx, qz);
+        (!farJob || farJob.cx !== qx || farJob.cz !== qz)) {
+      const _t0 = performance.now();
+      startFarBuild(qx, qz);
+      _sec("farStart", performance.now() - _t0);
+    }
     if (farJob) stepFarBuild();
-    // road cells the worker hadn't finished when the ribbons drew: redraw
-    // from cache every couple of seconds (a cached-only rebuild is a few ms)
-    // until every cell in reach has been injected
+    // road cells the worker hadn't finished when the ribbons drew: redraw the
+    // ROAD ribbon (rivers don't depend on the road cache) once the worker has
+    // injected new cells, at most every couple of seconds, until none are
+    // missing — never more than a handful of redraws per recentre
     else if (farCenter && farRibbonsMissing && now >= farRibbonRetryAt) {
       farRibbonRetryAt = now + 2000;
-      refreshFarRibbons(farCenter.x, farCenter.z);
+      const n = world._roadCacheSize ? world._roadCacheSize() : -1;
+      if (n !== farRibbonCacheN) refreshFarRibbons(farCenter.x, farCenter.z, true);
     }
   }
 

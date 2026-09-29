@@ -354,6 +354,7 @@ function genWorld() {
     _genLog: chunksApi.genLog,
     // road warm worker wiring (render3d drives it; see world/roadworker.js)
     _roadCellInject: features._roadCellInject,
+    _roadCacheSize: features._roadCacheSize,
     // chunk terrain-field warm worker wiring (render3d syncChunkWorker →
     // world/chunkworker.js): pre-computed pass-1/2 grids injected here
     _fieldInject: chunksApi._fieldInject,
