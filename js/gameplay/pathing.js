@@ -11,25 +11,61 @@ function findPath(tx, ty, reach) {
   if (goalOk(player.x, player.y)) return [];
   // don't explore absurd distances in one click
   if (Math.max(Math.abs(tx - player.x), Math.abs(ty - player.y)) > 80) return null;
-  const open = [[0, player.x, player.y]], came = new Map(), g = new Map([[start, 0]]);
+  // never expand the search into an UNGENERATED chunk: every tile query there
+  // (passable → isBlocked/getDecor/groundLevel…) generates the whole chunk
+  // synchronously — 50-1000 ms each on the mainland, and one blocked-goal
+  // flood can touch a dozen (the multi-second click freeze). Cold tiles are
+  // simply unwalkable for THIS search; the mesh pipeline / chunk worker keeps
+  // a 2-3 chunk ring warm around the player, so real clicks stay inside it —
+  // and a re-click a moment later reaches anything that was still streaming.
+  const CS = world.CHUNK || 32;
+  const warm = (x, y) => world.chunks.has(Math.floor(x / CS) + "," + Math.floor(y / CS));
+  const came = new Map(), g = new Map([[start, 0]]);
   const h = (x, y) => Math.max(Math.abs(x - tx), Math.abs(y - ty));
+  // binary min-heap on f — the old linear scan was O(n²) over up to 9000
+  // entries (hundreds of ms on a flooded search all by itself)
+  const heap = [[h(player.x, player.y), player.x, player.y]];
+  const hPush = e => {
+    heap.push(e);
+    let i = heap.length - 1;
+    while (i > 0) {
+      const p = (i - 1) >> 1;
+      if (heap[p][0] <= heap[i][0]) break;
+      const t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p;
+    }
+  };
+  const hPop = () => {
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      heap[0] = last;
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let s = i;
+        if (l < heap.length && heap[l][0] < heap[s][0]) s = l;
+        if (r < heap.length && heap[r][0] < heap[s][0]) s = r;
+        if (s === i) break;
+        const t = heap[s]; heap[s] = heap[i]; heap[i] = t; i = s;
+      }
+    }
+    return top;
+  };
   let found = null, iter = 0;
-  while (open.length && iter++ < 9000) {
-    let bi = 0;
-    for (let i = 1; i < open.length; i++) if (open[i][0] < open[bi][0]) bi = i;
-    const [, cx, cy] = open.splice(bi, 1)[0];
+  while (heap.length && iter++ < 9000) {
+    const [, cx, cy] = hPop();
     if (goalOk(cx, cy)) { found = K(cx, cy); break; }
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue;
       const nx = cx + dx, ny = cy + dy;
+      if (!warm(nx, ny)) continue;
       if (!passable(nx, ny)) continue;
-      if (dx && dy && (!passable(nx, cy) || !passable(cx, ny))) continue;
+      if (dx && dy && (!warm(nx, cy) || !warm(cx, ny) || !passable(nx, cy) || !passable(cx, ny))) continue;
       if (!stepClimbOK(cx, cy, nx, ny)) continue; // terraces: no climbing >½ step
       const nk = K(nx, ny);
       const ng = g.get(K(cx, cy)) + (dx && dy ? 1.42 : 1);
       if (ng < (g.get(nk) ?? Infinity)) {
         g.set(nk, ng); came.set(nk, K(cx, cy) + ";" + cx + ";" + cy);
-        open.push([ng + h(nx, ny), nx, ny]);
+        hPush([ng + h(nx, ny), nx, ny]);
       }
     }
   }

@@ -1,18 +1,19 @@
-// ===== Our RPG — social UI: who's in the world + direct messages =====
+// ===== Our RPG — social UI: who's in the world =====
 // The user-facing half of hubsync.js.
 //   • A top-right button (just left of the sidebar) shows how many players are
 //     online; clicking it opens the world roster — everyone online NOW (with a
-//     portrait of their character, you included), and a table of everyone seen
+//     portrait of their character, you included) and a table of everyone seen
 //     in the last 24 hours with how long ago.
-//   • A bottom-right "Messages" button opens direct-message threads.
-// Whispers also work by typing "/w <name> <message>" into the chat box.
+// There is no separate messages window: direct messages ARE chat. They appear
+// in the game log like public chat, and you send them from the same chat field
+// ("/w <name> <message>", or the roster's Whisper button, which prefills it).
 // Inert in offline/dev builds (no Hub / no SERVER_URL).
 "use strict";
 
 (function () {
   const DEV = typeof DEV_MODE !== "undefined" && DEV_MODE;
   const URL_ = typeof SERVER_URL !== "undefined" ? SERVER_URL : "";
-  if (DEV || !URL_ || typeof Hub === "undefined") { window.Social = { openDM: () => {} }; return; }
+  if (DEV || !URL_ || typeof Hub === "undefined") { window.Social = { openRoster: () => {} }; return; }
 
   const css = document.createElement("style");
   css.textContent = `
@@ -27,16 +28,6 @@
 #online-top .ot-pin { background:#2a6a4a; color:#d9ffe9; border-radius:9px;
   min-width:18px; height:18px; line-height:18px; text-align:center; font-size:11px;
   padding:0 5px; font-weight:bold; }
-#social-bar { position:fixed; right:10px; bottom:60px; z-index:41; display:none;
-  gap:6px; font:11px OpenDyslexic, Verdana, sans-serif; }
-#social-bar.on { display:flex; }
-#social-bar button { position:relative; background:rgba(20,26,34,0.9); color:#cfe4ff;
-  border:1px solid #3a4a5a; border-radius:6px; padding:4px 10px; cursor:pointer; font:inherit; }
-#social-bar button:hover { background:rgba(40,52,66,0.95); color:#fff; }
-#social-bar .badge { position:absolute; top:-6px; right:-6px; background:#d9534f; color:#fff;
-  border-radius:9px; min-width:16px; height:16px; line-height:16px; text-align:center;
-  font-size:10px; padding:0 4px; display:none; }
-#social-bar .badge.on { display:block; }
 
 /* roster dialogue */
 #online-dialog { position:fixed; inset:0; z-index:70; display:none;
@@ -70,39 +61,12 @@
 #online-dialog td { padding:5px 4px; border-bottom:1px solid rgba(255,255,255,0.06); font-size:12px; }
 #online-dialog td.od-when { color:#8fa6bd; text-align:right; white-space:nowrap; }
 #online-dialog td .od-livedot { display:inline-block; width:7px; height:7px; border-radius:50%;
-  background:#58c98a; margin-right:6px; box-shadow:0 0 5px #58c98a; }
-
-/* DM panel */
-.social-panel { position:fixed; right:10px; bottom:92px; z-index:61; width:300px;
-  max-height:52vh; background:rgba(16,22,30,0.97); border:1px solid #46586a; border-radius:10px;
-  color:#e6eef6; font:12px OpenDyslexic, Verdana, sans-serif; display:none; flex-direction:column;
-  box-shadow:0 8px 30px rgba(0,0,0,0.45); overflow:hidden; }
-.social-panel.on { display:flex; }
-.social-panel .sp-head { padding:8px 12px; border-bottom:1px solid #2d3a48; color:#a8ffc9;
-  font-size:13px; display:flex; justify-content:space-between; align-items:center; }
-.social-panel .sp-head .sp-x { cursor:pointer; color:#9fb7c9; padding:0 4px; }
-#dm-panel .dm-tabs { display:flex; flex-wrap:wrap; gap:4px; padding:6px 8px 0; }
-#dm-panel .dm-tab { background:rgba(30,40,52,0.9); color:#cfe4ff; border:1px solid #3a4a5a;
-  border-radius:12px; padding:2px 9px; cursor:pointer; font:inherit; font-size:11px; }
-#dm-panel .dm-tab.sel { background:#24463a; color:#c9ffe0; border-color:#3a6a52; }
-#dm-panel .dm-tab .dm-unread { color:#ffd75e; }
-#dm-panel .dm-log { flex:1; overflow-y:auto; padding:8px; display:flex; flex-direction:column; gap:3px; }
-#dm-panel .dm-msg { max-width:82%; padding:3px 8px; border-radius:8px; word-wrap:break-word; }
-#dm-panel .dm-msg.me { align-self:flex-end; background:#24463a; color:#eaffea; }
-#dm-panel .dm-msg.them { align-self:flex-start; background:rgba(30,40,52,0.95); color:#dfe9f2; }
-#dm-panel .dm-none { color:#8fa6bd; padding:12px; text-align:center; }
-#dm-panel .dm-foot { display:flex; gap:6px; padding:8px; border-top:1px solid #2d3a48; }
-#dm-panel .dm-foot input { flex:1; background:rgba(10,14,20,0.9); border:1px solid #3a4a5a;
-  border-radius:6px; color:#fff; padding:6px 8px; font:inherit; outline:none; }
-#dm-panel .dm-foot button { background:#24463a; color:#c9ffe0; border:1px solid #3a6a52;
-  border-radius:6px; padding:6px 12px; cursor:pointer; font:inherit; }`;
+  background:#58c98a; margin-right:6px; box-shadow:0 0 5px #58c98a; }`;
   document.head.appendChild(css);
 
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
   // ---------- character portraits ----------
-  // Load the shared character atlas once and blit the south-facing frame — the
-  // same art the world draws (js/sprites/characters-data.js globals).
   let charSheet = null, charSheetOk = false;
   if (typeof CHAR_SHEET !== "undefined") {
     charSheet = new Image();
@@ -110,11 +74,10 @@
     charSheet.src = CHAR_SHEET;
   }
   function paintPortrait(cv, charId) {
-    const px = cv.width;
-    const ctx = cv.getContext("2d");
+    const px = cv.width, ctx = cv.getContext("2d");
     ctx.clearRect(0, 0, px, px);
     if (charSheetOk && charId != null && typeof CHAR_CELL !== "undefined") {
-      const frame = (charId | 0) * CHAR_DIRS.length + 0; // 0 = south
+      const frame = (charId | 0) * CHAR_DIRS.length + 0; // south
       const sx = (frame % CHAR_COLS) * CHAR_CELL, sy = Math.floor(frame / CHAR_COLS) * CHAR_CELL;
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(charSheet, sx, sy, CHAR_CELL, CHAR_CELL, 0, 0, px, px);
@@ -200,7 +163,10 @@
       if (!p.me) {
         const w = document.createElement("button");
         w.className = "od-w"; w.textContent = "Whisper";
-        w.onclick = () => { openDM(p.id, p.name); dialog.classList.remove("on"); };
+        w.onclick = () => {
+          dialog.classList.remove("on");
+          if (window.LiveChat) LiveChat.compose("/w " + p.name + " ");
+        };
         meta.appendChild(w);
       }
       card.appendChild(meta);
@@ -213,7 +179,6 @@
     const r = await Server.call("/api/players/recent");
     if (!r || !r.ok) { recentBox.innerHTML = `<div class="od-empty">Couldn't load the roster right now.</div>`; return; }
     const nowSrv = r.now || Date.now();
-    // who is online RIGHT NOW, by name, so we can flag them in the table
     const liveNames = new Set(onlineList().map(p => String(p.name).toLowerCase()));
     const rows = r.players || [];
     if (!rows.length) { recentBox.innerHTML = `<div class="od-empty">No one has been seen in the last day.</div>`; return; }
@@ -238,126 +203,32 @@
     topBtn.classList.toggle("on", Hub.connected());
   }
 
-  // ---------- bottom-right Messages button ----------
-  const bar = document.createElement("div");
-  bar.id = "social-bar";
-  bar.innerHTML = `<button id="btn-dm">✉ Messages<span class="badge" id="dm-badge">0</span></button>`;
-  document.body.appendChild(bar);
-  const dmBadge = bar.querySelector("#dm-badge");
-
-  // ---------- DM threads ----------
-  const threads = new Map();   // peerId -> { name, msgs:[{me,text}], unread }
-  let curPeer = 0;
-
-  const dpanel = document.createElement("div");
-  dpanel.id = "dm-panel";
-  dpanel.className = "social-panel";
-  dpanel.innerHTML = `<div class="sp-head"><span>Messages</span><span class="sp-x">✕</span></div>
-    <div class="dm-tabs"></div>
-    <div class="dm-log"></div>
-    <div class="dm-foot"><input maxlength="500" placeholder="Write a message… (Enter)"><button>Send</button></div>`;
-  document.body.appendChild(dpanel);
-  const dmTabs = dpanel.querySelector(".dm-tabs");
-  const dmLog = dpanel.querySelector(".dm-log");
-  const dmInput = dpanel.querySelector(".dm-foot input");
-  dpanel.querySelector(".sp-x").onclick = () => dpanel.classList.remove("on");
-
-  function totalUnread() { let n = 0; for (const t of threads.values()) n += t.unread; return n; }
-  function refreshBadge() {
-    const n = totalUnread();
-    dmBadge.textContent = n;
-    dmBadge.classList.toggle("on", n > 0);
-  }
-  function thread(peerId, name) {
-    let t = threads.get(peerId);
-    if (!t) { t = { name: name || ("player" + peerId), msgs: [], unread: 0 }; threads.set(peerId, t); }
-    if (name) t.name = name;
-    return t;
-  }
-  function renderTabs() {
-    dmTabs.innerHTML = "";
-    for (const [id, t] of threads) {
-      const b = document.createElement("div");
-      b.className = "dm-tab" + (id === curPeer ? " sel" : "");
-      b.innerHTML = esc(t.name) + (t.unread ? ` <span class="dm-unread">(${t.unread})</span>` : "");
-      b.onclick = () => selectPeer(id);
-      dmTabs.appendChild(b);
-    }
-  }
-  function renderLog() {
-    const t = threads.get(curPeer);
-    if (!t) { dmLog.innerHTML = `<div class="dm-none">Pick a conversation, or whisper someone from the online list.</div>`; return; }
-    dmLog.innerHTML = "";
-    for (const msg of t.msgs) {
-      const d = document.createElement("div");
-      d.className = "dm-msg " + (msg.me ? "me" : "them");
-      d.textContent = msg.text;
-      dmLog.appendChild(d);
-    }
-    dmLog.scrollTop = dmLog.scrollHeight;
-  }
-  function selectPeer(id) {
-    curPeer = id;
-    const t = threads.get(id);
-    if (t) t.unread = 0;
-    refreshBadge(); renderTabs(); renderLog();
-    dmInput.focus();
-  }
-  function openDM(peerId, name) {
-    thread(peerId, name);
-    dpanel.classList.add("on");
-    selectPeer(peerId);
-  }
-  function sendCurrent() {
-    const text = dmInput.value.trim();
-    if (!text || !curPeer) return;
-    if (Hub.sendDM(curPeer, text)) dmInput.value = "";
-    // the sent line is appended when the hub echoes it back (onDM, from===myId)
-  }
-  dpanel.querySelector(".dm-foot button").onclick = sendCurrent;
-  dmInput.addEventListener("keydown", e => {
-    e.stopPropagation();
-    if (e.key === "Enter") sendCurrent();
-    else if (e.key === "Escape") { dpanel.classList.remove("on"); dmInput.blur(); }
-  });
-  bar.querySelector("#btn-dm").onclick = () => {
-    dpanel.classList.toggle("on");
-    if (dpanel.classList.contains("on")) {
-      if (!curPeer && threads.size) selectPeer([...threads.keys()][0]);
-      else { renderTabs(); renderLog(); }
-    }
+  // ---------- direct messages: they live in the game log ----------
+  const nameFor = id => {
+    const o = Hub.online.get(id);
+    return (o && o.name) || ("player" + id);
   };
-
   Hub.onDM(m => {
-    const mine = m.from === Hub.myId();
-    if (mine) {
-      const t = thread(m.to);
-      t.msgs.push({ me: true, text: m.text });
+    if (typeof logHTML !== "function") return;
+    if (m.from === Hub.myId()) {
+      // echo of a whisper I sent
+      logHTML("✉ <b>you → " + esc(nameFor(m.to)) + ":</b> " + esc(m.text), "whisper");
       if (m.delivered === false && typeof log === "function")
-        log("They're offline — your message won't have reached " + (t.name || "them") + ".", "sys");
+        log(nameFor(m.to) + " is offline — your whisper didn't reach them.", "sys");
     } else {
-      const t = thread(m.from, m.name);
-      t.msgs.push({ me: false, text: m.text });
-      // surface it in the message log too, then badge/notify if not looking
-      if (typeof logHTML === "function")
-        logHTML("✉ <b>" + esc(m.name) + "</b> whispers: " + esc(m.text), "whisper");
-      if (m.from !== curPeer || !dpanel.classList.contains("on")) t.unread++;
+      logHTML("✉ <b>" + esc(m.name) + " whispers:</b> " + esc(m.text), "whisper");
     }
-    refreshBadge(); renderTabs();
-    if ((mine ? m.to : m.from) === curPeer) renderLog();
   });
 
-  // ---------- roster refresh cadence ----------
+  // ---------- refresh cadence ----------
   Hub.onRoster(() => {
     updatePin(onlineList().length);
     if (dialog.classList.contains("on")) renderNow();
   });
   setInterval(() => {
-    const on = Hub.connected();
-    bar.classList.toggle("on", on);
     updatePin(onlineList().length);
-    if (!on) { dialog.classList.remove("on"); dpanel.classList.remove("on"); }
+    if (!Hub.connected()) dialog.classList.remove("on");
   }, 1000);
 
-  window.Social = { openDM, openRoster: () => { dialog.classList.add("on"); renderNow(); fetchRecent(); } };
+  window.Social = { openRoster: () => { dialog.classList.add("on"); renderNow(); fetchRecent(); } };
 })();

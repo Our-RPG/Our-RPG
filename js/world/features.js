@@ -530,6 +530,35 @@ function createWorldFeatures(ctx) {
     if (!roadCache.has(key)) roadCache.set(key, out);
   }
   const ROAD_SCAN = Math.ceil(CITY_MAX_LEN / VCELL);
+  // Non-forcing roadsNear for the far-LOD vista (render3d buildFarRibbons):
+  // reads ONLY village cells the road cache already holds (computed locally or
+  // injected by the road worker) and counts the cold ones instead of running
+  // their city-link A* — which, over a far-LOD rect on a freshly visited
+  // region, is a 5+ second synchronous main-thread freeze. The caller draws
+  // what's cached and retries once the worker has injected the rest.
+  function roadsNearCached(tx0, ty0, tx1, ty1) {
+    const out = [], seen = new Set();
+    let missing = 0;
+    const c0x = Math.floor(tx0 / VCELL) - ROAD_SCAN, c1x = Math.floor(tx1 / VCELL) + ROAD_SCAN;
+    const c0y = Math.floor(ty0 / VCELL) - ROAD_SCAN, c1y = Math.floor(ty1 / VCELL) + ROAD_SCAN;
+    for (let cy = c0y; cy <= c1y; cy++)
+      for (let cx = c0x; cx <= c1x; cx++) {
+        const v = villageNode(cx, cy);
+        if (!v) continue;
+        if (v.kind !== "city" &&
+            (v.x < tx0 - ROAD_MAX_LEN - 32 || v.x > tx1 + ROAD_MAX_LEN + 32 ||
+             v.y < ty0 - ROAD_MAX_LEN - 32 || v.y > ty1 + ROAD_MAX_LEN + 32)) continue;
+        const cached = roadCache.get(cx + "," + cy);
+        if (!cached) { missing++; continue; }
+        for (const rp of cached) {
+          if (seen.has(rp.key)) continue;
+          seen.add(rp.key);
+          if (rp.bbox[0] <= tx1 && rp.bbox[2] >= tx0 &&
+              rp.bbox[1] <= ty1 && rp.bbox[3] >= ty0) out.push(rp);
+        }
+      }
+    return { roads: out, missing };
+  }
   function roadsNear(tx0, ty0, tx1, ty1) {
     const out = [], seen = new Set();
     const c0x = Math.floor(tx0 / VCELL) - ROAD_SCAN, c1x = Math.floor(tx1 / VCELL) + ROAD_SCAN;
@@ -2311,7 +2340,7 @@ function createWorldFeatures(ctx) {
 
   return {
     DEEP_E, GRID8, ROAD_W, gridRoute, shapePath, polyBBox, waterBody, riverTrace,
-    lakeFill, lakeOutflows, riversNear, roadsNear, nearPoly, riverNearPt, riverSourceAt,
+    lakeFill, lakeOutflows, riversNear, roadsNear, roadsNearCached, nearPoly, riverNearPt, riverSourceAt,
     riverAtPt, solidDoorX, riverDoors, riverFlowAt, _roadWarm, _roadCellInject,
     roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, macroPixels, genName, villageInfo, villagesNear,
     poiInfo, wildIcon, atlasVariantAt, personalityAt, biomeGround, BIOME_VEG,

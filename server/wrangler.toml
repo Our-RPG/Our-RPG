@@ -12,6 +12,11 @@ compatibility_date = "2026-09-01"
 # in the dashboard (Settings → Domains & Routes) after the itch re-upload.
 routes = [
   { pattern = "our-rpg.com/api/*", zone_name = "our-rpg.com" },
+  # Community-zone page shells (src/zones.js pageShell): static files pass
+  # through to Pages; 404s for live community zones get a synthesized shell
+  # (zones/<zx>.<zy>.html and npc/<snake>/<shire>$<zx>.<zy>.html).
+  { pattern = "our-rpg.com/workshop/zones/*", zone_name = "our-rpg.com" },
+  { pattern = "our-rpg.com/workshop/npc/*", zone_name = "our-rpg.com" },
 ]
 
 # Weekly workshop digest — Monday 09:00 UTC (Monday evening NZT) — plus the

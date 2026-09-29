@@ -29,7 +29,7 @@
   css.textContent = `
   /* Chat lines now render into the main message log (#log); this is just the
      input, pinned along the bottom edge below the log. */
-  #livechat { position:fixed; left:10px; bottom:8px; width:66%; max-width:720px; z-index:45;
+  #livechat { position:fixed; left:10px; bottom:8px; width:72%; max-width:860px; z-index:45;
     font:12px OpenDyslexic, Verdana, sans-serif; display:none; }
   #livechat.on { display:block; }
   #livechat input { width:100%; box-sizing:border-box; background:rgba(10,14,20,0.82);
@@ -119,6 +119,18 @@
       inputEl.blur();
     }
   });
+
+  // Open the chat field with some text already in it (the roster's Whisper
+  // button prefills "/w <name> "), so DMs are just chat with a prefix.
+  window.LiveChat = {
+    compose(prefix) {
+      if (!Live.chatOn()) { if (typeof log === "function") log("Chat isn't available right now.", "sys"); return; }
+      inputEl.value = prefix || "";
+      inputEl.focus();
+      const n = inputEl.value.length;
+      try { inputEl.setSelectionRange(n, n); } catch (e) {}
+    },
+  };
 
   Live.onChat(m => {
     chatLine("<b>" + esc(m.name) + ":</b> " + esc(m.text));

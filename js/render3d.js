@@ -429,9 +429,11 @@ const R3D = (() => {
     // cells it has already finished, so repeat requests only cost new ground
     if (Math.abs(player.x - roadWarmX) > 96 || Math.abs(player.y - roadWarmY) > 96) {
       roadWarmX = player.x; roadWarmY = player.y;
-      // pad 16 cells ≥ roadsNear's ROAD_SCAN reach for every chunk the mesh
-      // pipeline can touch around the player
-      roadWorker.postMessage({ type: "warm", mx: player.x / 2, my: player.y / 2, pad: 16 });
+      // pad 19 cells: ≥ roadsNear's ROAD_SCAN (14) reach for every chunk the
+      // mesh pipeline can touch, PLUS the far-LOD ribbons' rect (±588 map
+      // units ≈ 4 cells + ROAD_SCAN = 18) so roadsNearCached converges to
+      // zero missing cells without any main-thread A*
+      roadWorker.postMessage({ type: "warm", mx: player.x / 2, my: player.y / 2, pad: 19 });
     }
   }
   // ---- chunk terrain-field warm worker ----
@@ -1017,6 +1019,14 @@ void main() {
   ];
   const FARLOD_SINK = 0.45, FARLOD_CELL = 96;
   let farMeshes = [], farMat = null, farJob = null, farCenter = null;
+  // far road/river ribbons live apart from the terrain grid so they can be
+  // redrawn alone: roads come from the CACHED cells only (roadsNearCached) —
+  // cells the road worker hasn't finished yet are skipped, counted here, and
+  // the ribbons redraw every couple of seconds until nothing is missing.
+  // Forcing them synchronously (the old way) ran the per-cell city-link A*
+  // for a ±1176-tile rect on the main thread: a 5+ second freeze every time
+  // the far vista recentred over a freshly visited region.
+  let farRibbonMeshes = [], farRibbonsMissing = false, farRibbonRetryAt = 0;
   // ACCURATE distant terrain colour: the biome the world would actually
   // classify there (world.biomeAt — the same pure classify the chunks use),
   // coloured with the mean pixel of that biome's own ground tile art from
@@ -1163,7 +1173,10 @@ void main() {
       m.frustumCulled = false; m.renderOrder = -4;
       out.push(m);
     }
-    const roadPolys = world.roadsNear(mx0, mz0, mx1, mz1).map(rp => rp.pts);
+    const roadQ = world.roadsNearCached ? world.roadsNearCached(mx0, mz0, mx1, mz1)
+      : { roads: world.roadsNear(mx0, mz0, mx1, mz1), missing: 0 };
+    farRibbonsMissing = roadQ.missing > 0;
+    const roadPolys = roadQ.roads.map(rp => rp.pts);
     const dg = mkStrips(roadPolys, () => 2.2, 0.14);
     if (dg) {
       const m = new THREE.Mesh(dg, farRoadMat);
@@ -1322,14 +1335,20 @@ void main() {
         scene.add(m);
         fresh.push(m);
       }
-      try {
-        for (const m of buildFarRibbons(farJob.cx, farJob.cz)) { scene.add(m); fresh.push(m); }
-      } catch (e) { /* distant roads/rivers are decoration — never fail the LOD */ }
       for (const m of farMeshes) { scene.remove(m); m.geometry.dispose(); }
       farMeshes = fresh;
       farCenter = { x: farJob.cx, z: farJob.cz };
       farJob = null;
+      refreshFarRibbons(farCenter.x, farCenter.z);
     }
+  }
+  function refreshFarRibbons(cx, cz) {
+    let fresh = [];
+    try { fresh = buildFarRibbons(cx, cz); }
+    catch (e) { /* distant roads/rivers are decoration — never fail the LOD */ }
+    for (const m of farRibbonMeshes) { scene.remove(m); m.geometry.dispose(); }
+    farRibbonMeshes = fresh;
+    for (const m of fresh) scene.add(m);
   }
   function syncFarLod() {
     if (!world || !world.heightAt) return;
@@ -1338,6 +1357,13 @@ void main() {
     if ((!farCenter || farCenter.x !== qx || farCenter.z !== qz) &&
         (!farJob || farJob.cx !== qx || farJob.cz !== qz)) startFarBuild(qx, qz);
     if (farJob) stepFarBuild();
+    // road cells the worker hadn't finished when the ribbons drew: redraw
+    // from cache every couple of seconds (a cached-only rebuild is a few ms)
+    // until every cell in reach has been injected
+    else if (farCenter && farRibbonsMissing && now >= farRibbonRetryAt) {
+      farRibbonRetryAt = now + 2000;
+      refreshFarRibbons(farCenter.x, farCenter.z);
+    }
   }
 
   // sun glint on the sea backdrop: a long shimmering reflection path toward the
@@ -6636,10 +6662,18 @@ void main() {
 
   // ---------- frame ----------
   let lastT = 0;
+  // per-section frame cost accumulators (perf triage; read via R3D._diag().framePerf)
+  const framePerf = {};
+  function _sec(name, ms) {
+    const s = framePerf[name] || (framePerf[name] = { ms: 0, n: 0, max: 0 });
+    s.ms += ms; s.n++; if (ms > s.max) s.max = ms;
+  }
   function frame() {
     if (!ready) return;
     const dt = Math.min(100, now - lastT);
     lastT = now;
+    let _fpT = performance.now();
+    const _fpMark = name => { const t = performance.now(); _sec(name, t - _fpT); _fpT = t; };
     // --- camera follow + orbit smoothing (must run before billboards are placed) ---
     const tx = WX(player.px), tz = WX(player.py);
     if (followX === null) { followX = tx; followZ = tz; followY = playerLiftY; }
@@ -6659,11 +6693,13 @@ void main() {
     // quantizes azimuth+length so this never churns per-frame)
     updateSun();
     updateShadowFade();
+    _fpMark("sun");
     if (sunState.key !== sunBakeKey) {
       sunBakeKey = sunState.key;
       for (const g of chunkMeshes.values()) if (g.userData.shSprites) buildChunkShadow(g);
       for (const rec of structs.values()) if (rec.shadowFeet) buildStructShadow(rec);
     }
+    _fpMark("shadowBake");
     // snow cover: one uniform, all patched materials follow (no rebakes)
     if (typeof snowNow === "function") snowUni.value = snowNow();
     // colour temperature: neutral white under a high sun, golden as it sinks
@@ -6790,18 +6826,19 @@ void main() {
     // hull stays at the water line in syncPlaced — so they stand ON the raft
     // instead of at its front edge / the water. (player.sailing has its own +0.45.)
     if (typeof ridingEnt === "function" && !player.sailing && ridingEnt()) playerLiftY += 0.4;
-    syncChunks();
-    syncNodes();
+    _fpMark("pre");
+    syncChunks(); _fpMark("syncChunks");
+    syncNodes(); _fpMark("syncNodes");
     tickAltarShimmer();
     syncPlaced();
-    syncDecor();
-    syncStructures();
-    syncEntities();
-    syncFlow();
-    syncFarLod();
-    syncClouds(wfog, dt);
+    syncDecor(); _fpMark("syncDecor");
+    syncStructures(); _fpMark("syncStructures");
+    syncEntities(); _fpMark("syncEntities");
+    syncFlow(); _fpMark("syncFlow");
+    syncFarLod(); _fpMark("syncFarLod");
+    syncClouds(wfog, dt); _fpMark("syncClouds");
     syncWaterfalls();
-    sweep();
+    sweep(); _fpMark("sweep");
     // --- place the camera exactly on its orbit circle (no chord dip = no nausea) ---
     const _cz = camZoom;
     const dist = 9.6 * _cz, hgt = 9.2 * _cz, fb = 0.5 * _cz;
@@ -6819,8 +6856,9 @@ void main() {
     seaHazeUni.value.set(scene.fog.near, scene.fog.far);
     glintCamUni.value.copy(camera.position);   // glint path radiates from the eye
     if (skyDome) skyDome.position.copy(camera.position);
-    renderer.render(scene, camera);
-    drawOverlay();
+    _fpMark("camera");
+    renderer.render(scene, camera); _fpMark("glRender");
+    drawOverlay(); _fpMark("overlay");
   }
 
   // lightweight runtime diagnostics (leak hunting / perf triage from the console)
@@ -6853,6 +6891,7 @@ void main() {
       calls: renderer ? renderer.info.render.calls : -1,
       gyPerf: { ...gyPerf },
       wlPerf: { ...wlPerf },
+      framePerf: JSON.parse(JSON.stringify(framePerf)),
     };
   }
 

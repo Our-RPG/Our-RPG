@@ -25,6 +25,7 @@ import * as seeds from "./seeds.js";
 import * as envelope from "./envelope.js";
 import * as ranks from "./ranks.js";
 import * as telemetry from "./telemetry.js";
+import * as zones from "./zones.js";
 
 export { RegionLedger } from "./region.js";
 export { LiveZone } from "./live.js";
@@ -97,6 +98,16 @@ const ROUTES = {
   "GET /api/ranks/skill":               ranks.skillMeta,
   "GET /api/ranks/me":                  ranks.mine,
 
+  "GET /api/zones/index":               zones.index,
+  "GET /api/zones/state":               zones.state,
+  "GET /api/zones/manifest":            zones.manifest,
+  "GET /api/zones/map":                 zones.mapImage,
+  "POST /api/zones/claim":              zones.claim,
+  "POST /api/zones/progress":           zones.progress,
+  "PUT /api/zones/checkpoint":          zones.putCheckpoint,
+  "GET /api/zones/checkpoint":          zones.getCheckpoint,
+  "POST /api/zones/publish":            zones.publish,
+
   "POST /api/telemetry":                telemetry.ingest,
   "GET /api/admin/telemetry":           telemetry.adminBrowse,
 
@@ -128,6 +139,13 @@ export default {
     // Same-origin tools (curl, health checks) carry no Origin header —
     // allowed. A browser origin outside the allowlist is refused.
     if (req.headers.get("origin") && !cors) return err("Origin not allowed.", 403);
+
+    // Community-zone page shells: the wrangler.toml routes put this worker in
+    // front of the static site for /workshop/zones/* and /workshop/npc/* —
+    // static files pass through to Pages; 404s for live community zones get
+    // their ~1 KB shell synthesized from the stored manifest (zones.js).
+    if (url.pathname.startsWith("/workshop/"))
+      return zones.pageShell(req, env, url);
 
     // health goes through the normal path so CORS headers attach — the
     // Phase-2 client reads it cross-origin to measure the clock offset

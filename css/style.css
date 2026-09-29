@@ -31,7 +31,7 @@ input, textarea { user-select: text; -webkit-user-select: text; -moz-user-select
   /* wider than before, and lifted clear of the chat input that now sits along
      the bottom edge (see #livechat in live-ui.js) so the newest line is never
      hidden behind it */
-  position: absolute; left: 10px; bottom: 40px; width: 66%; max-width: 720px;
+  position: absolute; left: 10px; bottom: 38px; width: 72%; max-width: 860px;
   pointer-events: none; font-size: 12px; line-height: 1.35;
   text-shadow: 1px 1px 0 #000;
 }
