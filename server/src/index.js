@@ -11,6 +11,7 @@ import * as link from "./link.js";
 import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
+import * as gen from "./gen.js";
 import * as koha from "./koha.js";
 import * as admin from "./admin.js";
 import { buildAndPostDigest } from "./digest.js";
@@ -60,6 +61,14 @@ const ROUTES = {
   "POST /api/workshop/review":          workshop.review,
   "GET /api/workshop/digest/latest":    workshop.latestDigest,
   "GET /api/workshop/gaps":             workshop.gaps,
+
+  "POST /api/gen/start":                gen.start,
+  "POST /api/gen/progress":             gen.progress,
+  "POST /api/gen/complete":             gen.complete,
+  "POST /api/gen/fail":                 gen.fail,
+  "GET /api/gen/mine":                  gen.mine,
+  "GET /api/gen/job":                   gen.getResult,
+  "POST /api/gen/delete":               gen.remove,
 
   "GET /api/koha/transparency":         koha.transparency,
 

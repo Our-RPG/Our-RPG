@@ -115,6 +115,9 @@ const PixelLab = (function () {
   }
 
   // Create a full 8-direction character. Returns { dirs: {dir: dataUrl}, characterId }.
+  // opts.onRef (optional), if given, fires with the characterId as soon as
+  // it's known — BEFORE polling starts — so a caller can persist it
+  // server-side and resume polling after e.g. a hard refresh.
   async function createCharacter(opts, onTick) {
     const body = {
       description: opts.description,
@@ -130,12 +133,23 @@ const PixelLab = (function () {
     if (opts.name) body.name = opts.name;
     const start = await v2("/create-character-v3", body);
     const cid = start.character_id || start.id;
+    if (opts.onRef) opts.onRef(cid);
     if (onTick) onTick({ status: "processing" });
     const done = await pollCharacter(cid, onTick);
     return { characterId: cid, dirs: await rotationsToDataUrls(done.rotation_urls) };
   }
 
-  // Create an 8-direction object/item. Returns { dirs, objectId }.
+  // Resume polling a character generation started earlier (e.g. before a
+  // hard refresh) — no new PixelLab call, just the same poll+convert tail
+  // createCharacter would have done.
+  async function resumeCharacter(characterId, onTick) {
+    const done = await pollCharacter(characterId, onTick);
+    return { characterId, dirs: await rotationsToDataUrls(done.rotation_urls) };
+  }
+
+  // Create an 8-direction object/item. Returns { dirs, objectId }. opts.onRef
+  // fires with the resumable ref (the background job id when PixelLab went
+  // async, else the object id) as soon as it's known, before polling.
   async function createObject8(opts, onTick) {
     const body = {
       description: opts.description,
@@ -148,11 +162,21 @@ const PixelLab = (function () {
     const start = await v2("/create-8-direction-object", body);
     const jobId = start.background_job_id || start.job_id;
     const oid = start.object_id || start.id;
+    if (opts.onRef && jobId) opts.onRef(jobId);
     let done;
     if (jobId) { const j = await pollJob(jobId, onTick); done = j.last_response || j; }
     else done = start;
     const rots = done.rotation_urls || (done.object && done.object.rotation_urls);
     return { objectId: oid, dirs: await rotationsToDataUrls(rots) };
+  }
+
+  // Resume polling an 8-direction object job started earlier by its
+  // background_job_id (createObject8's onRef value).
+  async function resumeObject8(jobId, onTick) {
+    const j = await pollJob(jobId, onTick);
+    const done = j.last_response || j;
+    const rots = done.rotation_urls || (done.object && done.object.rotation_urls);
+    return { objectId: done.object_id || done.id, dirs: await rotationsToDataUrls(rots) };
   }
 
   // Single-direction object (icon / top-down item). Returns a data URL.
@@ -224,6 +248,7 @@ const PixelLab = (function () {
   return {
     setKey, hasKey, maskedKey, balance,
     generateImage, createCharacter, createObject8, createObject1,
+    resumeCharacter, resumeObject8,
     rotate8, animate,
   };
 })();

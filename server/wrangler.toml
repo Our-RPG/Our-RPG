@@ -6,6 +6,14 @@ name = "taiao-server"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
 
+# Canonical home: our-rpg.com. The zone route below makes the API same-origin
+# for the game and Workshop served from that domain (no CORS in the primary
+# path); the *.workers.dev URL keeps working for older builds until disabled
+# in the dashboard (Settings → Domains & Routes) after the itch re-upload.
+routes = [
+  { pattern = "our-rpg.com/api/*", zone_name = "our-rpg.com" },
+]
+
 # Weekly workshop digest — Monday 09:00 UTC (Monday evening NZT) — plus the
 # Phase-2 daily tick: rank recompute, envelope sweep, stale-stock sweep.
 [triggers]
@@ -40,11 +48,14 @@ bucket_name = "taiao-vault"
 
 [vars]
 # Comma-separated origins allowed to call the API (no trailing slashes).
-ALLOWED_ORIGINS = "https://html.itch.zone,http://localhost:8899,http://127.0.0.1:8899"
-# + ",https://taiao-workshop.pages.dev" — add the deployed Workshop's origin here once
-# it's known (Phase 5); passkeys.js derives its per-origin RP id from this same list.
-# WebAuthn relying-party id (the domain the GAME is served from, not the API).
-RP_ID = "html.itch.zone" # itch embed origin; passkeys stay unadvertised on this shared domain
+# our-rpg.com covers both the game (root) and the Workshop (/workshop) —
+# same origin. html.itch.zone stays for the itch embed. passkeys.js derives
+# its per-origin RP id from this same list.
+ALLOWED_ORIGINS = "https://our-rpg.com,https://html.itch.zone,http://localhost:8899,http://127.0.0.1:8899"
+# WebAuthn relying-party fallback id (used only when a request carries no
+# Origin header; with one, rpIdFor() derives the RP id per-origin from the
+# allowlist above — our-rpg.com passkeys and itch passkeys coexist).
+RP_ID = "our-rpg.com"
 # Live-presence moderation gates (live.js): the chat + player-trading
 # protocols are fully built client AND server side, but refused until these
 # are "on" — flip them (and redeploy) once moderation is staffed. No client

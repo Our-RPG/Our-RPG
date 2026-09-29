@@ -266,6 +266,16 @@ textarea { resize: vertical; min-height: 78px; }
 .tile .meta .name { font-weight: 650; }
 .tile .meta .sub { color: var(--ink-faint); font-size: .72rem; font-family: var(--mono); }
 
+/* ---- generation-job cards (js/genjobs.js) — the "up top" persistent card
+   row shown while a PixelLab generation is in flight, then completed/failed,
+   surviving a hard refresh since the job is tracked server-side. ---- */
+.genjob-row { display: flex; gap: .7rem; overflow-x: auto; padding: .2rem .1rem .8rem; margin-bottom: .6rem; }
+.genjob-card {
+  flex: 0 0 auto; width: 190px; background: var(--bg-1); border: 1px solid var(--line-2);
+  border-radius: var(--radius); padding: .6rem .65rem;
+}
+.genjob-head { display: flex; align-items: center; gap: .4rem; font-size: .82rem; margin-bottom: .2rem; }
+
 .votebar { display: flex; align-items: center; gap: .5rem; margin-top: .4rem; }
 .votes { font-weight: 700; color: var(--gold); font-variant-numeric: tabular-nums; font-family: var(--mono); }
 .crown { color: var(--gold); }

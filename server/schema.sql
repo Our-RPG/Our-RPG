@@ -218,3 +218,30 @@ CREATE TABLE IF NOT EXISTS rank_meta (
   active      INTEGER NOT NULL,                      -- 1 once ≥1000 qualify
   computed_at INTEGER NOT NULL
 );
+
+-- ============================== Phase 6 ====================================
+-- PixelLab generation jobs, tracked server-side so the Workshop's "generating"
+-- card survives a hard refresh (or a closed tab) instead of living only in
+-- that one browser's memory. The server never talks to PixelLab itself — the
+-- client still drives the actual generation with its own BYO PixelLab key —
+-- this is just a durable status board: start (before the PixelLab call),
+-- progress (the async job/character id, once known, for resuming polling),
+-- then complete (result payload, mirrors the proposals R2 pattern) or fail.
+CREATE TABLE IF NOT EXISTS gen_jobs (
+  id            INTEGER PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  sprite_type   TEXT NOT NULL,                       -- character|monster|object|ui
+  sprite_id     TEXT NOT NULL,
+  label         TEXT NOT NULL,                       -- display name (sprite id, or state/costume name)
+  subject       TEXT,                                -- gen:<type>:<key> when adding to an EXISTING sprite; null for a brand-new one
+  prompt        TEXT NOT NULL,
+  body_type     TEXT,                                -- humanoid|quadruped (monster only)
+  seed          TEXT,
+  pixellab_kind TEXT NOT NULL,                        -- character|object8|object1|image — which PixelLab call/poll shape
+  pixellab_ref  TEXT,                                 -- characterId or background_job_id, once known (resumable kinds only)
+  status        TEXT NOT NULL DEFAULT 'generating',   -- generating|completed|failed|deleted
+  error         TEXT,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gen_jobs_user ON gen_jobs(user_id, status, created_at);

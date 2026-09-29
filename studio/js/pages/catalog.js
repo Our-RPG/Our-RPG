@@ -95,24 +95,14 @@ function spriteRowDirs(r) {
   return 1;
 }
 
-// A "🚩 Needs aligning" flag for 1-direction sprites — a single-choice server vote
-// (subject gen:<type>:<spriteId>, field needs_align). It toggles, and highlights
-// when the current user has flagged it (Taiao.myVote reads the local cache, so no
-// per-row tally fetch is needed and it scales to the whole sprite list).
-function spriteAlignFlag(r) {
-  return VoteWidget.buttons({
-    kind: r.type, folder: String(r.id), field: "needs_align",
-    choices: [["needs_align", "🚩 Needs aligning"]],
-    label: "flag this sprite as needing alignment",
-    getTallies: () => ({}), refetch: () => {},
-  });
-}
-
 function pageSprites(root) {
   clear(root);
   const page = el("div.page");
   page.appendChild(el("div.banner.info", { html: "Every drawable sprite in the game — characters, world objects, monsters, item icons, biome tiles and map icons. Sprites are identified by <b>id</b> only (names belong to the instantiated Player / NPC / World Objects / Monsters / Items / Biomes, not the shared art). Click an id to open its sprite page (art, state tree &amp; animations)." }));
   page.appendChild(spriteCreateCard());
+  const genBoard = el("div");
+  GenJobs.mountBoard(genBoard, {});
+  page.appendChild(genBoard);
 
   const CATS = [["character", "Character"], ["object", "Object"], ["monster", "Monster"], ["ui", "Item"], ["tile", "Biome"], ["map", "Map icon"]];
   const rows = [];
@@ -190,8 +180,8 @@ function pageSprites(root) {
     const table = el("table", { style: "border-collapse:collapse;width:100%" });
     // TableFilter.enhance adds a filter field at the top of each column (incl.
     // Sprite size & Directions) — the cells stay plain text, not editable.
-    table.appendChild(el("tr", null, ["Sprite id", "Category", "Sprite size", "Directions", "Human/AI", "Artist/Prompter", "Needs aligning"].map(h =>
-      el("th", h === "Needs aligning" ? { style: th, text: h, "data-tf-skip": "" } : { style: th, text: h }))));   // flag column: no filter/sort
+    table.appendChild(el("tr", null, ["Sprite id", "Category", "Sprite size", "Directions", "Human/AI", "Artist/Prompter"].map(h =>
+      el("th", { style: th, text: h }))));
     for (const r of shown) {
       const cv = el("canvas", { width: 64, height: 64, style: CAT_ICON });
       try { r.provider.draw(cv, r.e, 0); } catch (_) {}
@@ -212,7 +202,6 @@ function pageSprites(root) {
         el("td", { style: td + ";color:var(--ink-dim)", text: String(spriteRowDirs(r)) }),
         el("td", { style: td }, [mk.originHost]),
         el("td", { style: td }, [mk.makerHost]),
-        el("td", { style: td }, [spriteRowDirs(r) === 1 ? spriteAlignFlag(r) : el("span", { style: "color:var(--ink-dim)", text: "—" })]),
       ]));
     }
     holder.appendChild(el("div", { style: "overflow-x:auto" }, [TableFilter.enhance(table)]));
@@ -2007,8 +1996,22 @@ function openUnifiedGenerateDialog() {
   m.appendChild(bodyField);
 
   const prompt = el("textarea", { placeholder: "" });
+  const taken = takenSpriteIds();
+  const suggestKind = () => typeSel.value === "monster" ? "monster:" + monsterBody : typeSel.value;
+  const suggestBtn = el("button.btn.sm.ghost", {
+    text: "✨ Suggest a prompt", onclick: async () => {
+      if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
+      suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
+      try {
+        const s = await GenJobs.suggest(suggestKind(), { taken });
+        prompt.value = s.prompt; sid.input.value = s.id; sid.validate();
+      } catch (e) { toast(e.message || String(e), "err", 6000); }
+      finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+    },
+  });
   m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), prompt]));
-  const sid = snakeIdField("sprite_id", "snake_case, e.g. rangi_warrior", takenSpriteIds());
+  m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));
+  const sid = snakeIdField("sprite_id", "snake_case, e.g. rangi_warrior", taken);
   m.appendChild(sid.field);
   const seedIn = el("input", { type: "number", placeholder: "seed (optional)" });
   m.appendChild(el("label.field", null, [el("span", { text: "Seed" }), seedIn]));
@@ -2046,44 +2049,31 @@ function openUnifiedGenerateDialog() {
     .then(b => { balance = { gen: (b && b.subscription && b.subscription.generations) || 0, usd: (b && b.credits && b.credits.usd) || 0 }; updateCost(); })
     .catch(() => { balLine.textContent = ""; });
 
-  const stage = el("div.stage", { style: "margin-top:.8rem;min-height:160px" });
-  const stageMsg = t => { clear(stage); stage.appendChild(el("div.center-col", null, [el("div.empty", { html: t })])); };
-  stageMsg("🎨 Pick a type, describe it, and generate.");
-  const saveRow = el("div", { style: "margin-top:.6rem" });
+  m.appendChild(el("p.tagline", { style: "margin-top:.6rem", text: "Generate closes this dialog — the sprite appears as a card up top while PixelLab works, and stays there (even across a refresh) once it's done." }));
   const genBtn = el("button.btn.primary", { text: "Generate" });
-  m.appendChild(el("div.btn-row", { style: "margin-top:.4rem" }, [genBtn]));
-  m.appendChild(stage); m.appendChild(saveRow);
-
-  const showDirs = dirs => { clear(stage); const grid = el("div.dirgrid", { style: "width:100%" }); for (const d of DIRS8) { const cv = el("canvas.spr"); if (dirs[d]) drawSprite(cv, dirs[d], 96); grid.appendChild(el("div.dircell", null, [cv, el("div.lbl", { text: DIR_SHORT[d] })])); } stage.appendChild(grid); };
-  const showImage = src => { clear(stage); const cv = el("canvas.spr", { style: "width:160px;height:160px" }); drawSprite(cv, src, 160); stage.appendChild(cv); };
+  m.appendChild(el("div.btn-row", { style: "margin-top:.4rem" }, [genBtn, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() })]));
 
   genBtn.onclick = async () => {
+    if (!Taiao.logged()) { toast("Sign in (Settings) to generate.", "warn"); return; }
     if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); return; }
     if (!prompt.value.trim()) { toast("Write a prompt first.", "warn"); return; }
     if (!sid.input.value.trim()) { toast("Enter a sprite_id.", "warn"); return; }
     if (!sid.validate()) { toast("That sprite_id is invalid or already in use.", "warn"); return; }
-    const gtype = typeSel.value, desc = prompt.value.trim(), seed = seedIn.value;
+    const gtype = typeSel.value, desc = prompt.value.trim(), seed = seedIn.value, spriteId = sid.input.value.trim().toLowerCase();
     const isItem = gtype === "item";
     const saveType = gtype === "character" ? "character" : gtype === "monster" ? "monster" : gtype === "object" ? "object" : "ui";
-    const gen = isItem ? { view: "high top-down", size: 32 } : { view: "high top-down", size: 128 };
-    genBtn.disabled = true; clear(stage); stage.appendChild(el("div.center-col", null, [el("div.spinner"), el("small", { text: "PixelLab jobs take a few seconds to a couple of minutes." })]));
-    let result = null;
-    try {
-      if (gtype === "character" || (gtype === "monster" && monsterBody === "humanoid")) { const r = await PixelLab.createCharacter({ description: desc, view: gen.view, size: gen.size, template: "mannequin", seed }); result = { dirs: r.dirs }; showDirs(r.dirs); }
-      else if (isItem) { const src = await PixelLab.createObject1({ description: desc, view: gen.view, size: gen.size, seed }); result = { image: src }; showImage(src); }
-      else { const r = await PixelLab.createObject8({ description: desc, view: gen.view, size: gen.size, seed }); result = { dirs: r.dirs }; showDirs(r.dirs); }
-    } catch (e) { toast(e.message, "err", 7000); stageMsg("😕 " + escapeHtml(e.message)); genBtn.disabled = false; return; }
-    genBtn.disabled = false;
-    clear(saveRow);
-    saveRow.appendChild(el("button.btn.primary", { text: "Save as draft →", onclick: async () => {
-      const spriteId = sid.input.value.trim().toLowerCase();
-      const p = Store.newProject(saveType, spriteId);
-      p.prompt = desc; p.spriteId = spriteId; p.folder = spriteId; p.gen = { view: gen.view, size: gen.size };
-      if (gtype === "monster") p.bodyType = monsterBody;
-      p.base = result.dirs ? result.dirs : { image: result.image };
-      p.provenance = "pixellab";
-      await Store.save(p); toast("Saved to your drafts.", "ok"); App.go("#/edit/" + p.id);
-    } }));
+    const pixellabKind = (gtype === "character" || (gtype === "monster" && monsterBody === "humanoid")) ? "character" : isItem ? "object1" : "object8";
+    const view = "high top-down", size = isItem ? 32 : 128;
+    bg.remove();
+    GenJobs.execute(
+      { spriteType: saveType, spriteId, label: spriteId, prompt: desc, bodyType: gtype === "monster" ? monsterBody : undefined, seed: seed || undefined, pixellabKind },
+      async onRef => {
+        if (pixellabKind === "character") { const r = await PixelLab.createCharacter({ description: desc, view, size, template: "mannequin", seed, onRef }); return { dirs: r.dirs }; }
+        if (pixellabKind === "object8") { const r = await PixelLab.createObject8({ description: desc, view, size, seed, onRef }); return { dirs: r.dirs }; }
+        const src = await PixelLab.createObject1({ description: desc, view, size, seed }); return { image: src };
+      }
+    ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
+    toast("Generating “" + spriteId + "” — watch it in the card up top.", "ok");
   };
   bg.appendChild(m); document.body.appendChild(bg);
 }
@@ -2114,7 +2104,9 @@ async function handleSpriteUpload(cat, fileInp, idIn) {
 function spriteCreateCard() {
   const card = el("div.card");
   card.appendChild(el("div.sectitle", null, [el("h3", null, ["Create a sprite ", el("span.hint", { text: "generate with PixelLab, or upload your own" })])]));
-  if (!PixelLab.hasKey())
+  if (!Taiao.logged())
+    card.appendChild(el("div.banner.info", { html: '<a href="#/settings">Sign in</a> to generate — it tracks your in-progress generations so they survive a refresh (uploads work without signing in).' }));
+  else if (!PixelLab.hasKey())
     card.appendChild(el("div.banner.warn", { html: 'Add your PixelLab API key in <a href="#/settings">Settings</a> to generate (uploads work without a key).' }));
   card.appendChild(el("div.btn-row", { style: "flex-wrap:wrap;gap:.5rem" }, [
     el("button.btn.primary.sm", { text: "Generate new sprite with PixelLab", onclick: openUnifiedGenerateDialog }),

@@ -295,6 +295,28 @@ const Taiao = (function () {
     return r && r.ok ? r.fields : {};
   }
 
+  // ---- generation jobs: a durable status board for PixelLab generations ---
+  // (server/src/gen.js — see js/genjobs.js). The server never talks to
+  // PixelLab; this just tracks start/progress/complete/fail so an in-flight
+  // generation survives a hard refresh instead of living only in one tab.
+  async function genStart(jobMeta) {
+    if (!logged()) return { error: "Sign in to generate." };
+    return call("/api/gen/start", { body: jobMeta });
+  }
+  const genProgress = (id, pixellabRef) => call("/api/gen/progress", { body: { id, pixellabRef } });
+  const genComplete = (id, result) => call("/api/gen/complete", { body: { id, result } });
+  const genFail = (id, error) => call("/api/gen/fail", { body: { id, error: String(error == null ? "" : error).slice(0, 300) } });
+  async function genMine() {
+    if (!logged()) return [];
+    const r = await call("/api/gen/mine");
+    return r && r.ok ? r.jobs : [];
+  }
+  async function genJob(id) {
+    const r = await call("/api/gen/job?id=" + Number(id));
+    return r && r.ok ? r.job : null;
+  }
+  const genDelete = id => call("/api/gen/delete", { body: { id: Number(id) } });
+
   // Resume a stored session a beat after boot.
   if (token) setTimeout(refreshMe, 300);
 
@@ -309,5 +331,6 @@ const Taiao = (function () {
     endorseCostume, flagCostume, voteCostume, tally,
     castVote, myVote,
     curator, listMine, pendingQueue, review,
+    genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
   };
 })();

@@ -399,6 +399,11 @@ function stateTreeCard(title, hint, nodes, voteCtx, animMap) {
       voteCtx ? el("button.btn.ghost.sm", { text: "🏷 request art", onclick: () => openRequestArtDialog(voteCtx.type, voteCtx.key) }) : null,
     ].filter(Boolean)),
   ]));
+  if (voteCtx) {
+    const genBoard = el("div");
+    GenJobs.mountBoard(genBoard, { subject: Taiao.subjectFor(voteCtx.type, voteCtx.key) });
+    card.appendChild(genBoard);
+  }
   const byId = {}; nodes.forEach(n => byId[n.id] = n);
   const kids = {}; nodes.forEach(n => { const p = (n.parent && byId[n.parent]) ? n.parent : "__root"; (kids[p] || (kids[p] = [])).push(n); });
   const pathOf = n => { const segs = []; let cur = n, g = 0; while (cur && g++ < 24) { segs.unshift(cur.seg || slug(cur.name)); cur = (cur.parent && byId[cur.parent]) ? byId[cur.parent] : null; } return segs.join("."); };
@@ -528,6 +533,18 @@ async function openCreateStateDialog(voteCtx, parentNode) {
   const promptIn = el("textarea", { placeholder: "describe the change… e.g. wearing heavy plate armour" });
   m.appendChild(el("label.field", null, [el("span", { text: "State name" }), nameIn]));
   m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), promptIn]));
+  const suggestBtn = el("button.btn.sm.ghost", {
+    text: "✨ Suggest a prompt", onclick: async () => {
+      if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
+      suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
+      try {
+        const s = await GenJobs.suggest("state", { baseName: parentNode.name || parentNode.path });
+        promptIn.value = s.prompt; nameIn.value = s.id;
+      } catch (e) { toast(e.message || String(e), "err", 6000); }
+      finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+    },
+  });
+  m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));
 
   // "Use outfit" — reveal a combobox of ids of the SAME type
   const ph = type === "monster" ? "monster id, e.g. goblin · brown_bear" : type === "object" ? "object id, e.g. anvil · barrel" : "state id, e.g. cathal.armed · idir";
@@ -551,6 +568,7 @@ async function openCreateStateDialog(voteCtx, parentNode) {
   const status = el("div.tagline", { style: "min-height:1.2em" });
   const go = el("button.btn.primary", { text: "Generate & add", onclick: async () => {
     const name = nameIn.value.trim(); if (!name) return toast("Name the state.", "warn");
+    if (!Taiao.logged()) { toast("Sign in (Settings) to generate.", "warn"); return; }
     if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); return; }
     const outfitId = outfitField.style.display !== "none" ? outfitIn.value.trim() : "";
     go.disabled = true;
@@ -566,24 +584,24 @@ async function openCreateStateDialog(voteCtx, parentNode) {
       status.textContent = "Resolving reference sprite…";
       try { const cv = el("canvas", { width: 128, height: 128 }); parentNode.draw(cv, 0); await sleep(320); const url = cv.toDataURL("image/png"); if (url && url.length > 300) reference = { type: "base64", base64: dataUrlToB64(url), format: "png" }; } catch (_) {}
     }
-    status.textContent = "Generating with PixelLab…";
-    try {
-      const desc = (promptIn.value.trim() || name) + (outfitId ? (", wearing the outfit of " + outfitId) : "");
-      // Only characters, monsters and world objects are directional (8-way).
-      // Anything else (items / biome tiles / map icons / any future single-frame
-      // type) goes through the PixelLab pipeline as ONE image, not an 8-dir set.
-      const single = !(type === "character" || type === "monster" || type === "object");
-      let stateArt;
-      if (single) { const img = await PixelLab.generateImage({ description: desc, reference }); stateArt = { dirs: { south: img } }; }
-      else if (type === "object") { const r = await PixelLab.createObject8({ description: desc, reference }); stateArt = { dirs: r.dirs }; }
-      else { const r = await PixelLab.createCharacter({ description: desc, reference }); stateArt = { dirs: r.dirs }; }
-      const drafts = await Store.all(type);
-      let p = drafts.find(x => x.folder === folder);
-      if (!p) { p = Store.newProject(type, (Providers.get(type).entry(folder) || {}).name || folder); p.folder = folder; }
-      (p.states || (p.states = [])).push({ id: rid(), name, parent: parentNode.path, outfit: outfitId || undefined, dirs: stateArt.dirs, note: "from " + parentNode.path + (outfitId ? " · outfit " + outfitId : "") });
-      await Store.save(p);
-      toast("New state added to a draft.", "ok"); bg.remove(); App.go("#/edit/" + p.id);
-    } catch (e) { status.textContent = ""; toast(e.message, "err", 6000); go.disabled = false; }
+    const desc = (promptIn.value.trim() || name) + (outfitId ? (", wearing the outfit of " + outfitId) : "");
+    // Only characters, monsters and world objects are directional (8-way).
+    // Anything else (items / biome tiles / map icons / any future single-frame
+    // type) goes through the PixelLab pipeline as ONE image, not an 8-dir set.
+    const single = !(type === "character" || type === "monster" || type === "object");
+    const pixellabKind = single ? "image" : (type === "object" ? "object8" : "character");
+    const subject = Taiao.subjectFor(type, folder);
+    bg.remove();
+    GenJobs.execute(
+      { spriteType: type, spriteId: folder, label: name, subject, prompt: desc, pixellabKind },
+      async onRef => {
+        if (single) { const img = await PixelLab.generateImage({ description: desc, reference }); return { dirs: { south: img } }; }
+        if (type === "object") { const r = await PixelLab.createObject8({ description: desc, reference, onRef }); return { dirs: r.dirs }; }
+        const r = await PixelLab.createCharacter({ description: desc, reference, onRef }); return { dirs: r.dirs };
+      }
+    ).then(jobId => { if (reference) GenJobs.setReference(jobId, reference); })
+     .catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
+    toast("Generating “" + name + "” — watch it in the card above the state tree.", "ok");
   } });
   m.appendChild(status);
   m.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [go, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() })]));
@@ -1543,7 +1561,7 @@ function renderItemPreview(page, provider, entry, ctx) {
 
   const fileInp = el("input", { type: "file", accept: "image/*", style: "display:none" });
   const uploadBtn = el("button.btn.sm.ghost", { text: "⬆ Upload your own", onclick: () => fileInp.click() });
-  const genBtn = el("button.btn.sm.ghost", { text: "🎨 Generate with PixelLab", onclick: generate });
+  const genBtn = el("button.btn.sm.ghost", { text: "🎨 Generate with PixelLab", onclick: () => openGenerateIconDialog() });
   const staging = el("div");
   const galleryHost = el("div");
 
@@ -1552,6 +1570,9 @@ function renderItemPreview(page, provider, entry, ctx) {
     el("div.btn-row", null, [uploadBtn, genBtn]),
     fileInp, staging,
   ]));
+  const genBoard = el("div");
+  GenJobs.mountBoard(genBoard, { subject: Taiao.subjectFor("ui", key) });
+  pc.appendChild(genBoard);
   pc.appendChild(galleryHost);
   page.appendChild(pc);
 
@@ -1578,14 +1599,38 @@ function renderItemPreview(page, provider, entry, ctx) {
     try { stage(await readFile(f), "Your uploaded icon", "upload"); } catch (e) { toast(e.message || "Upload failed.", "err"); }
     fileInp.value = "";
   });
-  async function generate() {
-    if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); App.go("#/settings"); return; }
-    const label = genBtn.textContent; genBtn.disabled = true; genBtn.textContent = "Generating…";
-    try {
-      const url = await PixelLab.generateImage({ description: name + ", a single game item icon", size: 64, view: "high top-down" });
-      stage(url, "Generated with PixelLab", "pixellab");
-    } catch (e) { toast("Generation failed: " + (e && e.message || e), "err", 6000); }
-    finally { genBtn.disabled = false; genBtn.textContent = label; }
+  function openGenerateIconDialog() {
+    const bg = el("div.modal-bg", { onclick: e => { if (e.target === bg) bg.remove(); } });
+    const m = el("div.modal");
+    m.appendChild(el("span.x", { text: "×", onclick: () => bg.remove() }));
+    m.appendChild(el("h2", { text: "Generate icon with PixelLab" }));
+    const promptIn = el("textarea", { placeholder: "describe the icon…" });
+    promptIn.value = name + ", a single game item icon";
+    m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), promptIn]));
+    const suggestBtn = el("button.btn.sm.ghost", {
+      text: "✨ Suggest a prompt", onclick: async () => {
+        if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
+        suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
+        try { const s = await GenJobs.suggest("item", { baseName: name }); promptIn.value = s.prompt; }
+        catch (e) { toast(e.message || String(e), "err", 6000); }
+        finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+      },
+    });
+    m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));
+    const go = el("button.btn.primary", { text: "Generate" });
+    m.appendChild(el("div.btn-row", { style: "margin-top:.4rem" }, [go, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() })]));
+    go.onclick = () => {
+      if (!Taiao.logged()) { toast("Sign in (Settings) to generate.", "warn"); return; }
+      if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); return; }
+      const desc = promptIn.value.trim() || (name + ", a single game item icon");
+      bg.remove();
+      GenJobs.execute(
+        { spriteType: "ui", spriteId: id, label: name, subject: Taiao.subjectFor("ui", key), prompt: desc, pixellabKind: "image" },
+        async () => { const url = await PixelLab.generateImage({ description: desc, size: 64, view: "high top-down" }); return { image: url }; }
+      ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
+      toast("Generating an icon — watch it in the card above.", "ok");
+    };
+    bg.appendChild(m); document.body.appendChild(bg);
   }
   async function publish(dataUrl) {
     if (!Taiao.logged()) { toast("Sign in to share.", "warn"); App.go("#/settings"); return; }
