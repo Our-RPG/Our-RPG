@@ -19,6 +19,7 @@ import { buildAndPostDigest } from "./digest.js";
 import * as region from "./region.js";
 import * as live from "./live.js";
 import * as hub from "./hub.js";
+import * as players from "./players.js";
 import * as shops from "./shops.js";
 import * as seeds from "./seeds.js";
 import * as envelope from "./envelope.js";
@@ -78,12 +79,17 @@ const ROUTES = {
   "GET /api/profile/gallery/item":      profile.getItem,
   "POST /api/profile/gallery/delete":   profile.remove,
 
+  "POST /api/sprites/publish":          profile.publish,
+  "GET /api/sprites/published":         profile.publishedList,
+  "GET /api/sprites/published/item":    profile.publishedItem,
+
   "GET /api/koha/transparency":         koha.transparency,
 
   "POST /api/region/push":              region.pushDeltas,
   "GET /api/region/pull":               region.pullDeltas,
   "GET /api/live/ws":                   live.connect,
   "GET /api/hub/ws":                    hub.connect,
+  "GET /api/players/recent":            players.recent,
   "GET /api/shop/stock":                shops.stock,
   "POST /api/shop/trade":               shops.trade,
   "POST /api/seeds/next":               seeds.next,

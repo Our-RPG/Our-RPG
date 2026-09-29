@@ -22,6 +22,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires_at  INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+-- the world-roster "seen in last 24h" scan (server/src/players.js)
+CREATE INDEX IF NOT EXISTS idx_users_last_seen ON users(last_seen);
 
 -- WebAuthn credentials (optional passkeys).
 CREATE TABLE IF NOT EXISTS passkeys (
@@ -254,18 +256,46 @@ CREATE INDEX IF NOT EXISTS idx_gen_jobs_user ON gen_jobs(user_id, status, create
 -- pin the ones they want to keep. Metadata + a small thumbnail here; the full
 -- rotation art bundle rides in R2 at profile/<id>.json. Private and inert —
 -- promoting an item into the game is still the explicit "upload to game" flow.
+-- Also the destination for EVERY sprite generated through the Workshop's
+-- PixelLab pipeline (client hooks GenJobs.execute), each carrying a proposed
+-- sprite_id + category tag; from here a player can delete, regenerate (keeps the
+-- old, adds the new), or publish to the public catalogue (published_sprites).
 CREATE TABLE IF NOT EXISTS profile_gallery (
-  id            INTEGER PRIMARY KEY,
-  user_id       INTEGER NOT NULL REFERENCES users(id),
-  category      TEXT NOT NULL,                        -- character|monster|object|item (heuristic; PixelLab only knows character vs object)
-  source        TEXT NOT NULL DEFAULT 'pixellab',     -- provenance of the art
-  pixellab_kind TEXT NOT NULL,                        -- character|object — which PixelLab list it came from
-  pixellab_id   TEXT NOT NULL,                        -- the PixelLab character/object id — dedupe key
-  name          TEXT,                                 -- display name (PixelLab name, or a slug of the prompt)
-  prompt        TEXT,
-  thumb         TEXT,                                 -- small south-facing data URL for the grid (full art rides in R2)
-  created_at    INTEGER NOT NULL,                     -- PixelLab's own created_at, so the shelf sorts by when it was generated
-  added_at      INTEGER NOT NULL,                     -- when it was pinned to this profile
+  id                  INTEGER PRIMARY KEY,
+  user_id             INTEGER NOT NULL REFERENCES users(id),
+  category            TEXT NOT NULL,                  -- character|monster|object|item (heuristic; PixelLab only knows character vs object)
+  source              TEXT NOT NULL DEFAULT 'pixellab', -- provenance of the art
+  pixellab_kind       TEXT NOT NULL,                  -- character|object (library) or character|object8|object1|image (pipeline)
+  pixellab_id         TEXT NOT NULL,                  -- PixelLab character/object id (library) or "job:<genJobId>" (pipeline) — dedupe key
+  sprite_id           TEXT,                           -- proposed sprite id (regenerate/publish key)
+  subject             TEXT,                           -- gen:<kind>:<folder> when the gen targeted an existing sprite; else null
+  body_type           TEXT,                           -- humanoid|quadruped (monsters), for regenerate
+  seed                TEXT,                           -- generation seed, for regenerate
+  name                TEXT,                           -- display name (PixelLab name, or a slug of the prompt)
+  prompt              TEXT,
+  thumb               TEXT,                           -- small south-facing data URL for the grid (full art rides in R2)
+  published_sprite_id TEXT,                           -- the public sprite_id once this item has been published
+  created_at          INTEGER NOT NULL,               -- when the art was generated
+  added_at            INTEGER NOT NULL,               -- when it was pinned/added to this profile
   UNIQUE(user_id, pixellab_id)
 );
 CREATE INDEX IF NOT EXISTS idx_profile_gallery_user ON profile_gallery(user_id, category, created_at);
+
+-- The PUBLIC sprite catalogue behind our-rpg.com/workshop/sprites. A player
+-- publishes a gallery item here with a globally UNIQUE sprite_id (server appends
+-- -2, -3, … on collision) and the chosen tag. Metadata + thumbnail here; full
+-- rotation art in R2 at published/<id>.json. Direct publish, no voting — separate
+-- from the proposals ballot box.
+CREATE TABLE IF NOT EXISTS published_sprites (
+  id            INTEGER PRIMARY KEY,
+  sprite_id     TEXT NOT NULL UNIQUE,                 -- globally unique public id
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  category      TEXT NOT NULL,                        -- the chosen tag: character|monster|object|item
+  name          TEXT,
+  prompt        TEXT,
+  thumb         TEXT,
+  created_at    INTEGER NOT NULL,
+  published_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_published_sprites_cat ON published_sprites(category, published_at);
+CREATE INDEX IF NOT EXISTS idx_published_sprites_user ON published_sprites(user_id, published_at);

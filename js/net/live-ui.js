@@ -27,22 +27,16 @@
   // ---------- shared styles ----------
   const css = document.createElement("style");
   css.textContent = `
-  #livechat { position:fixed; left:10px; bottom:86px; width:300px; z-index:40;
-    font:12px OpenDyslexic, Verdana, sans-serif; display:none; pointer-events:none; }
+  /* Chat lines now render into the main message log (#log); this is just the
+     input, pinned along the bottom edge below the log. */
+  #livechat { position:fixed; left:10px; bottom:8px; width:66%; max-width:720px; z-index:45;
+    font:12px OpenDyslexic, Verdana, sans-serif; display:none; }
   #livechat.on { display:block; }
-  #livechat .lc-lines { max-height:150px; overflow-y:auto; display:flex;
-    flex-direction:column; justify-content:flex-end; gap:2px; margin-bottom:4px; }
-  #livechat .lc-line { background:rgba(14,18,24,0.72); border-radius:5px;
-    padding:2px 7px; color:#dfe9f2; pointer-events:auto; word-wrap:break-word; }
-  #livechat .lc-line b { color:#a8ffc9; font-weight:bold; }
-  #livechat .lc-line.sys { color:#9fb7c9; font-style:italic; }
-  #livechat input { width:100%; box-sizing:border-box; background:rgba(14,18,24,0.9);
-    border:1px solid #3a4a5a; border-radius:6px; color:#fff; padding:5px 8px;
-    font:inherit; outline:none; display:none; pointer-events:auto; }
-  #livechat.typing input { display:block; }
-  #livechat .lc-hint { color:rgba(210,225,235,0.55); font-size:11px;
-    text-shadow:0 1px 2px #000; }
-  #livechat.typing .lc-hint { display:none; }
+  #livechat input { width:100%; box-sizing:border-box; background:rgba(10,14,20,0.82);
+    border:1px solid #3a4a5a; border-radius:6px; color:#fff; padding:6px 10px;
+    font:inherit; outline:none; pointer-events:auto; }
+  #livechat input::placeholder { color:rgba(200,215,230,0.5); }
+  #livechat input:focus { background:rgba(10,14,20,0.96); border-color:#5a7a9a; }
   #livenear { position:fixed; left:10px; bottom:60px; z-index:40; display:none;
     gap:4px; font:11px OpenDyslexic, Verdana, sans-serif; pointer-events:auto; }
   #livenear.on { display:flex; }
@@ -79,32 +73,27 @@
   document.head.appendChild(css);
 
   // ---------- chat ----------
+  // The input lives along the bottom of the screen; the CONVERSATION lands in
+  // the main message log (#log) via logHTML, so chat and game events read as
+  // one stream. esc() keeps player-authored text out of the HTML.
   const box = document.createElement("div");
   box.id = "livechat";
-  box.innerHTML = `<div class="lc-lines"></div>
-    <div class="lc-hint">/ to chat</div>
-    <input maxlength="240" placeholder="Say something to those nearby… (Enter, or /w name msg)">`;
+  box.innerHTML = `<input maxlength="240" placeholder="Say something nearby…  (Enter to send · /w name message to whisper)">`;
   document.body.appendChild(box);
-  const linesEl = box.querySelector(".lc-lines");
   const inputEl = box.querySelector("input");
-  const MAX_LINES = 60;
 
-  function chatLine(html, sys) {
-    const d = document.createElement("div");
-    d.className = "lc-line" + (sys ? " sys" : "");
-    d.innerHTML = html;
-    linesEl.appendChild(d);
-    while (linesEl.children.length > MAX_LINES) linesEl.removeChild(linesEl.firstChild);
-    linesEl.scrollTop = linesEl.scrollHeight;
-  }
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Route a chat line into the shared message log. sys lines use the log's
+  // italic-blue system style; ordinary chat uses the green-name chat style.
+  function chatLine(html, sys) {
+    if (typeof logHTML === "function") logHTML(html, sys ? "sys" : "chat");
+  }
 
   document.addEventListener("keydown", e => {
     if (e.key !== "/" || !Live.chatOn()) return;
     const ae = document.activeElement;
     if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
     e.preventDefault();
-    box.classList.add("typing");
     inputEl.focus();
   });
   inputEl.addEventListener("keydown", e => {
@@ -124,11 +113,9 @@
         }
       }
       inputEl.value = "";
-      box.classList.remove("typing");
       inputEl.blur();
     } else if (e.key === "Escape") {
       inputEl.value = "";
-      box.classList.remove("typing");
       inputEl.blur();
     }
   });
@@ -362,7 +349,7 @@
   // ---------- visibility cadence ----------
   setInterval(() => {
     box.classList.toggle("on", Live.chatOn());
-    if (!Live.chatOn()) box.classList.remove("typing");
+    if (!Live.chatOn() && document.activeElement === inputEl) inputEl.blur();
     refreshNear();
     if (T && T.open && !Live.tradeOn()) cancel(false);
   }, 1000);

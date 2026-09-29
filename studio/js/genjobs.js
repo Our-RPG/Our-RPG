@@ -55,6 +55,10 @@ const GenJobs = (function () {
       const result = await pixellabFn(ref => { Taiao.genProgress(jobId, ref); });
       await Taiao.genComplete(jobId, result);
       resultCache.set(jobId, result);
+      // Every sprite generated through the Workshop pipeline lands in the
+      // player's profile gallery automatically, tagged with its proposed
+      // sprite_id + category. Best-effort — a gallery hiccup never fails the gen.
+      try { await addToGallery(jobId, jobMeta, result); } catch (_) {}
       return jobId;
     } catch (e) {
       await Taiao.genFail(jobId, e && e.message || String(e));
@@ -62,6 +66,55 @@ const GenJobs = (function () {
     } finally {
       inFlight.delete(jobId); notifyBoards();
     }
+  }
+
+  // spriteType (character|monster|object|ui) → gallery category. "ui" (item
+  // icons) maps to the gallery's "item" bucket; the rest pass through.
+  function galleryCategoryFor(spriteType) { return spriteType === "ui" ? "item" : (spriteType || "object"); }
+
+  // Auto-add a completed generation to the profile gallery. Keyed by
+  // "job:<genJobId>" so every generation (including a regenerate) is its own row
+  // — the old one stays, the new one appears once it finishes.
+  async function addToGallery(jobId, meta, result) {
+    const dirs = result && result.dirs, image = result && result.image;
+    const thumb = image || (dirs && (dirs.south || Object.values(dirs)[0])) || "";
+    if (!thumb) return;
+    return Taiao.galleryAdd({
+      category: galleryCategoryFor(meta.spriteType),
+      pixellabKind: meta.pixellabKind,
+      pixellabId: "job:" + jobId,
+      spriteId: meta.spriteId,
+      subject: meta.subject || null,
+      name: meta.label || meta.spriteId,
+      prompt: meta.prompt,
+      bodyType: meta.bodyType || null,
+      seed: meta.seed != null && meta.seed !== "" ? String(meta.seed) : null,
+      createdAt: Date.now(),
+      thumb,
+      result: dirs ? { dirs } : { image },
+    });
+  }
+
+  // Regenerate from a gallery item: run a FRESH PixelLab generation with the same
+  // recipe. It goes through execute() like any other, so it's durable and the new
+  // result auto-adds to the gallery as a NEW row — the original item is untouched.
+  // Library-pinned items store pixellab_kind as character|object; map object→
+  // object8 so it regenerates as a rotatable object.
+  const regenKind = k => (k === "object" ? "object8" : (k || "image"));
+  async function regenerateFromGallery(item) {
+    const spriteType = item.category === "item" ? "ui" : (item.category || "object");
+    const meta = {
+      spriteType,
+      spriteId: item.sprite_id || item.pixellab_id || "sprite",
+      label: item.name || item.sprite_id || "sprite",
+      subject: item.subject || undefined,
+      prompt: item.prompt || "",
+      bodyType: item.body_type || undefined,
+      seed: item.seed || undefined,
+      pixellabKind: regenKind(item.pixellab_kind),
+    };
+    const row = { id: "gal:" + item.id, pixellab_kind: meta.pixellabKind, prompt: meta.prompt };
+    return execute(meta, defaultPixellabFn(row));
   }
 
   // Record the PixelLab reference image (if any) a job was generated from —
@@ -272,5 +325,5 @@ const GenJobs = (function () {
     return refresh;
   }
 
-  return { suggest, execute, mountBoard, resumePending, uploadToGame, setReference };
+  return { suggest, execute, mountBoard, resumePending, uploadToGame, setReference, regenerateFromGallery, galleryCategoryFor };
 })();

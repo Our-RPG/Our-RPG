@@ -85,6 +85,15 @@ export async function authToken(env, token) {
     await env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE token_hash = ?")
       .bind(now() + SESSION_DAYS * 864e5, row.token_hash).run();
   }
+  // Keep last_seen tracking real activity (it otherwise only moves on login /
+  // save). Throttled to ~once a minute so it costs little: this runs on every
+  // authed request AND on each live/hub WebSocket connect, so the "seen in the
+  // last 24h" roster stays meaningful.
+  if (now() - (row.last_seen || 0) > 60e3) {
+    await env.DB.prepare("UPDATE users SET last_seen = ? WHERE id = ?")
+      .bind(now(), row.id).run();
+    row.last_seen = now();
+  }
   return row; // user columns + token_hash
 }
 

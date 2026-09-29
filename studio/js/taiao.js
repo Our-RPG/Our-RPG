@@ -339,6 +339,26 @@ const Taiao = (function () {
   }
   const galleryDelete = id => call("/api/profile/gallery/delete", { body: { id: Number(id) } });
 
+  // ---- publishing a gallery item to the PUBLIC sprite catalogue ------------
+  // (server/src/profile.js). Publish copies the item into published_sprites — the
+  // public shelf behind our-rpg.com/workshop/sprites — under a globally unique
+  // sprite_id (server appends -2, -3, … on collision) with the chosen tag. Direct
+  // publish, separate from the proposals ballot box. Returns the FINAL sprite_id.
+  async function publishSprite(galleryId, spriteId, category, name) {
+    if (!logged()) return { error: "Sign in to publish." };
+    return call("/api/sprites/publish", { body: { galleryId: Number(galleryId), spriteId, category, name } });
+  }
+  // Public: the community sprite catalogue (metadata + thumbnail), optionally by tag.
+  async function listPublishedSprites(category) {
+    const r = await call("/api/sprites/published" + (category ? "?category=" + encodeURIComponent(category) : ""));
+    return r && r.ok ? r.items : [];
+  }
+  // Public: full rotation art for one published sprite.
+  async function publishedSpriteItem(id) {
+    const r = await call("/api/sprites/published/item?id=" + Number(id));
+    return r && r.ok ? r.item : null;
+  }
+
   // Resume a stored session a beat after boot.
   if (token) setTimeout(refreshMe, 300);
 
@@ -355,5 +375,6 @@ const Taiao = (function () {
     curator, listMine, pendingQueue, review,
     genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
     galleryAdd, galleryMine, galleryItem, galleryDelete,
+    publishSprite, listPublishedSprites, publishedSpriteItem,
   };
 })();

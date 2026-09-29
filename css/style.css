@@ -28,10 +28,17 @@ input, textarea { user-select: text; -webkit-user-select: text; -moz-user-select
   color: #ffe97a; text-shadow: 1px 1px 0 #000; font-size: 13px; font-weight: bold;
 }
 #log {
-  position: absolute; left: 10px; bottom: 8px; width: 46%; max-width: 460px;
+  /* wider than before, and lifted clear of the chat input that now sits along
+     the bottom edge (see #livechat in live-ui.js) so the newest line is never
+     hidden behind it */
+  position: absolute; left: 10px; bottom: 40px; width: 66%; max-width: 720px;
   pointer-events: none; font-size: 12px; line-height: 1.35;
   text-shadow: 1px 1px 0 #000;
 }
+#log .msg.chat { color: #cdefe0; } /* public/local chat, folded into the log */
+#log .msg.chat b { color: #a8ffc9; font-weight: bold; } /* speaker name */
+#log .msg.whisper { color: #e6c8ff; } /* a direct message */
+#log .msg.whisper b { color: #d8a8ff; font-weight: bold; }
 #log .msg {
   color: #eee;
   /* full dark outline (not just the shared 1px offset) so the text stays legible

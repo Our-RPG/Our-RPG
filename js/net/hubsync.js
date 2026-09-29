@@ -36,7 +36,7 @@
   let ws = null, wsOpen = false, helloSent = false;
   let retryIn = RETRY_MIN, retryAt = 0, pingAt = 0, manageAt = 0;
   let myId = 0;
-  let lastClvl = -1, lastZone = null;
+  let lastClvl = -1, lastZone = null, lastChar;
   const dmListeners = [], rosterListeners = [];
   const fire = (fns, m) => { for (const fn of fns) { try { fn(m); } catch (e) {} } };
   const clvlNow = () => (typeof combatLevel === "function" ? combatLevel() : 1) | 0;
@@ -91,7 +91,8 @@
   function hello() {
     myId = (Server.user && Server.user.id) | 0;
     lastClvl = clvlNow(); lastZone = whereLabel();
-    send({ t: "hello", clvl: lastClvl, zone: lastZone });
+    lastChar = (typeof player !== "undefined" && player) ? player.character : null;
+    send({ t: "hello", clvl: lastClvl, zone: lastZone, character: lastChar });
     helloSent = true;
   }
 
@@ -102,18 +103,18 @@
     switch (m.t) {
       case "roster":
         online.clear();
-        for (const p of m.players || []) if (p && p.id && p.id !== myId) online.set(p.id, { name: String(p.name || "?"), clvl: p.clvl | 0, zone: String(p.zone || "") });
+        for (const p of m.players || []) if (p && p.id && p.id !== myId) online.set(p.id, { name: String(p.name || "?"), clvl: p.clvl | 0, zone: String(p.zone || ""), character: p.character == null ? null : p.character | 0 });
         fire(rosterListeners, online);
         return;
       case "join":
-        if (m.p && m.p.id && m.p.id !== myId) { online.set(m.p.id, { name: String(m.p.name || "?"), clvl: m.p.clvl | 0, zone: String(m.p.zone || "") }); fire(rosterListeners, online); }
+        if (m.p && m.p.id && m.p.id !== myId) { online.set(m.p.id, { name: String(m.p.name || "?"), clvl: m.p.clvl | 0, zone: String(m.p.zone || ""), character: m.p.character == null ? null : m.p.character | 0 }); fire(rosterListeners, online); }
         return;
       case "leave":
         if (online.delete(m.id)) fire(rosterListeners, online);
         return;
       case "upd": {
         const o = online.get(m.id);
-        if (o) { o.clvl = m.clvl | 0; o.zone = String(m.zone || ""); fire(rosterListeners, online); }
+        if (o) { o.clvl = m.clvl | 0; o.zone = String(m.zone || ""); if (m.character !== undefined) o.character = m.character == null ? null : m.character | 0; fire(rosterListeners, online); }
         return;
       }
       case "sync": hello(); return;
@@ -134,11 +135,12 @@
     if (!ws) { if (t >= retryAt) connect(); return; }
     if (!wsOpen || !helloSent) return;
     if (t >= pingAt) { pingAt = t + PING_EVERY; send({ t: "ping" }); }
-    // presence upkeep: tell the hub when our combat level or area changes
+    // presence upkeep: tell the hub when our combat level, area or look changes
     const cl = clvlNow(), zn = whereLabel();
-    if (cl !== lastClvl || zn !== lastZone) {
-      lastClvl = cl; lastZone = zn;
-      send({ t: "u", clvl: cl, zone: zn });
+    const ch = (typeof player !== "undefined" && player) ? player.character : null;
+    if (cl !== lastClvl || zn !== lastZone || ch !== lastChar) {
+      lastClvl = cl; lastZone = zn; lastChar = ch;
+      send({ t: "u", clvl: cl, zone: zn, character: ch });
     }
   }
 
@@ -151,6 +153,7 @@
     connected: () => !!(ws && wsOpen),
     myId: () => myId,
     myName: () => (Server.user && Server.user.username) || "",
+    myZone: () => lastZone || "",
     sendDM(to, text) {
       to = to | 0;
       const body = String(text || "").slice(0, 500).trim();

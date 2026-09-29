@@ -74,14 +74,14 @@ export class GlobalHub {
     if (!st) {
       const at = this.attach(ws);
       if (!at) return null;
-      st = { id: at.id, name: at.name, clvl: 0, zone: "", hello: false,
-             nudged: false, tokens: 20, tAt: Date.now() };
+      st = { id: at.id, name: at.name, clvl: 0, zone: "", character: null,
+             hello: false, nudged: false, tokens: 20, tAt: Date.now() };
       this.p.set(ws, st);
     }
     return st;
   }
 
-  pub(st) { return { id: st.id, name: st.name, clvl: st.clvl, zone: st.zone }; }
+  pub(st) { return { id: st.id, name: st.name, clvl: st.clvl, zone: st.zone, character: st.character }; }
 
   send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (e) {} }
 
@@ -122,6 +122,7 @@ export class GlobalHub {
     if (m.t === "hello") {
       st.clvl = num(m.clvl, 99) | 0;
       st.zone = str(m.zone, ZONE_MAX);
+      st.character = m.character == null ? null : num(m.character, 999) | 0;
       st.hello = true;
       const roster = [];
       for (const [ows, os] of this.p)
@@ -137,10 +138,11 @@ export class GlobalHub {
     }
 
     switch (m.t) {
-      case "u": {   // presence update — combat level ticked, or changed area
+      case "u": {   // presence update — combat level ticked, changed area, reskin
         st.clvl = num(m.clvl, 99) | 0;
         st.zone = str(m.zone, ZONE_MAX);
-        this.bcast({ t: "upd", id: st.id, clvl: st.clvl, zone: st.zone }, ws);
+        if (m.character !== undefined) st.character = m.character == null ? null : num(m.character, 999) | 0;
+        this.bcast({ t: "upd", id: st.id, clvl: st.clvl, zone: st.zone, character: st.character }, ws);
         return;
       }
       case "dm": {  // a direct message — reaches its target anywhere online

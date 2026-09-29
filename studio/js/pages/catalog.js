@@ -95,6 +95,65 @@ function spriteRowDirs(r) {
   return 1;
 }
 
+// The public community catalogue on the Sprites hub — sprites players have
+// published from their profile gallery (server/src/profile.js published_sprites).
+// Direct-published, live under each maker's chosen sprite_id + tag. Distinct from
+// the game's built-in sprites listed below and from the proposals ballot box.
+function publishedSpritesCard() {
+  const c = el("div.card");
+  c.appendChild(el("div.sectitle", null, [el("h3", null, ["Community sprites ", el("span.hint", { text: "published by players" })])]));
+  const body = el("div");
+  c.appendChild(body);
+  (async () => {
+    body.appendChild(el("p.tagline", { text: "Loading…" }));
+    let items = [];
+    try { items = await Taiao.listPublishedSprites(); } catch (_) {}
+    clear(body);
+    if (!items.length) { body.appendChild(el("p.tagline", { text: "No community sprites published yet — generate one in the Workshop, then publish it from your profile gallery." })); return; }
+    const grid = el("div.grid-cards");
+    for (const it of items) grid.appendChild(publishedTile(it));
+    body.appendChild(grid);
+  })();
+  return c;
+
+  function publishedTile(it) {
+    const t = el("div.tile", { style: "cursor:pointer", title: "View all directions" });
+    const thumb = el("div.thumb");
+    if (it.thumb) thumb.appendChild(el("img", { src: it.thumb, alt: it.name || it.sprite_id, loading: "lazy" }));
+    else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: (typeof _catIcon === "function" ? _catIcon(it.category) : "✨") }));
+    t.appendChild(thumb);
+    t.appendChild(el("div.meta", null, [
+      el("div.name", { style: "font-family:monospace;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: it.sprite_id }),
+      el("div.sub", null, [el("span.badge", { text: it.category }), document.createTextNode(" @" + (it.username || "someone"))]),
+    ]));
+    t.addEventListener("click", () => openPublishedView(it));
+    return t;
+  }
+
+  function openPublishedView(it) {
+    const bg = el("div.modal-bg", { onclick: e => { if (e.target === bg) bg.remove(); } });
+    const box = el("div.modal", { style: "width:min(560px,94vw)" });
+    box.appendChild(el("h3", { text: it.name || it.sprite_id }));
+    box.appendChild(el("p.tagline", null, [el("span.mono", { text: it.sprite_id }), document.createTextNode(" · " + it.category + " · @" + (it.username || "someone"))]));
+    const grid = el("div.dirgrid"); box.appendChild(grid);
+    grid.appendChild(el("div", { text: "Loading…" }));
+    box.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [el("button.btn.ghost", { text: "Close", onclick: () => bg.remove() })]));
+    bg.appendChild(box); document.body.appendChild(bg);
+    (async () => {
+      const full = await Taiao.publishedSpriteItem(it.id);
+      clear(grid);
+      const res = full && full.result;
+      const dirs = res && (res.dirs || (res.image ? { image: res.image } : null));
+      if (!dirs) { grid.appendChild(el("div.empty", { text: "Art unavailable." })); return; }
+      for (const [dir, url] of Object.entries(dirs)) {
+        const cv = el("canvas.spr", { width: 96, height: 96 });
+        drawSprite(cv, url, 96);
+        grid.appendChild(el("div.dircell", null, [cv, el("div.lbl", { text: dir })]));
+      }
+    })();
+  }
+}
+
 function pageSprites(root) {
   clear(root);
   const page = el("div.page");
@@ -103,6 +162,7 @@ function pageSprites(root) {
   const genBoard = el("div");
   GenJobs.mountBoard(genBoard, {});
   page.appendChild(genBoard);
+  page.appendChild(publishedSpritesCard());
 
   const CATS = [["character", "Character"], ["object", "Object"], ["monster", "Monster"], ["ui", "Item"], ["tile", "Biome"], ["map", "Map icon"]];
   const rows = [];

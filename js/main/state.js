@@ -182,12 +182,22 @@ const logEl = document.getElementById("log");
 //  skills/crafting.js:14,16,20,40,47,51,56,71 skills/farming.js:8,12,16,17,21,30,32
 //  skills/firemaking.js:6,8,9,10,16 skills/gathering.js:6,8,12,17,44,46,47
 //  skills/thieving.js:6,7,9,23,27,33 storage.js:36,101
+const LOG_MAX = 12;
 function log(msg, cls = "") {
   const d = document.createElement("div");
   d.className = "msg " + cls;
   d.textContent = msg;
   logEl.appendChild(d);
-  while (logEl.children.length > 9) logEl.removeChild(logEl.firstChild);
+  while (logEl.children.length > LOG_MAX) logEl.removeChild(logEl.firstChild);
+}
+// Same log, but the message is trusted HTML (for chat lines with a bold
+// speaker name). Callers MUST escape any user text they interpolate.
+function logHTML(html, cls = "") {
+  const d = document.createElement("div");
+  d.className = "msg " + cls;
+  d.innerHTML = html;
+  logEl.appendChild(d);
+  while (logEl.children.length > LOG_MAX) logEl.removeChild(logEl.firstChild);
 }
 // Callers (3):
 //  gameplay/items.js:29 main/state.js:56,59

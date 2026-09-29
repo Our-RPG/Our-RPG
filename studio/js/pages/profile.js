@@ -350,21 +350,38 @@ function normalizePixellabRow(kind, it) {
 
 function pixellabLibraryCard(galleryCard) {
   const c = el("div.card");
-  c.appendChild(el("h3", null, ["Your PixelLab library ", el("span.hint", { text: "everything this account has generated" })]));
-  c.appendChild(el("p.tagline", { html:
+  const LIB_LSK = "studio_lib_collapsed_v1";
+  let libCollapsed; try { libCollapsed = localStorage.getItem(LIB_LSK) === "1"; } catch (_) { libCollapsed = false; }
+  const caret = el("span", { style: "font-size:.8rem;color:var(--ink-faint)", text: libCollapsed ? "▸" : "▾" });
+  const head = el("h3", { style: "cursor:pointer;user-select:none;display:flex;align-items:center;gap:.45rem", title: "Collapse / expand" }, [
+    caret, el("span", { text: "Your PixelLab library " }), el("span.hint", { text: "everything this account has generated" }),
+  ]);
+  c.appendChild(head);
+  const content = el("div", libCollapsed ? { style: "display:none" } : null);
+  c.appendChild(content);
+  content.appendChild(el("p.tagline", { html:
     "This pulls in every character and object your signed-in PixelLab account has ever generated — sorted into buckets — so you can pick which ones live on your profile. " +
     "PixelLab doesn't tag a sprite as a monster or an item, so the sort is a best guess from the prompt; move on regardless. " +
     "<b>Single-image item icons aren't kept by PixelLab</b>, so the Item bucket only fills from objects that look like gear." }));
+
+  let loadedOnce = false;
+  head.addEventListener("click", () => {
+    libCollapsed = !libCollapsed;
+    caret.textContent = libCollapsed ? "▸" : "▾";
+    content.style.display = libCollapsed ? "none" : "";
+    try { localStorage.setItem(LIB_LSK, libCollapsed ? "1" : "0"); } catch (_) {}
+    if (!libCollapsed && !loadedOnce && PixelLab.hasKey() && Taiao.logged()) load();
+  });
 
   const bar = el("div.btn-row", { style: "margin:.5rem 0" });
   const loadBtn = el("button.btn.primary", { text: "↻ Load my PixelLab generations" });
   const addBtn = el("button.btn.primary", { text: "＋ Add selected to my profile", style: "display:none" });
   const note = el("small.tagline", { style: "margin-left:.5rem;align-self:center" });
   bar.appendChild(loadBtn); bar.appendChild(addBtn); bar.appendChild(note);
-  c.appendChild(bar);
+  content.appendChild(bar);
 
   const body = el("div");
-  c.appendChild(body);
+  content.appendChild(body);
 
   const selected = new Map();   // pixellab id -> normalized entry
   let savedIds = new Set();     // ids already pinned to the gallery
@@ -413,6 +430,7 @@ function pixellabLibraryCard(galleryCard) {
   }
 
   async function load() {
+    loadedOnce = true;
     if (!PixelLab.hasKey()) { clear(body); body.appendChild(el("div.banner.warn", { html: "Add your PixelLab API key in <a href='#/settings'>Settings</a> first — then load your generations here." })); return; }
     if (!Taiao.logged()) { clear(body); body.appendChild(el("p.tagline", { text: "Sign in to save generations to your profile." })); return; }
     loadBtn.disabled = true; note.textContent = "Reading your PixelLab account…";
@@ -468,18 +486,19 @@ function pixellabLibraryCard(galleryCard) {
 
   loadBtn.addEventListener("click", load);
   addBtn.addEventListener("click", addSelected);
-  // auto-load once the account + key are both present
-  if (PixelLab.hasKey() && Taiao.logged()) load();
+  // auto-load once the account + key are both present (unless collapsed — then
+  // we defer until the card is first expanded, to save the list calls)
+  if (!libCollapsed && PixelLab.hasKey() && Taiao.logged()) load();
   else { clear(body); body.appendChild(el("p.tagline", { text: PixelLab.hasKey() ? "Sign in to save generations to your profile." : "Add your PixelLab API key in Settings, then load your generations here." })); }
-  Taiao.onAuth(() => { if (PixelLab.hasKey() && Taiao.logged()) load(); });
+  Taiao.onAuth(() => { if (!libCollapsed && PixelLab.hasKey() && Taiao.logged()) load(); });
   return c;
 }
 
 function myGalleryCard() {
   const c = el("div.card");
-  c.appendChild(el("h3", null, ["My profile gallery ", el("span.hint", { text: "the sprites you've pinned" })]));
+  c.appendChild(el("h3", null, ["My profile gallery ", el("span.hint", { text: "every sprite you've generated" })]));
   c.appendChild(el("p.tagline", { html:
-    "Your private shelf of chosen PixelLab sprites. Nothing here is public and nothing is in the game yet — when you're ready, open a sprite's page and use <b>Upload to game</b> to put it up for the community to vote on." }));
+    "Every sprite you generate in the Workshop lands here automatically, tagged with a proposed <b>sprite id</b> and category. From here you can <b>regenerate</b> it (the old one stays, a fresh take appears alongside it), <b>delete</b> it, or <b>publish</b> it to the public catalogue at <span class='mono'>/workshop/sprites/</span> — where it goes live under your sprite id and tag." }));
   const body = el("div");
   c.appendChild(body);
 
@@ -489,7 +508,7 @@ function myGalleryCard() {
     let items = [];
     try { items = await Taiao.galleryMine(); } catch (_) {}
     clear(body);
-    if (!items.length) { body.appendChild(el("p.tagline", { text: "Nothing pinned yet — pick from your PixelLab library above." })); return; }
+    if (!items.length) { body.appendChild(el("p.tagline", { text: "Nothing here yet — generate a sprite in the Sprites tab, or pick from your PixelLab library above." })); return; }
     for (const cat of GALLERY_CATS) {
       const inCat = items.filter(m => m.category === cat.key);
       if (!inCat.length) continue;
@@ -498,27 +517,80 @@ function myGalleryCard() {
       for (const m of inCat) grid.appendChild(galleryTile(m));
       body.appendChild(grid);
     }
+  }
 
-    function galleryTile(m) {
-      const t = el("div.tile", { style: "position:relative" });
-      const thumb = el("div.thumb");
-      if (m.thumb) thumb.appendChild(el("img", { src: m.thumb, alt: m.name || "", loading: "lazy" }));
-      else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: _catIcon(m.category) }));
-      t.appendChild(thumb);
-      t.appendChild(el("div.meta", null, [
-        el("div.name", { style: "font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: m.name || m.pixellab_id }),
-        el("div.sub", { text: m.pixellab_kind === "character" ? "character" : "object" }),
-      ]));
-      const del = el("button.btn.ghost.sm", { title: "Remove from gallery", text: "🗑", style: "position:absolute;top:.35rem;right:.35rem;padding:.1rem .35rem" });
-      del.addEventListener("click", async (ev) => {
-        ev.stopPropagation();
-        del.disabled = true;
-        const r = await Taiao.galleryDelete(m.id);
-        if (r && r.ok) refresh(); else { del.disabled = false; toast((r && r.error) || "Couldn't remove.", "err"); }
-      });
-      t.appendChild(del);
-      return t;
+  function galleryTile(m) {
+    const t = el("div.tile", { style: "position:relative" });
+    const thumb = el("div.thumb");
+    if (m.thumb) thumb.appendChild(el("img", { src: m.thumb, alt: m.name || "", loading: "lazy" }));
+    else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: _catIcon(m.category) }));
+    t.appendChild(thumb);
+    t.appendChild(el("div.meta", null, [
+      el("div.name", { style: "font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: m.name || m.sprite_id || m.pixellab_id }),
+      el("div.sub", { text: m.sprite_id ? ("id: " + m.sprite_id) : (m.pixellab_kind === "character" ? "character" : "object") }),
+      m.published_sprite_id
+        ? el("div.sub", { style: "color:var(--accent,#56e39f)", text: "✓ published as " + m.published_sprite_id })
+        : null,
+    ]));
+    const btns = el("div.btn-row", { style: "flex-wrap:wrap;padding:.4rem .55rem .55rem;gap:.3rem" }, [
+      el("button.btn.sm.primary", { text: m.published_sprite_id ? "Publish again" : "⬆ Publish", onclick: () => openPublishDialog(m) }),
+      el("button.btn.sm.ghost", { text: "🔁 Regenerate", title: "Generate a fresh take — the original stays", onclick: () => regen(m, t) }),
+      el("button.btn.sm.ghost", { text: "🗑", title: "Delete from gallery", onclick: () => del(m) }),
+    ]);
+    t.appendChild(btns);
+    return t;
+
+    async function del(item) {
+      const r = await Taiao.galleryDelete(item.id);
+      if (r && r.ok) refresh(); else toast((r && r.error) || "Couldn't remove.", "err");
     }
+    async function regen(item, tileEl) {
+      if (!item.prompt) { toast("This item has no prompt to regenerate from.", "warn"); return; }
+      const overlay = el("div", { style: "position:absolute;inset:0;background:rgba(6,10,8,.72);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;border-radius:var(--radius)" }, [
+        el("div.spinner"), el("small", { text: "Regenerating…" }),
+      ]);
+      tileEl.appendChild(overlay);
+      try {
+        await GenJobs.regenerateFromGallery(item);   // new take auto-adds to the gallery on completion
+        toast("Fresh take added to your gallery.", "ok", 4000);
+        refresh();
+      } catch (e) {
+        overlay.remove();
+        toast((e && e.message) || "Regenerate failed.", "err", 6000);
+      }
+    }
+  }
+
+  // Publish dialog: confirm the sprite id + tag, then push to the public catalogue.
+  function openPublishDialog(m) {
+    const bg = el("div.modal-bg", { onclick: e => { if (e.target === bg) bg.remove(); } });
+    const box = el("div.modal", { style: "width:min(460px,94vw)" });
+    box.appendChild(el("h3", { text: "Publish to the public catalogue" }));
+    box.appendChild(el("p.tagline", { html: "This goes live for everyone at <span class='mono'>/workshop/sprites/</span> under the sprite id and tag below. If the id is already taken, a number is appended to keep it unique." }));
+
+    const idInput = el("input", { type: "text", value: m.sprite_id || "", placeholder: "sprite_id", style: "width:100%" });
+    const tagSel = el("select", { style: "width:100%" });
+    GALLERY_CATS.forEach(cat => { const o = el("option", { value: cat.key, text: cat.icon + " " + cat.label }); if (cat.key === m.category) o.selected = true; tagSel.appendChild(o); });
+    const nameInput = el("input", { type: "text", value: m.name || "", placeholder: "display name (optional)", style: "width:100%" });
+
+    box.appendChild(el("label.field", null, [el("span", { text: "Sprite id" }), idInput]));
+    box.appendChild(el("label.field", null, [el("span", { text: "Tag" }), tagSel]));
+    box.appendChild(el("label.field", null, [el("span", { text: "Name" }), nameInput]));
+
+    const note = el("small.tagline");
+    const doBtn = el("button.btn.primary", { text: "Publish" });
+    doBtn.addEventListener("click", async () => {
+      doBtn.disabled = true; note.textContent = "Publishing…";
+      const r = await Taiao.publishSprite(m.id, idInput.value.trim(), tagSel.value, nameInput.value.trim());
+      if (r && r.ok) {
+        toast("Published as " + r.spriteId + " — live at /workshop/sprites/", "ok", 6000);
+        bg.remove(); refresh();
+      } else { doBtn.disabled = false; note.textContent = (r && r.error) || "Couldn't publish."; }
+    });
+    box.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [doBtn, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() }), note]));
+    bg.appendChild(box);
+    document.body.appendChild(bg);
+    idInput.focus();
   }
 
   c._refresh = refresh;
