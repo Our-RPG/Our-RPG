@@ -195,11 +195,22 @@
 
   function mkNoop() {
     return { noteNode: () => {}, noteDecor: () => {}, noteHeat: () => {},
+             applyLive: () => {},
              status: () => ({ enabled: false }) };
   }
 
+  // Live-presence courier (livesync.js): apply a mutation relayed straight
+  // from another player's client, whose times are THEIR wall clock — near
+  // enough to ours (NTP) for an instant visual. The ledger's own pull
+  // re-applies the authoritative record within the minute.
+  function applyLive(rec) {
+    const o = off;
+    off = 0;                 // toLocal()/toServer() become identity for this call
+    try { apply(rec); } finally { off = o; }
+  }
+
   window.RegionSync = {
-    noteNode, noteDecor, noteHeat,
+    noteNode, noteDecor, noteHeat, applyLive,
     status: () => ({
       enabled: true, live: live(), offsetMs: off,
       outbox: Object.keys(outbox).length, pendingApply: pendingNodes.size,

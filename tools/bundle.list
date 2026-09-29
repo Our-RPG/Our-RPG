@@ -218,6 +218,11 @@ js/net/worksync.js
 js/net/regionsync.js
 js/net/shopsync.js
 js/net/seedroll.js
+# Phase-3 live presence: real-time zone WebSocket (remote players, deeds,
+# instant mutations) + the chat/trade UI it gates. livesync wraps killMonster/
+# ShopSync/RegionSync, so it must follow combat + the Phase-2 layer.
+js/net/livesync.js
+js/net/live-ui.js
 js/net/account-ui.js
 js/gameplay/koha.js
 js/gameplay/goals-arc.js

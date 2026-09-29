@@ -66,7 +66,15 @@ export async function createSession(env, userId) {
 export async function authUser(req, env) {
   const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
   if (!m) return null;
-  const hash = await sha256hex(m[1]);
+  return authToken(env, m[1]);
+}
+
+/* Same resolution from a bare token — for transports that can't carry an
+ * Authorization header (the live-presence WebSocket smuggles the token in
+ * its subprotocol list, live.js). */
+export async function authToken(env, token) {
+  if (!token) return null;
+  const hash = await sha256hex(token);
   const row = await env.DB.prepare(
     `SELECT s.token_hash, s.expires_at, u.* FROM sessions s
      JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`

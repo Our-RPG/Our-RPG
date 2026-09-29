@@ -15,6 +15,7 @@ import * as koha from "./koha.js";
 import * as admin from "./admin.js";
 import { buildAndPostDigest } from "./digest.js";
 import * as region from "./region.js";
+import * as live from "./live.js";
 import * as shops from "./shops.js";
 import * as seeds from "./seeds.js";
 import * as envelope from "./envelope.js";
@@ -22,6 +23,7 @@ import * as ranks from "./ranks.js";
 import * as telemetry from "./telemetry.js";
 
 export { RegionLedger } from "./region.js";
+export { LiveZone } from "./live.js";
 
 const ROUTES = {
   "POST /api/register":                 auth.register,
@@ -63,6 +65,7 @@ const ROUTES = {
 
   "POST /api/region/push":              region.pushDeltas,
   "GET /api/region/pull":               region.pullDeltas,
+  "GET /api/live/ws":                   live.connect,
   "GET /api/shop/stock":                shops.stock,
   "POST /api/shop/trade":               shops.trade,
   "POST /api/seeds/next":               seeds.next,
@@ -115,7 +118,10 @@ export default {
       console.log("unhandled:", url.pathname, e && e.stack || e);
       res = err("Something broke on our side.", 500);
     }
-    if (cors) for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
+    // a 101 (live-presence WebSocket upgrade) has immutable headers and
+    // needs no CORS — the browser doesn't apply CORS to WebSockets
+    if (cors && res.status !== 101)
+      for (const [k, v] of Object.entries(cors)) res.headers.set(k, v);
     return res;
   },
 

@@ -13,12 +13,21 @@ crons = ["0 9 * * 1", "30 14 * * *"]
 
 # Phase 2: one Durable Object per world region holds the shared mutation
 # ledger (node depletion, picked decor, station heat).
+# Phase 3: one Durable Object per world ZONE relays real-time presence over
+# hibernatable WebSockets (live.js).
 [durable_objects]
-bindings = [{ name = "REGION", class_name = "RegionLedger" }]
+bindings = [
+  { name = "REGION", class_name = "RegionLedger" },
+  { name = "LIVE", class_name = "LiveZone" },
+]
 
 [[migrations]]
 tag = "v2-region-ledger"
 new_sqlite_classes = ["RegionLedger"]
+
+[[migrations]]
+tag = "v3-live-zone"
+new_sqlite_classes = ["LiveZone"]
 
 [[d1_databases]]
 binding = "DB"
@@ -36,6 +45,12 @@ ALLOWED_ORIGINS = "https://html.itch.zone,http://localhost:8899,http://127.0.0.1
 # it's known (Phase 5); passkeys.js derives its per-origin RP id from this same list.
 # WebAuthn relying-party id (the domain the GAME is served from, not the API).
 RP_ID = "html.itch.zone" # itch embed origin; passkeys stay unadvertised on this shared domain
+# Live-presence moderation gates (live.js): the chat + player-trading
+# protocols are fully built client AND server side, but refused until these
+# are "on" — flip them (and redeploy) once moderation is staffed. No client
+# rebuild needed; the server advertises the flags in the roster message.
+LIVE_CHAT = "off"
+LIVE_TRADE = "off"
 
 # Secrets (set with `wrangler secret put NAME`), all optional:
 #   TURNSTILE_SECRET  — enables Turnstile verification on register/login

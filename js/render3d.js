@@ -5275,6 +5275,51 @@ void main() {
         m.scale.x = _bs * _bw;
       }
     }
+    // ---- live remote players (net/livesync.js): everyone else in the zone ----
+    // full-opacity outfit-aware bodies, drawn exactly like the local player
+    // (outfit sheet when their state has one, else the base char sheet), with
+    // their own character's build scale. Meshes ride the `meshes` registry so
+    // the sweep reaps a player who logs off or walks out of range.
+    if (typeof Live !== "undefined" && Live.players.size) {
+      ensureCharTex();
+      for (const rp of Live.players.values()) {
+        const key = "livep" + rp.id;
+        let m = meshes.get(key);
+        const rpShow = charMat && rp.character != null &&
+          typeof CHAR_LIST !== "undefined" && CHAR_LIST[rp.character] &&
+          Math.abs(rp.x - player.x) <= _vr && Math.abs(rp.y - player.y) <= _vr;
+        if (!rpShow) { if (m) { m.visible = false; m.userData.seen = true; } continue; }
+        if (!m) {
+          m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), charMat);
+          m.renderOrder = 5;
+          scene.add(m);
+          meshes.set(key, m);
+        }
+        m.userData.seen = true; m.visible = true;
+        const rwi = Math.max(0, CHAR_DIRS.indexOf(rp.dir8 || "south"));
+        const rdi = (rwi - camDir + 8) & 7;
+        const rFolder = CHAR_LIST[rp.character].folder;
+        const rFr = (rp.outfit && rp.outfit !== "Idle" && typeof OUTFIT_FRAME !== "undefined")
+          ? OUTFIT_FRAME[rFolder + "|" + rp.outfit] : null;
+        const rOs = rFr ? ensureOutfitSheet(rFr[0]) : null;
+        if (rFr && rOs && rOs.w) {
+          m.material = rOs.mat;
+          setSheetUV(m.geometry, rFr[1] + rdi, OUTFIT_SHEET_COLS, OUTFIT_SHEET_CELL, rOs.w, rOs.h);
+        } else {
+          m.material = charMat;
+          setCharUV(m.geometry, rp.character * CHAR_DIRS.length + rdi);
+        }
+        const rx = rp.px != null ? WX(rp.px) : rp.x + 0.5;
+        const ry = rp.py != null ? WX(rp.py) : rp.y + 0.5;
+        m.userData.lift = rp.moving ? Math.abs(Math.sin(now / 90 + rp.id)) * 0.08 : 0;
+        const rSt = (typeof CHAR_STATS !== "undefined" && CHAR_STATS[rp.character]) || null;
+        const rH = rSt ? rSt.h : 1, rW = rSt ? rSt.w : 1;
+        const rPs = CHAR_SCALE / CHAR_FILL_H;
+        place(m, rx, ry, 1, rPs * rH, false, false,
+          liftAt(rp.x, rp.y) + (rp.level | 0) * STOREY_H - CHAR_FEET_FRAC * rPs * rH);
+        m.scale.x = rPs * rW;
+      }
+    }
     // held tool
     const act = player.act;
     let held = null;
@@ -6188,6 +6233,56 @@ void main() {
           if (octx.roundRect) { octx.beginPath(); octx.roundRect(bx, by, w, h, 6); octx.fill(); }
           else octx.fillRect(bx, by, w, h);
           octx.fillStyle = "#fff";
+          for (let li = 0; li < lines.length; li++)
+            octx.fillText(lines[li], p.x, by + padY + li * lineH + 11);
+          octx.font = nameFont;
+          octx.shadowColor = "rgba(0,0,0,0.9)"; octx.shadowBlur = 3 * uiK;
+        }
+      }
+    }
+    // live remote players (net/livesync.js): nameplate + action mark + chat
+    // bubble — same projection discipline as the NPC labels above
+    if (typeof Live !== "undefined" && Live.players.size) {
+      const TL = performance.now();
+      octx.font = nameFont;
+      octx.textAlign = "center";
+      octx.shadowColor = "rgba(0,0,0,0.9)"; octx.shadowBlur = 3 * uiK;
+      for (const rp of Live.players.values()) {
+        if (rp.character == null) continue;
+        if (Math.abs(rp.x - player.x) > _ovr || Math.abs(rp.y - player.y) > _ovr) continue;
+        const rSt = (typeof CHAR_STATS !== "undefined" && CHAR_STATS[rp.character]) || null;
+        const rhh = CHAR_SCALE * (rSt ? rSt.h : 1) + liftPx(rp.px, rp.py) +
+          (rp.level | 0) * STOREY_H + 0.15;
+        const p = project(rp.px, rp.py, rhh);
+        if (p.behind) continue;
+        octx.fillStyle = "#a8ffc9";                    // green = a fellow player
+        octx.fillText(rp.name, p.x, p.y - 6 * uiK);
+        // what they're doing right now, at a glance
+        if (rp.act)
+          octx.fillText(rp.act === "gather" ? "⛏" : rp.act === "combat" ? "⚔" : "🔨",
+            p.x, p.y - 20 * uiK);
+        // their public-chat line as an overhead bubble (once chat is live)
+        if (rp._say && TL < rp._say.until) {
+          octx.font = "bold 12px OpenDyslexic, Verdana";
+          const maxW = 240, padX = 9, padY = 6, lineH = 15;
+          const words = String(rp._say.text).split(/\s+/);
+          const lines = [];
+          let cur = "";
+          for (const word of words) {
+            const trial = cur ? cur + " " + word : word;
+            if (octx.measureText(trial).width + padX * 2 > maxW && cur) { lines.push(cur); cur = word; }
+            else cur = trial;
+          }
+          if (cur) lines.push(cur);
+          let tw = 0;
+          for (const ln of lines) tw = Math.max(tw, octx.measureText(ln).width);
+          const w = tw + padX * 2, h = lines.length * lineH + padY * 2;
+          const bx = p.x - w / 2, by = p.y - 34 * uiK - h;
+          octx.shadowBlur = 0;
+          octx.fillStyle = "rgba(22,32,26,0.9)";       // green-dark = a player's voice
+          if (octx.roundRect) { octx.beginPath(); octx.roundRect(bx, by, w, h, 6); octx.fill(); }
+          else octx.fillRect(bx, by, w, h);
+          octx.fillStyle = "#eaffea";
           for (let li = 0; li < lines.length; li++)
             octx.fillText(lines[li], p.x, by + padY + li * lineH + 11);
           octx.font = nameFont;

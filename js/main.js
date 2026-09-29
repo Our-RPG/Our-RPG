@@ -336,6 +336,10 @@ async function init() {
       updateWorldStuff();
       tickTrade(); // close the shop/bank window when out of reach
       if (typeof npcChatTick === "function") npcChatTick(); // AI NPC earshot greetings (Nets)
+      // live presence (js/net/livesync.js): socket upkeep + remote-player
+      // interpolation — deliberately OUTSIDE the cine gate: the rest of the
+      // world keeps moving for everyone else while your cutscene plays
+      if (typeof Live !== "undefined") Live.tick(dt);
       if (typeof tickPlaced === "function") tickPlaced(); // temporary placed decor withers
       if (!cine && typeof Quests !== "undefined") Quests.tick(); // quest collect/reach objectives
       if (!cine && typeof Lua !== "undefined" && Lua.ready) Lua.tickRoutines(); // NPC daily routines (js/lua; inert until the runtime is ready)
