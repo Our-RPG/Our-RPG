@@ -12,11 +12,13 @@ import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
 import * as gen from "./gen.js";
+import * as profile from "./profile.js";
 import * as koha from "./koha.js";
 import * as admin from "./admin.js";
 import { buildAndPostDigest } from "./digest.js";
 import * as region from "./region.js";
 import * as live from "./live.js";
+import * as hub from "./hub.js";
 import * as shops from "./shops.js";
 import * as seeds from "./seeds.js";
 import * as envelope from "./envelope.js";
@@ -25,6 +27,7 @@ import * as telemetry from "./telemetry.js";
 
 export { RegionLedger } from "./region.js";
 export { LiveZone } from "./live.js";
+export { GlobalHub } from "./hub.js";
 
 const ROUTES = {
   "POST /api/register":                 auth.register,
@@ -70,11 +73,17 @@ const ROUTES = {
   "GET /api/gen/job":                   gen.getResult,
   "POST /api/gen/delete":               gen.remove,
 
+  "POST /api/profile/gallery/add":      profile.add,
+  "GET /api/profile/gallery":           profile.mine,
+  "GET /api/profile/gallery/item":      profile.getItem,
+  "POST /api/profile/gallery/delete":   profile.remove,
+
   "GET /api/koha/transparency":         koha.transparency,
 
   "POST /api/region/push":              region.pushDeltas,
   "GET /api/region/pull":               region.pullDeltas,
   "GET /api/live/ws":                   live.connect,
+  "GET /api/hub/ws":                    hub.connect,
   "GET /api/shop/stock":                shops.stock,
   "POST /api/shop/trade":               shops.trade,
   "POST /api/seeds/next":               seeds.next,

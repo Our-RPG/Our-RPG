@@ -317,6 +317,28 @@ const Taiao = (function () {
   }
   const genDelete = id => call("/api/gen/delete", { body: { id: Number(id) } });
 
+  // ---- private PixelLab gallery: the contributor's own shelf ---------------
+  // (server/src/profile.js). Once a PixelLab key is signed in, the Profile page
+  // lists everything that account generated (PixelLab's own GET /v2/characters +
+  // /v2/objects), and the player pins the keepers here. Metadata + a thumbnail
+  // come back from galleryMine; the full art bundle rides in R2, fetched per
+  // item via galleryItem. Nothing here is public — promoting to the game stays
+  // the explicit submitProposal flow.
+  async function galleryAdd(item) {
+    if (!logged()) return { error: "Sign in to save to your profile." };
+    return call("/api/profile/gallery/add", { body: item });
+  }
+  async function galleryMine() {
+    if (!logged()) return [];
+    const r = await call("/api/profile/gallery");
+    return r && r.ok ? r.items : [];
+  }
+  async function galleryItem(id) {
+    const r = await call("/api/profile/gallery/item?id=" + Number(id));
+    return r && r.ok ? r.item : null;
+  }
+  const galleryDelete = id => call("/api/profile/gallery/delete", { body: { id: Number(id) } });
+
   // Resume a stored session a beat after boot.
   if (token) setTimeout(refreshMe, 300);
 
@@ -332,5 +354,6 @@ const Taiao = (function () {
     castVote, myVote,
     curator, listMine, pendingQueue, review,
     genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
+    galleryAdd, galleryMine, galleryItem, galleryDelete,
   };
 })();

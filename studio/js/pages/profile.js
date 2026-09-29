@@ -23,6 +23,9 @@ function pageProfile(root) {
     const page = el("div.page");
     page.appendChild(profileHeaderCard());
     page.appendChild(profileImpactCard());
+    const galleryCard = myGalleryCard();
+    page.appendChild(pixellabLibraryCard(galleryCard));
+    page.appendChild(galleryCard);
     page.appendChild(myProposalsCard());
     page.appendChild(playLocallyCard());
     root.appendChild(page);
@@ -293,6 +296,236 @@ const setPreview = on => { try { on ? localStorage.setItem(PREVIEW_LS, "1") : lo
 const COMMUNITY_LS = "taiao_community_layer_v1";
 const communityOn = () => { try { return localStorage.getItem(COMMUNITY_LS) !== "0"; } catch (_) { return true; } };
 const setCommunity = on => { try { localStorage.setItem(COMMUNITY_LS, on ? "1" : "0"); } catch (_) {} };
+
+// ===== PixelLab library → private profile gallery ==========================
+// Once a PixelLab API key is signed in (js/pixellab.js), the Workshop can list
+// EVERYTHING that PixelLab account has ever generated — PixelLab keeps two
+// listable collections, characters (create-character) and objects
+// (create-*-direction-object). We pull both, sort them into the four buckets the
+// game thinks in (character / monster / object / item), and let the player pin
+// the keepers to their own private gallery (server/src/profile.js). PixelLab has
+// no notion of "monster" vs "character" or "item" vs "object", so the split
+// below is a keyword heuristic over the prompt — it'll sometimes guess wrong,
+// and the item bucket only ever fills from objects, since single-image icon
+// generations aren't in any PixelLab list. Nothing here is public: a gallery
+// item enters the game only if the player later submits it as a proposal.
+
+const GALLERY_CATS = [
+  { key: "character", label: "Character sprites", icon: "🧑" },
+  { key: "monster",   label: "Monster sprites",   icon: "👹" },
+  { key: "object",    label: "Object sprites",    icon: "📦" },
+  { key: "item",      label: "Item sprites",      icon: "🏷" },
+];
+const _catLabel = k => (GALLERY_CATS.find(c => c.key === k) || {}).label || k;
+const _catIcon = k => (GALLERY_CATS.find(c => c.key === k) || {}).icon || "✨";
+
+// Words that read as a creature rather than a townsperson / a wieldable item
+// rather than a world prop. Mirrors the taxonomy in js/prompt-bank.js.
+const _MONSTER_RE = /\b(monster|beast|creature|goblin|orc|troll|ogre|zombie|undead|skeleton|skele|ghost|ghoul|wraith|golem|demon|devil|dragon|wyrm|wyvern|drake|serpent|snake|slime|ooze|spider|scorpion|dire|wolf|boar|bear|spirit|fiend|imp|witch|brute|stalker|lurker|horror|mutant|elemental|hydra|kraken|banshee|spectre|specter|vampire|werewolf|lizardman|naga|harpy|gargoyle|minotaur|cyclops|wendigo|taniwha|abomination|behemoth|chimera|manticore|basilisk|cultist|marauder|raider|bandit)\b/i;
+const _ITEM_RE = /\b(sword|blade|axe|dagger|mace|club|spear|lance|bow|crossbow|staff|wand|shield|helmet|helm|armou?r|breastplate|gauntlet|boots|potion|flask|vial|elixir|ring|amulet|necklace|pendant|brooch|gem|crystal|coin|gold|scroll|book|tome|map|key|torch|lantern|candle|food|bread|loaf|fruit|apple|berry|meat|steak|fish|herb|flower|mushroom|ore|ingot|bar|nugget|log|plank|rope|cloth|fabric|leather|hide|pelt|tool|pickaxe|hammer|hoe|sickle|scythe|\brod\b|net|bucket|barrel|pot|pan|cup|mug|bottle|jar|bag|pouch|sack|basket|arrow|quiver|rune|icon|trinket|charm)\b/i;
+
+// kind: "character" | "object" (which PixelLab list it came from). Returns one
+// of the four gallery categories.
+function classifyPixellab(kind, prompt) {
+  const p = String(prompt || "");
+  if (kind === "character") return _MONSTER_RE.test(p) ? "monster" : "character";
+  return _ITEM_RE.test(p) ? "item" : "object";
+}
+
+// Normalise a PixelLab list row (fields differ a little across API revisions)
+// into { kind, id, name, prompt, preview, createdAt, category }.
+function normalizePixellabRow(kind, it) {
+  const id = String(it.id || it.character_id || it.object_id || "");
+  const prompt = it.prompt || it.description || "";
+  const created = typeof it.created_at === "number" ? it.created_at : (Date.parse(it.created_at || "") || Date.now());
+  return {
+    kind, id,
+    name: it.name || "",
+    prompt,
+    preview: it.preview_url || it.preview || it.image_url || it.thumbnail_url || "",
+    createdAt: created,
+    category: classifyPixellab(kind, prompt),
+  };
+}
+
+function pixellabLibraryCard(galleryCard) {
+  const c = el("div.card");
+  c.appendChild(el("h3", null, ["Your PixelLab library ", el("span.hint", { text: "everything this account has generated" })]));
+  c.appendChild(el("p.tagline", { html:
+    "This pulls in every character and object your signed-in PixelLab account has ever generated — sorted into buckets — so you can pick which ones live on your profile. " +
+    "PixelLab doesn't tag a sprite as a monster or an item, so the sort is a best guess from the prompt; move on regardless. " +
+    "<b>Single-image item icons aren't kept by PixelLab</b>, so the Item bucket only fills from objects that look like gear." }));
+
+  const bar = el("div.btn-row", { style: "margin:.5rem 0" });
+  const loadBtn = el("button.btn.primary", { text: "↻ Load my PixelLab generations" });
+  const addBtn = el("button.btn.primary", { text: "＋ Add selected to my profile", style: "display:none" });
+  const note = el("small.tagline", { style: "margin-left:.5rem;align-self:center" });
+  bar.appendChild(loadBtn); bar.appendChild(addBtn); bar.appendChild(note);
+  c.appendChild(bar);
+
+  const body = el("div");
+  c.appendChild(body);
+
+  const selected = new Map();   // pixellab id -> normalized entry
+  let savedIds = new Set();     // ids already pinned to the gallery
+
+  function refreshAddBtn() {
+    if (selected.size) { addBtn.style.display = ""; addBtn.textContent = "＋ Add " + selected.size + " to my profile"; }
+    else addBtn.style.display = "none";
+  }
+
+  function tile(entry) {
+    const already = savedIds.has(entry.id);
+    const t = el("label.tile", { style: "cursor:" + (already ? "default" : "pointer") + ";display:block;position:relative" });
+    const thumb = el("div.thumb");
+    if (entry.preview) thumb.appendChild(el("img", { src: entry.preview, alt: entry.name || entry.prompt, loading: "lazy" }));
+    else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: _catIcon(entry.category) }));
+    t.appendChild(thumb);
+    t.appendChild(el("div.meta", null, [
+      el("div.name", { style: "font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: entry.name || (entry.prompt || "").slice(0, 40) || entry.id }),
+      el("div.sub", { text: entry.kind === "character" ? "character" : "object" }),
+    ]));
+    if (already) {
+      t.appendChild(el("span", { style: "position:absolute;top:.4rem;right:.4rem;background:var(--accent,#56e39f);color:#062;border-radius:4px;padding:.05rem .35rem;font-size:.66rem;font-weight:700", text: "✓ saved" }));
+      return t;
+    }
+    const cb = el("input", { type: "checkbox", style: "position:absolute;top:.4rem;left:.4rem;width:18px;height:18px;cursor:pointer" });
+    cb.addEventListener("change", () => {
+      if (cb.checked) { selected.set(entry.id, entry); t.style.outline = "2px solid var(--accent,#56e39f)"; }
+      else { selected.delete(entry.id); t.style.outline = ""; }
+      refreshAddBtn();
+    });
+    t.appendChild(cb);
+    return t;
+  }
+
+  function renderBuckets(entries) {
+    clear(body);
+    if (!entries.length) { body.appendChild(el("p.tagline", { text: "No characters or objects found on this PixelLab account yet — generate some, then load again." })); return; }
+    for (const cat of GALLERY_CATS) {
+      const inCat = entries.filter(e => e.category === cat.key);
+      if (!inCat.length) continue;
+      body.appendChild(el("h4", { style: "margin:.9rem 0 .4rem", text: cat.icon + " " + cat.label + " (" + inCat.length + ")" }));
+      const grid = el("div.grid-cards");
+      inCat.forEach(e => grid.appendChild(tile(e)));
+      body.appendChild(grid);
+    }
+  }
+
+  async function load() {
+    if (!PixelLab.hasKey()) { clear(body); body.appendChild(el("div.banner.warn", { html: "Add your PixelLab API key in <a href='#/settings'>Settings</a> first — then load your generations here." })); return; }
+    if (!Taiao.logged()) { clear(body); body.appendChild(el("p.tagline", { text: "Sign in to save generations to your profile." })); return; }
+    loadBtn.disabled = true; note.textContent = "Reading your PixelLab account…";
+    clear(body); body.appendChild(el("div.center-col", { style: "padding:1rem" }, [el("div.spinner")]));
+    try {
+      const [chars, objs, mine] = await Promise.all([
+        PixelLab.listCharacters(), PixelLab.listObjects(), Taiao.galleryMine(),
+      ]);
+      savedIds = new Set((mine || []).map(m => String(m.pixellab_id)));
+      selected.clear(); refreshAddBtn();
+      const entries = [
+        ...(chars.items || []).map(it => normalizePixellabRow("character", it)),
+        ...(objs.items || []).map(it => normalizePixellabRow("object", it)),
+      ].filter(e => e.id).sort((a, b) => b.createdAt - a.createdAt);
+      renderBuckets(entries);
+      const trunc = (chars.truncated || objs.truncated) ? " (showing the most recent — you have more on PixelLab)" : "";
+      note.textContent = entries.length + " generation" + (entries.length === 1 ? "" : "s") + " found" + trunc + ".";
+    } catch (e) {
+      clear(body);
+      body.appendChild(el("div.banner.warn", { text: (e && e.message) || "Couldn't read your PixelLab library." }));
+      note.textContent = "";
+    } finally { loadBtn.disabled = false; }
+  }
+
+  async function addSelected() {
+    const picks = [...selected.values()];
+    if (!picks.length) return;
+    addBtn.disabled = true; loadBtn.disabled = true;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < picks.length; i++) {
+      const e = picks[i];
+      note.textContent = "Fetching art " + (i + 1) + "/" + picks.length + " — " + (e.name || e.id) + "…";
+      try {
+        const dirs = e.kind === "character" ? await PixelLab.characterArt(e.id) : await PixelLab.objectArt(e.id);
+        if (!dirs || !Object.keys(dirs).length) throw new Error("no art returned");
+        const thumb = dirs.south || Object.values(dirs)[0] || "";
+        const r = await Taiao.galleryAdd({
+          category: e.category, pixellabKind: e.kind, pixellabId: e.id,
+          name: e.name || (e.prompt || "").slice(0, 80), prompt: e.prompt,
+          createdAt: e.createdAt, thumb, result: { dirs },
+        });
+        if (r && r.ok) { ok++; savedIds.add(e.id); } else { fail++; }
+      } catch (_) { fail++; }
+    }
+    note.textContent = "Added " + ok + " to your profile" + (fail ? " · " + fail + " failed" : "") + ".";
+    toast(ok ? "Saved " + ok + " to your profile." : "Nothing saved.", ok ? "ok" : "err", 5000);
+    selected.clear(); refreshAddBtn();
+    addBtn.disabled = false; loadBtn.disabled = false;
+    // reflect the new "✓ saved" badges + refresh the gallery below
+    load();
+    if (galleryCard && galleryCard._refresh) galleryCard._refresh();
+  }
+
+  loadBtn.addEventListener("click", load);
+  addBtn.addEventListener("click", addSelected);
+  // auto-load once the account + key are both present
+  if (PixelLab.hasKey() && Taiao.logged()) load();
+  else { clear(body); body.appendChild(el("p.tagline", { text: PixelLab.hasKey() ? "Sign in to save generations to your profile." : "Add your PixelLab API key in Settings, then load your generations here." })); }
+  Taiao.onAuth(() => { if (PixelLab.hasKey() && Taiao.logged()) load(); });
+  return c;
+}
+
+function myGalleryCard() {
+  const c = el("div.card");
+  c.appendChild(el("h3", null, ["My profile gallery ", el("span.hint", { text: "the sprites you've pinned" })]));
+  c.appendChild(el("p.tagline", { html:
+    "Your private shelf of chosen PixelLab sprites. Nothing here is public and nothing is in the game yet — when you're ready, open a sprite's page and use <b>Upload to game</b> to put it up for the community to vote on." }));
+  const body = el("div");
+  c.appendChild(body);
+
+  async function refresh() {
+    if (!Taiao.logged()) { clear(body); body.appendChild(el("p.tagline", { text: "Sign in to build your gallery." })); return; }
+    clear(body); body.appendChild(el("p.tagline", { text: "Loading…" }));
+    let items = [];
+    try { items = await Taiao.galleryMine(); } catch (_) {}
+    clear(body);
+    if (!items.length) { body.appendChild(el("p.tagline", { text: "Nothing pinned yet — pick from your PixelLab library above." })); return; }
+    for (const cat of GALLERY_CATS) {
+      const inCat = items.filter(m => m.category === cat.key);
+      if (!inCat.length) continue;
+      body.appendChild(el("h4", { style: "margin:.9rem 0 .4rem", text: cat.icon + " " + cat.label + " (" + inCat.length + ")" }));
+      const grid = el("div.grid-cards");
+      for (const m of inCat) grid.appendChild(galleryTile(m));
+      body.appendChild(grid);
+    }
+
+    function galleryTile(m) {
+      const t = el("div.tile", { style: "position:relative" });
+      const thumb = el("div.thumb");
+      if (m.thumb) thumb.appendChild(el("img", { src: m.thumb, alt: m.name || "", loading: "lazy" }));
+      else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: _catIcon(m.category) }));
+      t.appendChild(thumb);
+      t.appendChild(el("div.meta", null, [
+        el("div.name", { style: "font-size:.82rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: m.name || m.pixellab_id }),
+        el("div.sub", { text: m.pixellab_kind === "character" ? "character" : "object" }),
+      ]));
+      const del = el("button.btn.ghost.sm", { title: "Remove from gallery", text: "🗑", style: "position:absolute;top:.35rem;right:.35rem;padding:.1rem .35rem" });
+      del.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        del.disabled = true;
+        const r = await Taiao.galleryDelete(m.id);
+        if (r && r.ok) refresh(); else { del.disabled = false; toast((r && r.error) || "Couldn't remove.", "err"); }
+      });
+      t.appendChild(del);
+      return t;
+    }
+  }
+
+  c._refresh = refresh;
+  refresh();
+  Taiao.onAuth(() => refresh());
+  return c;
+}
 
 function playLocallyCard() {
   const c = el("div.card");

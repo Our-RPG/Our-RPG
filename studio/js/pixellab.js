@@ -231,6 +231,45 @@ const PixelLab = (function () {
     return frames.map(f => (f && f.base64) ? b64ToDataUrl(f) : (typeof f === "string" ? f : b64ToDataUrl(f)));
   }
 
+  // ---- account history: list everything this key's account has generated ----
+  // PixelLab keeps two listable collections — characters (create-character) and
+  // objects (create-*-direction-object). There is no list for the single-image
+  // /generate-image (pixflux) calls the item-icon generator uses, so those never
+  // appear here. List rows are lightweight: { id, name, prompt, size, created_at,
+  // preview_url, ... } — a preview thumbnail, no full rotation art. Fetch the
+  // detail (characterArt/objectArt) only when the player pins one to their gallery.
+  //
+  // Response shape varies across API revisions; normalise to a plain array.
+  const listArray = r => (r && (r.characters || r.objects || r.items || r.results || r.data)) || (Array.isArray(r) ? r : []);
+
+  // Page through a collection until it's exhausted or `cap` rows are gathered
+  // (a guard against an account with thousands of generations flooding the page).
+  async function listAll(path, cap) {
+    const LIMIT = 100, out = [];
+    cap = cap || 300;
+    for (let offset = 0; out.length < cap; offset += LIMIT) {
+      const page = listArray(await v2(path + "?limit=" + LIMIT + "&offset=" + offset));
+      if (!page.length) break;
+      out.push(...page);
+      if (page.length < LIMIT) break;
+    }
+    return { items: out.slice(0, cap), truncated: out.length > cap };
+  }
+  const listCharacters = cap => listAll("/characters", cap);
+  const listObjects = cap => listAll("/objects", cap);
+
+  // Full rotation art for one listed character/object, as {dir: dataUrl}. The
+  // detail endpoints return public rotation URLs; we inline them so the whole
+  // set travels in one JSON payload (what the gallery/proposal store expects).
+  async function characterArt(characterId) {
+    const c = await v2("/characters/" + characterId);
+    return await rotationsToDataUrls(c.rotation_urls || (c.character && c.character.rotation_urls));
+  }
+  async function objectArt(objectId) {
+    const o = await v2("/objects/" + objectId);
+    return await rotationsToDataUrls(o.rotation_urls || (o.object && o.object.rotation_urls));
+  }
+
   // rotation_urls can be a {dir:url} map OR already-inlined base64 images.
   async function rotationsToDataUrls(rots) {
     const out = {};
@@ -250,5 +289,6 @@ const PixelLab = (function () {
     generateImage, createCharacter, createObject8, createObject1,
     resumeCharacter, resumeObject8,
     rotate8, animate,
+    listCharacters, listObjects, characterArt, objectArt,
   };
 })();

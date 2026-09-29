@@ -245,3 +245,27 @@ CREATE TABLE IF NOT EXISTS gen_jobs (
   updated_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gen_jobs_user ON gen_jobs(user_id, status, created_at);
+
+-- ============================== Phase 7 ====================================
+-- The contributor's private PixelLab gallery. Once a PixelLab key is signed
+-- into the Workshop, the Profile page lists everything that PixelLab account
+-- has ever generated (PixelLab's own GET /v2/characters + /v2/objects),
+-- auto-sorts it into character/monster/object/item buckets, and lets the player
+-- pin the ones they want to keep. Metadata + a small thumbnail here; the full
+-- rotation art bundle rides in R2 at profile/<id>.json. Private and inert —
+-- promoting an item into the game is still the explicit "upload to game" flow.
+CREATE TABLE IF NOT EXISTS profile_gallery (
+  id            INTEGER PRIMARY KEY,
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  category      TEXT NOT NULL,                        -- character|monster|object|item (heuristic; PixelLab only knows character vs object)
+  source        TEXT NOT NULL DEFAULT 'pixellab',     -- provenance of the art
+  pixellab_kind TEXT NOT NULL,                        -- character|object — which PixelLab list it came from
+  pixellab_id   TEXT NOT NULL,                        -- the PixelLab character/object id — dedupe key
+  name          TEXT,                                 -- display name (PixelLab name, or a slug of the prompt)
+  prompt        TEXT,
+  thumb         TEXT,                                 -- small south-facing data URL for the grid (full art rides in R2)
+  created_at    INTEGER NOT NULL,                     -- PixelLab's own created_at, so the shelf sorts by when it was generated
+  added_at      INTEGER NOT NULL,                     -- when it was pinned to this profile
+  UNIQUE(user_id, pixellab_id)
+);
+CREATE INDEX IF NOT EXISTS idx_profile_gallery_user ON profile_gallery(user_id, category, created_at);
