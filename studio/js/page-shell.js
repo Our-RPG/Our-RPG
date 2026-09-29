@@ -90,9 +90,15 @@ const Nav = (function () {
       if (id) {
         // id = spriteSnake$shire$zone → npc/<spriteSnake>/<shire$zone>.html
         const i = id.indexOf("$");
-        return i >= 0
-          ? R + "npc/" + slugKey(id.slice(0, i)) + "/" + slugKey(id.slice(i + 1)) + ".html"
-          : R + "npc/" + slugKey(id) + "/template.html";
+        if (i < 0) return R + "npc/" + slugKey(id) + "/template.html";
+        // a COMMUNITY-baked zone's NPCs have no static pages in this build —
+        // route them to the dynamic npc/npc.html (works on any static host;
+        // the server also synthesizes the clean static-URL shell for sharing)
+        const zp = id.slice(id.lastIndexOf("$") + 1).split(".");
+        if (typeof ZoneStore !== "undefined" && zp.length === 2
+            && ZoneStore.isStatic(Number(zp[0]), Number(zp[1])) === false)
+          return R + "npc/npc.html?" + query;
+        return R + "npc/" + slugKey(id.slice(0, i)) + "/" + slugKey(id.slice(i + 1)) + ".html";
       }
       return (P.get("at") || P.get("name")) ? R + "npc/npc.html?" + query : R + "npc/";
     }
@@ -101,7 +107,13 @@ const Nav = (function () {
     if (path === "zones") {
       if (P.get("special")) return R + "zones/?special=1";
       const zx = P.get("zx"), zy = P.get("zy");
-      return (zx != null && zy != null) ? R + "zones/" + slugKey(zx + "." + zy) + ".html" : R + "zones/";   // per-zone static page
+      if (zx == null || zy == null) return R + "zones/";
+      // community-baked zones have no static per-zone page in this build —
+      // the zones hub renders them from ?zx&zy (server-synthesized shells
+      // cover the clean static URL for sharing/deep links)
+      if (typeof ZoneStore !== "undefined" && ZoneStore.isStatic(Number(zx), Number(zy)) === false)
+        return R + "zones/?zx=" + encodeURIComponent(zx) + "&zy=" + encodeURIComponent(zy);
+      return R + "zones/" + slugKey(zx + "." + zy) + ".html";   // per-zone static page
     }
     return R + (ROUTE_FOLDER[path] || path) + "/";              // a tab hub
   }

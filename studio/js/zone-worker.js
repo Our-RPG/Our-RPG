@@ -57,6 +57,25 @@ onmessage = e => {
       return;
     }
 
+    // ---- features only: query settlements/roads/rivers (and optionally POIs/
+    // icons) over an explicit MAP-coord rect, without rendering any terrain.
+    // Used by the in-browser zone bake (zone-bake.js), which renders terrain
+    // through parallel "region" requests and needs the feature query exactly
+    // once, over the final image's map extent. Streams one message per stage.
+    if (d.type === "features" && features) {
+      const stage = (name, fn) => { try { postMessage({ token: d.token, [name]: fn() }); } catch (err) { postMessage({ token: d.token, [name]: [], warn: name + ": " + err }); } };
+      stage("villages", () => features.villagesNearForMap(d.tMinX, d.tMinY, d.tMaxX, d.tMaxY, d.vcell)
+        .map(v => ({ name: v.name, kind: v.kind, x: v.x, y: v.y })));
+      if (d.pois) stage("pois", () => features.poisNearForMap(d.tMinX, d.tMinY, d.tMaxX, d.tMaxY, d.pcell)
+        .map(p => ({ name: p.name, kind: p.type, x: p.x, y: p.y })));
+      if (d.icons) stage("icons", () => features.iconsNearForMap(d.tMinX, d.tMinY, d.tMaxX, d.tMaxY)
+        .map(ic => ({ kind: ic.kind || ic.type, x: ic.x, y: ic.y })));
+      stage("rivers", () => features.riversNear(d.tMinX, d.tMinY, d.tMaxX, d.tMaxY).map(rv => ({ polys: rv.polys })));
+      stage("roads", () => features.roadsNear(d.tMinX, d.tMinY, d.tMaxX, d.tMaxY).map(rp => ({ pts: rp.pts })));
+      postMessage({ token: d.token, featuresDone: true });
+      return;
+    }
+
     if (d.type !== "render" || !features) return;
 
     // ---- zone geometry ----

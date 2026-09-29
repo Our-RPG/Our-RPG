@@ -143,7 +143,7 @@ copyTree(path.join(STU, "fonts"), path.join(WORKSHOP, "fonts"), { label: "fonts"
 // zone-worker.js + zone-chunk-worker.js: loaded via `new Worker(STUDIO_BASE +
 // "js/zone-worker.js")` (studio/js/pages/zones.js:324,599), so they must land
 // at <outdir>/workshop/js/ — the studio root in the deployed site.
-const WORKERS = ["zone-worker.js", "zone-chunk-worker.js"];
+const WORKERS = ["zone-worker.js", "zone-chunk-worker.js", "zone-bake-worker.js", "zone-bake-core.js"];
 fs.mkdirSync(path.join(WORKSHOP, "js"), { recursive: true });
 for (const w of WORKERS) fs.copyFileSync(path.join(STU, "js", w), path.join(WORKSHOP, "js", w));
 console.log(`  [workers] ${WORKERS.length} files -> workshop/js/`);
@@ -155,8 +155,11 @@ console.log(`  [workers] ${WORKERS.length} files -> workshop/js/`);
 // files confirms this is the complete dependency set (no further nested
 // importScripts inside them).
 const WORKER_DEPS = [
-  "data.js", "content.js",
+  "data.js", "content.js", "biome-tiles.js",
   "world/terrain.js", "world/features.js", "world/erosion.js", "world/chunks.js",
+  // zone-bake-worker.js extras (the in-browser "Generate zone" engine):
+  "sprites/mix-npc-data.js", "sprites/objects-data.js", "world/quest-anchors.js",
+  "skills/market.js",   // fetched at runtime for its SHOP_TYPES slice
 ];
 let depFiles = 0, depBytes = 0;
 for (const rel of WORKER_DEPS) {

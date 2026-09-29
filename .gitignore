@@ -103,3 +103,6 @@ js/lua/lua-src-gen.js
 
 # Session scratch directory — temp/working files, not source.
 /scratchpad/
+
+# our-rpg.com site tree (tools/build_ourrpg_site.sh output) — deploy artifact
+/dist/site/

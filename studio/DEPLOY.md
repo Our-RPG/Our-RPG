@@ -59,9 +59,26 @@ better part of an hour for a whole zone.
 `--min <tiles>` overrides the shire-merge threshold (default 4,500,000,
 matching `prerender-zone.mjs`'s own default).
 
-Baking is a **local** step — `bake-server.mjs`/`bake-zone.mjs` both need
-the real game code on disk and run outside any deployed site. Once a zone is
-baked:
+### Community baking (in the player's browser)
+
+Since 2026-09-30 the deployed site can bake zones WITHOUT a local checkout:
+the Zones tab's "Generate zone" runs the same six passes in the visitor's
+own browser (`studio/js/zone-bake.js` + `zone-bake-worker.js`, sharing the
+node pipeline's algorithms via `studio/js/zone-bake-core.js`) and publishes
+the manifest + map to the server (`server/src/zones.js`, R2 `zones/…`, D1
+`community_zones`). Progress heartbeats to the server, so everyone watching
+sees a live bar; the long passes checkpoint partial results, so a hard
+refresh — or another signed-in player, once the holder's lease goes stale —
+resumes where it left off. NPC/zone pages for community zones are never
+stored as HTML: the worker synthesizes the ~1 KB page shells on demand from
+the stored manifest (see the `/workshop/zones/*` + `/workshop/npc/*` routes
+in `server/wrangler.toml`). To enable on a fresh deploy: apply migration
+`0008_community_zones.sql`, deploy the worker with those two routes, done.
+
+Local (node) baking still exists and is still what ships zones INTO the
+static site build — `bake-server.mjs`/`bake-zone.mjs` need the real game
+code on disk and run outside any deployed site. Once a zone is baked
+locally:
 
 - Committing `studio/assets/zones/zone_<zx>_<zy>.{json,png}` to git is
   **optional, your call** — the Workshop reads them straight off disk either

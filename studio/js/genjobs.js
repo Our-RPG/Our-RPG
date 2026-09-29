@@ -42,68 +42,33 @@ const GenJobs = (function () {
   function suggest(kind, ctx) { return PromptBank.suggest(kind, ctx); }
 
   // ------------------------------------------------------------- execution
-  // jobMeta: { spriteType, spriteId, label, subject?, prompt, bodyType?, seed?, pixellabKind }
-  // pixellabFn: async (onRef) => ({ dirs } | { image }) — the actual PixelLab
-  // call(s); must call onRef(refId) as soon as a resumable id is known
-  // (character/object8 kinds only — see pixellab.js's opts.onRef).
-  async function execute(jobMeta, pixellabFn) {
-    const startRes = await Taiao.genStart(jobMeta);
-    if (!startRes || !startRes.ok) throw new Error((startRes && startRes.error) || "Couldn't start the generation.");
-    const jobId = startRes.id;
-    inFlight.add(jobId); notifyBoards();
-    try {
-      const result = await pixellabFn(ref => { Taiao.genProgress(jobId, ref); });
-      await Taiao.genComplete(jobId, result);
-      resultCache.set(jobId, result);
-      // Every sprite generated through the Workshop pipeline lands in the
-      // player's profile gallery automatically, tagged with its proposed
-      // sprite_id + category. Best-effort — a gallery hiccup never fails the gen.
-      try { await addToGallery(jobId, jobMeta, result); } catch (_) {}
-      return jobId;
-    } catch (e) {
-      await Taiao.genFail(jobId, e && e.message || String(e));
-      throw e;
-    } finally {
-      inFlight.delete(jobId); notifyBoards();
-    }
+  // jobMeta: { spriteType, spriteId, label, subject?, prompt, pixellabKind,
+  //            bodyType?, seed?, view?, size?, template?, reference?, negative? }
+  // Phase 8: the SERVER runs the whole PixelLab pipeline with the player's stored
+  // key and auto-adds the finished sprite to their gallery. execute() just kicks
+  // it off and returns the job id; the board polls until it finishes — even
+  // across a hard refresh, or from another device. The old second `_pixellabFn`
+  // argument (the client-side generator) is accepted-but-ignored so the existing
+  // call sites keep working unchanged.
+  async function execute(jobMeta, _pixellabFn) {
+    const r = await Taiao.genRequest(jobMeta);
+    if (!r || !r.ok) throw new Error((r && r.error) || "Couldn't start the generation.");
+    notifyBoards();
+    return r.id;
   }
 
-  // spriteType (character|monster|object|ui) → gallery category. "ui" (item
-  // icons) maps to the gallery's "item" bucket; the rest pass through.
+  // spriteType (character|monster|object|ui) → gallery category. Kept for callers
+  // that still map a type to a gallery bucket.
   function galleryCategoryFor(spriteType) { return spriteType === "ui" ? "item" : (spriteType || "object"); }
 
-  // Auto-add a completed generation to the profile gallery. Keyed by
-  // "job:<genJobId>" so every generation (including a regenerate) is its own row
-  // — the old one stays, the new one appears once it finishes.
-  async function addToGallery(jobId, meta, result) {
-    const dirs = result && result.dirs, image = result && result.image;
-    const thumb = image || (dirs && (dirs.south || Object.values(dirs)[0])) || "";
-    if (!thumb) return;
-    return Taiao.galleryAdd({
-      category: galleryCategoryFor(meta.spriteType),
-      pixellabKind: meta.pixellabKind,
-      pixellabId: "job:" + jobId,
-      spriteId: meta.spriteId,
-      subject: meta.subject || null,
-      name: meta.label || meta.spriteId,
-      prompt: meta.prompt,
-      bodyType: meta.bodyType || null,
-      seed: meta.seed != null && meta.seed !== "" ? String(meta.seed) : null,
-      createdAt: Date.now(),
-      thumb,
-      result: dirs ? { dirs } : { image },
-    });
-  }
-
-  // Regenerate from a gallery item: run a FRESH PixelLab generation with the same
-  // recipe. It goes through execute() like any other, so it's durable and the new
-  // result auto-adds to the gallery as a NEW row — the original item is untouched.
-  // Library-pinned items store pixellab_kind as character|object; map object→
-  // object8 so it regenerates as a rotatable object.
+  // Regenerate from a gallery item: request a FRESH server-side generation with
+  // the same recipe. A new job → a new gallery row once it finishes; the original
+  // item is untouched. Library-pinned items store pixellab_kind as
+  // character|object; map object→object8 so it regenerates as a rotatable object.
   const regenKind = k => (k === "object" ? "object8" : (k || "image"));
   async function regenerateFromGallery(item) {
     const spriteType = item.category === "item" ? "ui" : (item.category || "object");
-    const meta = {
+    return execute({
       spriteType,
       spriteId: item.sprite_id || item.pixellab_id || "sprite",
       label: item.name || item.sprite_id || "sprite",
@@ -112,9 +77,7 @@ const GenJobs = (function () {
       bodyType: item.body_type || undefined,
       seed: item.seed || undefined,
       pixellabKind: regenKind(item.pixellab_kind),
-    };
-    const row = { id: "gal:" + item.id, pixellab_kind: meta.pixellabKind, prompt: meta.prompt };
-    return execute(meta, defaultPixellabFn(row));
+    });
   }
 
   // Record the PixelLab reference image (if any) a job was generated from —
@@ -207,6 +170,7 @@ const GenJobs = (function () {
   // server's own staleness timeout (gen.js `mine`) to eventually fail.
   async function resumeOne(row) {
     if (row.status !== "generating" || inFlight.has(row.id) || resuming.has(row.id)) return;
+    if (row.driver === "server") return;   // Phase 8: the cron poller owns these — never client-poll them
     if (!row.pixellab_ref || (row.pixellab_kind !== "character" && row.pixellab_kind !== "object8")) return;
     if (!PixelLab.hasKey()) return;   // this browser can't resume without the key
     resuming.add(row.id);
@@ -249,23 +213,38 @@ const GenJobs = (function () {
     clear(container);
     if (!jobs.length) return;
     const row = el("div.genjob-row");
+
+    // One grouped "Generating…" card holds every in-flight sprite — it appears
+    // the instant you start a generation and new ones join it, rather than a
+    // separate card each. The server drives them to completion regardless.
+    const generating = jobs.filter(j => j.status === "generating");
+    if (generating.length) {
+      const card = el("div.genjob-card", { style: "min-width:220px" });
+      card.appendChild(el("div.genjob-head", null, [
+        el("span", { text: "✨" }),
+        el("strong", { text: "Generating " + generating.length + " sprite" + (generating.length === 1 ? "" : "s") + "…", style: "flex:1" }),
+        el("div.spinner", { style: "width:14px;height:14px" }),
+      ]));
+      for (const job of generating) {
+        card.appendChild(el("div", { style: "display:flex;align-items:center;gap:.4rem;font-size:.72rem;padding:.14rem 0;border-top:1px solid var(--line-2)" }, [
+          el("span", { text: TYPE_ICON[job.sprite_type] || "✨" }),
+          el("span", { style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", title: job.prompt || "", text: job.label }),
+          el("small.tagline", { text: elapsed(job) }),
+          el("button.btn.ghost.sm", { text: "✕", title: "Cancel / delete", style: "padding:0 .35rem", onclick: () => del(job) }),
+        ]));
+      }
+      row.appendChild(card);
+    }
+
+    // Completed / failed sprites keep their own cards with per-item actions.
     for (const job of jobs) {
+      if (job.status === "generating") continue;
       const card = el("div.genjob-card");
-      const head = el("div.genjob-head", null, [
+      card.appendChild(el("div.genjob-head", null, [
         el("span", { text: TYPE_ICON[job.sprite_type] || "✨" }),
         el("strong", { text: job.label, style: "flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" }),
-      ]);
-      card.appendChild(head);
-      if (job.status === "generating") {
-        card.appendChild(el("div.center-col", { style: "padding:.5rem 0" }, [
-          el("div.spinner"),
-          el("small", { text: "Generating… " + elapsed(job) }),
-        ]));
-        card.appendChild(el("p.tagline", { style: "font-size:.7rem;max-height:2.6em;overflow:hidden", text: job.prompt }));
-        card.appendChild(el("div.btn-row", null, [
-          el("button.btn.ghost.sm", { text: "Delete", onclick: () => del(job) }),
-        ]));
-      } else if (job.status === "completed") {
+      ]));
+      if (job.status === "completed") {
         const cv = el("canvas.spr", { width: 96, height: 96, style: "width:96px;height:96px" });
         const result = await resultFor(job);
         const src = thumbSrc(result);

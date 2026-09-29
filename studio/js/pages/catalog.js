@@ -2122,12 +2122,7 @@ function openUnifiedGenerateDialog() {
     const view = "high top-down", size = isItem ? 32 : 128;
     bg.remove();
     GenJobs.execute(
-      { spriteType: saveType, spriteId, label: spriteId, prompt: desc, bodyType: gtype === "monster" ? monsterBody : undefined, seed: seed || undefined, pixellabKind },
-      async onRef => {
-        if (pixellabKind === "character") { const r = await PixelLab.createCharacter({ description: desc, view, size, template: "mannequin", seed, onRef }); return { dirs: r.dirs }; }
-        if (pixellabKind === "object8") { const r = await PixelLab.createObject8({ description: desc, view, size, seed, onRef }); return { dirs: r.dirs }; }
-        const src = await PixelLab.createObject1({ description: desc, view, size, seed }); return { image: src };
-      }
+      { spriteType: saveType, spriteId, label: spriteId, prompt: desc, bodyType: gtype === "monster" ? monsterBody : undefined, seed: seed || undefined, pixellabKind, view, size, template: pixellabKind === "character" ? "mannequin" : undefined }
     ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
     toast("Generating “" + spriteId + "” — watch it in the card up top.", "ok");
   };

@@ -12,6 +12,7 @@ import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
 import * as gen from "./gen.js";
+import * as secrets from "./secrets.js";
 import * as profile from "./profile.js";
 import * as koha from "./koha.js";
 import * as admin from "./admin.js";
@@ -67,6 +68,7 @@ const ROUTES = {
   "GET /api/workshop/digest/latest":    workshop.latestDigest,
   "GET /api/workshop/gaps":             workshop.gaps,
 
+  "POST /api/gen/request":              gen.request,
   "POST /api/gen/start":                gen.start,
   "POST /api/gen/progress":             gen.progress,
   "POST /api/gen/complete":             gen.complete,
@@ -74,6 +76,10 @@ const ROUTES = {
   "GET /api/gen/mine":                  gen.mine,
   "GET /api/gen/job":                   gen.getResult,
   "POST /api/gen/delete":               gen.remove,
+
+  "POST /api/pixellab/key":             secrets.setKey,
+  "GET /api/pixellab/key":              secrets.keyStatus,
+  "POST /api/pixellab/key/delete":      secrets.deleteKey,
 
   "POST /api/profile/gallery/add":      profile.add,
   "GET /api/profile/gallery":           profile.mine,
@@ -169,6 +175,12 @@ export default {
 
   async scheduled(event, env, ctx) {
     ctx.waitUntil((async () => {
+      if (event.cron === "* * * * *") {
+        // Phase-8: advance in-flight server-side sprite generations to completion,
+        // independent of any browser.
+        await gen.pollPending(env);
+        return;
+      }
       if (event.cron === "30 14 * * *") {
         // Phase-2 daily tick (~2:30 am NZT): validate stray summaries,
         // recompute percentile standings, sweep stale shop stock.

@@ -14,8 +14,8 @@ function pageSettings(root) {
   keyCard.appendChild(el("h3", null, ["PixelLab API key ", el("span.hint", { text: "generates the art" })]));
   keyCard.appendChild(el("p.tagline", { html:
     'Get a key at <a href="https://pixellab.ai/account" target="_blank" rel="noopener">pixellab.ai/account</a>. ' +
-    'It is stored <b>only in this browser</b> and sent <b>only to api.pixellab.ai</b> — never to the game server. ' +
-    'On a shared computer, clear it when you\'re done.' }));
+    'When you\'re signed in, it\'s stored <b>encrypted on the Workshop server</b> so it can generate your sprites in the background — they finish and land in your gallery even if you close the tab, and show up wherever you next log in. ' +
+    'A copy is also kept in this browser (used only to list your PixelLab library). On a shared computer, use <b>Forget key</b> when you\'re done.' }));
 
   const status = el("div.banner");
   const refreshStatus = () => {
@@ -36,13 +36,26 @@ function pageSettings(root) {
     toast("Checking key with PixelLab…");
     try { const b = await PixelLab.balance(); toast("Key works. " + describeBalance(b), "ok", 5000); }
     catch (e) { toast(e.message, "err", 5000); }
+    // Stash it (encrypted) on the server so it can generate for you in the
+    // background. Only when signed in — the server keys it to your account.
+    if (Taiao.logged()) {
+      const r = await Taiao.savePixellabKey(v);
+      if (r && r.ok) toast("Key stored for background generation.", "ok", 4000);
+      else if (r && r.error) toast("Saved locally, but couldn't store it on the server: " + r.error, "warn", 6000);
+    } else {
+      toast("Sign in (below) to enable background generation on the server.", "", 6000);
+    }
     App.refreshChips();
   } });
   const testKey = el("button.btn", { text: "Test / balance", onclick: async () => {
     if (!PixelLab.hasKey()) { toast("Add a key first.", "warn"); return; }
     try { const b = await PixelLab.balance(); toast(describeBalance(b), "ok", 5000); } catch (e) { toast(e.message, "err", 5000); }
   } });
-  const clearKey = el("button.btn.danger", { text: "Forget key", onclick: () => { PixelLab.setKey(""); refreshStatus(); App.refreshChips(); toast("Key removed from this browser.", "ok"); } });
+  const clearKey = el("button.btn.danger", { text: "Forget key", onclick: async () => {
+    PixelLab.setKey(""); refreshStatus(); App.refreshChips();
+    if (Taiao.logged()) { try { await Taiao.deletePixellabKey(); } catch (_) {} }
+    toast("Key removed from this browser and the server.", "ok");
+  } });
   keyCard.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [saveKey, testKey, clearKey]));
 
   // ---- AI copilot key (Anthropic, BYO) ----

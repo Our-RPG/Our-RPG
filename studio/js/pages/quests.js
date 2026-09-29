@@ -404,8 +404,7 @@ function pageQuests(root, params) {
   const zonesP = (typeof bakedZones === "function") ? bakedZones() : Promise.resolve(["0,0"]);
   zonesP.then(zones => Promise.all(zones.map(z => {
     const p = z.split(",").map(s => parseInt(s, 10));
-    return fetch(STUDIO_BASE + "assets/zones/zone_" + p[0] + "_" + p[1] + ".json", { cache: "force-cache" })
-      .then(r => r.ok ? r.json() : null).then(m => ({ z, m })).catch(() => ({ z, m: null }));
+    return ZoneStore.manifest(p[0], p[1]).then(m => ({ z, m })).catch(() => ({ z, m: null }));
   }))).then(results => {
     clear(host);
     // combine quests across every baked zone (ids are globally unique); tag each
