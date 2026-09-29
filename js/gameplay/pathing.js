@@ -99,11 +99,10 @@ function executeGoal() {
   else if (goal.type === "board") boardVessel(goal.ent);
   else if (goal.type === "decorPick") {
     // crowbar-gated salvage (Phase 7 item 5), belt-and-braces: the menu
-    // entry already swaps to the "needs a crowbar" line when ungated, but
-    // check again here too (the tool could be dropped mid-walk) before the
-    // pickup actually fires. Tutorial isle stays exempt.
-    const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar") &&
-      !(typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active());
+    // entry already hides "Take" when ungated, but check again here too
+    // (the tool could be dropped mid-walk) before the pickup actually
+    // fires. Universal — no tutorial-isle exemption.
+    const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar");
     if (noCrowbar) log("It's fixed in place. A crowbar would pry it loose — forge one at an anvil (Toolmaking 15).", "warn");
     else pickUpDecor(goal.x, goal.y, goal.key);
   }

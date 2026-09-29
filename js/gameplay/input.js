@@ -447,16 +447,14 @@ function buildTileMenu(t) {
       else if (typeof decorPickable === "function" && decorPickable(dk)) {
         // crowbar-gated salvage (Phase 7 item 5): world decor is fixed in
         // place without one — every "Take <thing>" now runs through a
-        // Toolmaking sink instead of a free grab. Suppression precedent:
-        // the hasTool gate on skill-node gather actions above (input.js
-        // :362). Exempt on the tutorial isle — it teaches by doing, and the
-        // crowbar rule begins on the mainland.
-        const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar") &&
-          !(typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active());
-        if (noCrowbar)
-          items.push({ label: `Take ${decorName(dk)} (needs a crowbar)`,
-            fn: () => log("It's fixed in place. A crowbar would pry it loose — forge one at an anvil (Toolmaking 15).", "warn") });
-        else
+        // Toolmaking sink instead of a free grab. Same suppression pattern
+        // as the hasTool gate on skill-node gather actions above (input.js
+        // :362): no tool, no menu entry at all — not even a disabled one.
+        // Universal — no tutorial-isle exemption (a fresh, ungraduated
+        // character has hasTool("crowbar") === false just like anyone else,
+        // so this alone is enough to gate every decoration everywhere).
+        const noCrowbar = typeof hasTool === "function" && !hasTool("crowbar");
+        if (!noCrowbar)
           items.push({ label: `Take ${decorName(dk)}`, fn: () => setGoal({ type: "decorPick", x: t.x, y: t.y, key: dk }, t.x, t.y, 1) });
       }
       // city plaza fountains double as respawn anchors: "Set respawn point"

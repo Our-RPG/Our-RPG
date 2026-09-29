@@ -21,14 +21,21 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
   OFF (it isn't — say so, don't fake it). Enable "SharedArrayBuffer support"
   only if testing shows the ML dialogue layer wants it; the game itself
   doesn't.
-- **Cover image:** a Bifrost still (the beam over the isle). 630×500.
+- **Cover image:** `~/Downloads/our-rpg-itch-shots/00-cover-630x500.png` — a
+  golden-hour canyon vista (layered orange mesas, distant water, gem-strewn
+  floor), already sized 630×500. (A Bifrost still is the alternate.)
 - **Lead GIF:** record the Bifrost crossing — `tools/record_bifrost.js`
   already drives the cinematic headlessly; capture ~8 s of the pull,
   convert with `ffmpeg -i bifrost.webm -vf "fps=15,scale=640:-1" bifrost.gif`
   and keep it under ~8 MB so itch autoplays it. Place it FIRST in the body.
-- **Screenshots (5–6):** dawn chorus forest (birds visible), a synoptic
-  weather map, a busy town at dusk with lamplighters, split selves working a
-  field, a boat at a sea bridge, the Goals tab mid-arc.
+- **Screenshots (6):** staged and captured headlessly (see
+  `~/Downloads/our-rpg-itch-shots/`, 1920×1080 unless noted):
+  `01-golden-canyon` (endless-world vista), `02-living-forest` (the varied
+  living bush), `03-night-explorer` (a candle-lit wanderer at a moonlit pool),
+  `04-canyon-adventurer` (character in the gem badlands), `05-split-selves`
+  (five selves working one field — the **X**-split mechanic, 1920×1000),
+  `06-world-map` (the named, road-webbed explorable world). Re-stageable via
+  the `scenes*.mjs` directors in the scratch dir.
 - **Tags:** rpg, open-world, sandbox, crafting, pixel-art, singleplayer,
   relaxing, new-zealand.
 - **Upload:** the web zip from `tools/build_web_zip.sh` (see asset-diet
