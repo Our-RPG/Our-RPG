@@ -127,6 +127,7 @@
   "../js/pixellab.js",
   "../js/llm.js",
   "../js/taiao.js",
+  "../js/prompt-bank.js",
   "../js/genjobs.js",
   "../js/vote-widget.js",
   "../js/roster.js",

@@ -534,14 +534,10 @@ async function openCreateStateDialog(voteCtx, parentNode) {
   m.appendChild(el("label.field", null, [el("span", { text: "State name" }), nameIn]));
   m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), promptIn]));
   const suggestBtn = el("button.btn.sm.ghost", {
-    text: "✨ Suggest a prompt", onclick: async () => {
-      if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
-      suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
-      try {
-        const s = await GenJobs.suggest("state", { baseName: parentNode.name || parentNode.path });
-        promptIn.value = s.prompt; nameIn.value = s.id;
-      } catch (e) { toast(e.message || String(e), "err", 6000); }
-      finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+    text: "✨ Suggest a prompt", onclick: () => {
+      const s = GenJobs.suggest("state", { baseName: parentNode.name || parentNode.path });
+      promptIn.value = s.prompt; nameIn.value = s.id;
+      suggestBtn.textContent = "🔁 Another suggestion";
     },
   });
   m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));
@@ -1608,12 +1604,10 @@ function renderItemPreview(page, provider, entry, ctx) {
     promptIn.value = name + ", a single game item icon";
     m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), promptIn]));
     const suggestBtn = el("button.btn.sm.ghost", {
-      text: "✨ Suggest a prompt", onclick: async () => {
-        if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
-        suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
-        try { const s = await GenJobs.suggest("item", { baseName: name }); promptIn.value = s.prompt; }
-        catch (e) { toast(e.message || String(e), "err", 6000); }
-        finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+      text: "✨ Suggest a prompt", onclick: () => {
+        const s = GenJobs.suggest("item", { baseName: name });
+        promptIn.value = s.prompt;
+        suggestBtn.textContent = "🔁 Another suggestion";
       },
     });
     m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));

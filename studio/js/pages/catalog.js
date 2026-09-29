@@ -1999,19 +1999,15 @@ function openUnifiedGenerateDialog() {
   const taken = takenSpriteIds();
   const suggestKind = () => typeSel.value === "monster" ? "monster:" + monsterBody : typeSel.value;
   const suggestBtn = el("button.btn.sm.ghost", {
-    text: "✨ Suggest a prompt", onclick: async () => {
-      if (!LLM.hasKey()) { toast("Add your Anthropic API key in Settings to get suggestions.", "warn"); return; }
-      suggestBtn.disabled = true; suggestBtn.textContent = "Thinking…";
-      try {
-        const s = await GenJobs.suggest(suggestKind(), { taken });
-        prompt.value = s.prompt; sid.input.value = s.id; sid.validate();
-      } catch (e) { toast(e.message || String(e), "err", 6000); }
-      finally { suggestBtn.disabled = false; suggestBtn.textContent = "🔁 Another suggestion"; }
+    text: "✨ Suggest a prompt", onclick: () => {
+      const s = GenJobs.suggest(suggestKind(), { taken });
+      prompt.value = s.prompt; sid.input.value = s.id; sid.validate();
+      suggestBtn.textContent = "🔁 Another suggestion";
     },
   });
   m.appendChild(el("label.field", null, [el("span", { text: "Prompt" }), prompt]));
   m.appendChild(el("div.btn-row", { style: "margin:-.3rem 0 .4rem" }, [suggestBtn]));
-  const sid = snakeIdField("sprite_id", "snake_case, e.g. rangi_warrior", taken);
+  const sid = snakeIdField("sprite_id", "", taken);
   m.appendChild(sid.field);
   const seedIn = el("input", { type: "number", placeholder: "seed (optional)" });
   m.appendChild(el("label.field", null, [el("span", { text: "Seed" }), seedIn]));

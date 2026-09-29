@@ -3,9 +3,10 @@
 // unified generator, a state/costume generator on a sprite's own page, and the
 // item-icon generator). Two things it adds on top of a bare PixelLab call:
 //
-//  1. An LLM-suggested prompt (+ id/name) via js/llm.js, so a blank page isn't
-//     the starting point — "suggest" and "another suggestion" both just call
-//     GenJobs.suggest() again.
+//  1. A suggested prompt (+ id/name) from the offline PromptBank
+//     (js/prompt-bank.js — a hand-written bank, no network call, no API key),
+//     so a blank page isn't the starting point — "suggest" and "another
+//     suggestion" both just call GenJobs.suggest() again for a fresh pick.
 //  2. A durable job record on the Taiao server (server/src/gen.js) — start
 //     before the PixelLab call, progress once the async job/character id is
 //     known, complete/fail at the end. The PixelLab call itself still runs
@@ -33,59 +34,12 @@ const GenJobs = (function () {
   const notifyBoards = () => boards.forEach(fn => { try { fn(); } catch (_) {} });
 
   // ---------------------------------------------------------------- suggest
-  const STYLE_ANGLES = [
-    "a common, everyday one",
-    "a rare or unusual variant",
-    "something with strong New Zealand / Aotearoa flavour",
-    "something a returning player hasn't seen before",
-    "a simple, practical one",
-    "something a little whimsical",
-  ];
-  let suggestCalls = 0;
-  const KIND_TEXT = {
-    character: "a new playable character or NPC",
-    "monster:humanoid": "a new humanoid monster",
-    "monster:quadruped": "a new quadruped/animal monster",
-    object: "a new world object (furniture, terrain decoration, a tool, a small structure…)",
-    item: "a single inventory item icon",
-    state: "a new costume/state variant of an existing sprite",
-  };
-
   // kind: "character" | "monster:humanoid" | "monster:quadruped" | "object" |
   // "item" | "state". ctx: { baseName?, taken?: Set }. Returns { prompt, id }
   // — for kind "state", id is a short state/costume name, not a sprite id.
-  async function suggest(kind, ctx) {
-    ctx = ctx || {};
-    if (!LLM.hasKey()) throw new Error("Add your Anthropic API key in Settings first.");
-    const angle = STYLE_ANGLES[suggestCalls++ % STYLE_ANGLES.length];
-    const wantsId = kind !== "state";
-    const system =
-      "You help design art-generation prompts for Our RPG, a low-poly/pixel-art RPG set in a " +
-      "fantasy version of Aotearoa New Zealand (native birds, ferns, greenstone, marae, geothermal " +
-      "country, native bush). You write PixelLab.ai prompts: short, concrete, visual, top-down sprite " +
-      "descriptions — no camera/lighting jargon, no backstory, just what the sprite looks like. " +
-      "Reply with ONLY a compact JSON object, no markdown fences, no commentary: " +
-      (wantsId ? '{"prompt": "...", "id": "..."}' : '{"prompt": "...", "id": "..."}') +
-      (wantsId
-        ? " The id is a short, distinctive snake_case identifier (2-4 words) for the sprite."
-        : ' The id is a short, lowercase state/costume name (1-3 words, underscores if needed), e.g. "armed" or "winter_cloak".');
-    const userMsg = "Suggest " + (KIND_TEXT[kind] || "a new game sprite") +
-      (ctx.baseName ? (" — a variant of \"" + ctx.baseName + "\"") : "") +
-      ". Make it " + angle + "." +
-      (ctx.taken && ctx.taken.size ? (" Avoid these ids, already taken: " + [...ctx.taken].slice(0, 40).join(", ") + ".") : "");
-    const r = await LLM.chat([{ role: "user", content: userMsg }], system, { maxTokens: 300 });
-    let parsed;
-    try { parsed = JSON.parse(r.text); }
-    catch (_) { const m = /\{[\s\S]*\}/.exec(r.text); parsed = m ? JSON.parse(m[0]) : null; }
-    if (!parsed || !parsed.prompt) throw new Error("Couldn't parse a suggestion from the model — try again.");
-    let id = String(parsed.id || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    if (!id) id = "sprite";
-    if (wantsId && ctx.taken) {
-      const base = id; let n = 1;
-      while (ctx.taken.has(id)) id = base + "_" + (++n);
-    }
-    return { prompt: String(parsed.prompt).trim(), id };
-  }
+  // Thin wrapper over PromptBank (js/prompt-bank.js) — a static, offline
+  // prompt/id bank, no network call and no API key required.
+  function suggest(kind, ctx) { return PromptBank.suggest(kind, ctx); }
 
   // ------------------------------------------------------------- execution
   // jobMeta: { spriteType, spriteId, label, subject?, prompt, bodyType?, seed?, pixellabKind }
