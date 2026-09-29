@@ -4,6 +4,12 @@
 #   tools/build_web_zip.sh          # dist/taiao-web.zip, CDN-lean (default)
 #   tools/build_web_zip.sh --full   # include audio + paperdolls locally
 #
+# The itch build is an EMBED of the canonical our-rpg.com deployment: bake
+# the online config into it by exporting first —
+#   TAIAO_SERVER_URL=https://our-rpg.com
+#   TAIAO_WORKSHOP_URL=https://our-rpg.com/workshop
+# (unset = fully-offline build: accounts/sync/koha/workshop doors all no-op).
+#
 # The lean zip ships only what must be same-origin-local; everything else
 # streams from the Taiao-cdn repo via the service worker's remote fallback
 # (sw.js REMOTE_PREFIXES) on first use and caches:

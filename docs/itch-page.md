@@ -47,6 +47,11 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
 
 *(lead GIF here — the Bifrost crossing)*
 
+**The game's home is [our-rpg.com](https://our-rpg.com)** — this page embeds
+the very same build. The Workshop, where the community makes the game's art
+and votes it into everyone's world, lives at
+[our-rpg.com/workshop](https://our-rpg.com/workshop).
+
 **Our RPG** began life as *Taiao*, te reo Māori for the natural world — and
 the natural world is still what it's made of. It's a single-player,
 browser-native RPG in the spirit of old-school tile-based MMOs — RPG MO,
@@ -75,9 +80,8 @@ friend can visit.
 New characters wake on **Tūhura Isle**, a hand-built tutorial island of
 fifteen keepers, and leave it by a crossing you'll want to see for yourself.
 Then: press **X** to split into five bodies working in parallel; speak spells
-out loud (hold **V**); talk to villagers in your own words and get answers;
-run a workshop economy where goods carry their maker's name; press **I** and
-see what the game thinks you love.
+out loud (hold **V**); run a workshop economy where goods carry their
+maker's name; press **I** and see what the game thinks you love.
 
 ### Yours, forever — that's a feature
 
@@ -97,15 +101,16 @@ promise. If this game matters to you, the repo *is* the game.
   gamepad: **mouse + keyboard**.
 - ~60 MB of game all told, and you're playing well before it finishes —
   the world starts after ~15 MB; the rest of the art streams in behind you.
-  Birdsong, music and the NPC semantic-chat layer (~150 MB) arrive quietly
-  later and cache. Without them the game still works — quieter skies,
-  simpler villagers.
+  Birdsong and music arrive quietly later and cache. Without them the game
+  still works — quieter skies.
 - An **Accessibility** section in the ? tab offers a UI text-size slider
   and a reduced-motion mode (static Bifrost crossing, no shakes or eased
   zooms); the system prefers-reduced-motion setting is honoured by default.
 - **Saves are in your browser's storage.** Clearing site data for itch.io
-  deletes them. (Playing from a clone of the repo keeps your save in a
-  browser profile you control.)
+  deletes them, and the itch embed and our-rpg.com are separate origins with
+  separate saves — an optional account's cloud save is the bridge between
+  them. (Playing from a clone of the repo keeps your save in a browser
+  profile you control.)
 - Made for long sessions and slow evenings; combat exists but this is a
   gathering-crafting-wandering game first.
 
@@ -124,7 +129,8 @@ Art from Kenney.nl and Clint Bellanger (CC0) plus custom PixelLab and
 hand-drawn sheets (CC BY-SA). Sound effects CC0. Bird recordings from
 xeno-canto recordists (CC BY-NC-SA, distributed as an optional layer,
 individually credited). Full credits in the repo.
-Community: [GitHub Discussions](https://github.com/dataversion5372/Taiao/discussions) ·
+Community: [the Workshop](https://our-rpg.com/workshop) ·
+[GitHub Discussions](https://github.com/dataversion5372/Taiao/discussions) ·
 Koha (support): [ko-fi.com/taiao](https://ko-fi.com/taiao) —
 [what it funds](https://github.com/dataversion5372/Taiao/blob/main/docs/koha.md).
 

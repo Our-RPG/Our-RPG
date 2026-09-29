@@ -8,14 +8,15 @@
 // doesn't need a vote, just a maker. Everything else in the workshop still
 // goes through the ballot box as normal.
 //
-// Three sections:
-//   1. the flat WORKSHOP_GAPS manifest (missing icons, honest single-sprite
-//      monsters) — gen_gaps.mjs.
-//   2. "The unpainted directions" — DupeScan.run() (studio/js/dupe-scan.js),
-//      the sneakier case of something that DECLARES 8 directions but never
-//      actually got distinct per-direction art. Browser-only (needs the
-//      game's sheets loaded), cached in localStorage, re-run on demand.
-//   3. "Requested by the crew" — player-tagged wishlist proposals (taiao-
+// Two sections:
+//   1. the flat WORKSHOP_GAPS manifest — gen_gaps.mjs, deliberately CURATED
+//      down to the true placeholder-art cases (the single-sprite monsters:
+//      Slime, Cave Troll, Bandit). The old "unpainted directions" audit
+//      (DupeScan, studio/js/dupe-scan.js) is no longer surfaced here — it
+//      flooded the hub with 200+ world objects; anything beyond the manifest
+//      is now for PLAYERS to flag via 🏷 request art (section 2). dupe-scan.js
+//      stays loaded for gen_gaps.mjs --scan (an opt-in audit tool).
+//   2. "Requested by the crew" — player-tagged wishlist proposals (taiao-
 //      needsart/1 data proposals, see detail.js openRequestArtDialog),
 //      endorsable like any other proposal.
 "use strict";
@@ -88,62 +89,7 @@ function pageNeedsArt(root) {
     applyCrossCheck(rows);
   }
 
-  // ---- section 2: "The unpainted directions" (the dupe-direction audit) ----
-  const DUPE_CACHE_KEY = "workshop_dupescan_v1";
-  const dupeCard = el("div.card", { style: "margin-top:1.2rem" });
-  dupeCard.appendChild(el("div.sectitle", null, [
-    el("h3", { text: "The unpainted directions" }),
-    el("span.badge", { id: "dupe-scan-count", text: "…" }),
-  ]));
-  dupeCard.appendChild(el("p.tagline", { text:
-    "These declare eight directions but wear the same sprite in all of them — real 8-direction art ships " +
-    "straight to every player." }));
-  const dupeProgress = el("p.tagline", { style: "display:none" });
-  const dupeBody = el("div");
-  const rescanBtn = el("button.btn.sm", { text: "Re-scan" });
-  dupeCard.appendChild(el("div.btn-row", null, [rescanBtn]));
-  dupeCard.appendChild(dupeProgress);
-  dupeCard.appendChild(dupeBody);
-  page.appendChild(dupeCard);
-
-  function renderDupeGaps(dgaps) {
-    clear(dupeBody);
-    const countBadge = document.getElementById("dupe-scan-count");
-    if (countBadge) countBadge.textContent = dgaps.length + " found";
-    if (!dgaps.length) { dupeBody.appendChild(el("div.empty", { text: "None found — every declared 8-direction sprite is genuinely 8-direction." })); return; }
-    const { table, rows } = gapsTable(dgaps);
-    dupeBody.appendChild(table);
-    applyCrossCheck(rows);
-  }
-
-  async function runDupeScan(force) {
-    if (typeof DupeScan === "undefined") { dupeCard.appendChild(el("div.empty", { text: "Scanner not loaded." })); return; }
-    if (!force) {
-      try {
-        const cached = JSON.parse(localStorage.getItem(DUPE_CACHE_KEY) || "null");
-        if (cached && Array.isArray(cached.gaps)) { renderDupeGaps(cached.gaps); return; }
-      } catch (_) {}
-    }
-    rescanBtn.disabled = true;
-    dupeProgress.style.display = "";
-    dupeProgress.textContent = "Scanning…";
-    try {
-      const dgaps = await DupeScan.run({
-        onProgress: (done, total) => { dupeProgress.textContent = "Scanning… " + done + " / " + total; },
-      });
-      try { localStorage.setItem(DUPE_CACHE_KEY, JSON.stringify({ when: Date.now(), gaps: dgaps })); } catch (_) {}
-      renderDupeGaps(dgaps);
-    } catch (e) {
-      dupeBody.appendChild(el("div.empty", { text: "Scan failed: " + (e && e.message || e) }));
-    } finally {
-      dupeProgress.style.display = "none";
-      rescanBtn.disabled = false;
-    }
-  }
-  rescanBtn.onclick = () => runDupeScan(true);
-  runDupeScan(false);   // auto-runs from cache if present, else scans fresh
-
-  // ---- section 3: "Requested by the crew" (player-tagged wishlist) ----
+  // ---- section 2: "Requested by the crew" (player-tagged wishlist) ----
   const reqCard = el("div.card", { style: "margin-top:1.2rem" });
   reqCard.appendChild(el("div.sectitle", null, [el("h3", { text: "Requested by the crew" }), el("span.badge", { id: "reqart-count", text: "…" })]));
   reqCard.appendChild(el("p.tagline", { text:

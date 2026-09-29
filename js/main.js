@@ -315,6 +315,13 @@ async function init() {
   // anything whose deadline passed is simply ready. The per-frame delta is
   // capped (below) so a long gap can't fast-forward movement/animation.
   let last = Date.now();
+  // multiplayer-only enforcement: past the tutorial, the shared world needs a
+  // live, logged-in connection. mpBadSince rides a grace window over the normal
+  // WebSocket handshake and brief blips; once it lapses, the gate-ui curtain
+  // takes the screen and the player/monster sims freeze (like a cutscene) until
+  // we're reconnected. Offline/dev builds never enter this branch.
+  let mpBadSince = 0, mpBlock = false;
+  const MP_GRACE = 8000;
   function frame(t) {
     now = Date.now();
     const dt = Math.min(100, now - last);
@@ -326,13 +333,34 @@ async function init() {
       // turning and render() keeps painting so Newhaven warms up behind the void
       const cine = (typeof Bifrost !== "undefined" && Bifrost.active()) ||
         (typeof Lua !== "undefined" && Lua.ready && Lua.cutsceneActive());
-      if (!cine) {
+
+      // ---- multiplayer-only gate ----
+      {
+        const postTut = typeof player !== "undefined" && player &&
+          (!player.tutorial || (typeof player.tutorial === "object" && player.tutorial.graduated));
+        const need = typeof Server !== "undefined" && Server.enabled() && postTut;
+        const ok = !need || (Server.logged() &&
+          typeof Live !== "undefined" && Live.connected());
+        if (ok) {
+          mpBadSince = 0; mpBlock = false;
+          if (typeof AccountGate !== "undefined") AccountGate.veil(null);
+        } else {
+          if (!mpBadSince) mpBadSince = now;
+          if (now - mpBadSince > MP_GRACE) {
+            mpBlock = true;
+            if (typeof AccountGate !== "undefined")
+              AccountGate.veil(Server.logged() ? "reconnect" : "login");
+          }
+        }
+      }
+
+      if (!cine && !mpBlock) {
         stepPlayer(dt);
         updateZoom(dt);
         updateAction();
         if (typeof Split !== "undefined") Split.tick(dt); // split selves: queues + ghost bodies
       }
-      updateMonsters(dt);
+      if (!mpBlock) updateMonsters(dt);   // nothing preys on a frozen, curtained player
       updateWorldStuff();
       tickTrade(); // close the shop/bank window when out of reach
       if (typeof npcChatTick === "function") npcChatTick(); // AI NPC earshot greetings (Nets)
@@ -340,12 +368,13 @@ async function init() {
       // interpolation — deliberately OUTSIDE the cine gate: the rest of the
       // world keeps moving for everyone else while your cutscene plays
       if (typeof Live !== "undefined") Live.tick(dt);
+      if (typeof Hub !== "undefined") Hub.tick(dt); // global presence: online roster + DMs (js/net/hubsync.js)
       if (typeof tickPlaced === "function") tickPlaced(); // temporary placed decor withers
-      if (!cine && typeof Quests !== "undefined") Quests.tick(); // quest collect/reach objectives
-      if (!cine && typeof Lua !== "undefined" && Lua.ready) Lua.tickRoutines(); // NPC daily routines (js/lua; inert until the runtime is ready)
-      if (!cine && typeof Tutorial !== "undefined" && Tutorial.tick) Tutorial.tick(); // Tūhura source-reach reward
-      if (!cine && typeof GoalsArc !== "undefined") GoalsArc.tick(dt); // post-Bifrost "First days in Newhaven" arc
-      if (!cine && typeof Eggs !== "undefined") Eggs.tick(dt); // easter-egg condition watchers (1 Hz inside)
+      if (!cine && !mpBlock && typeof Quests !== "undefined") Quests.tick(); // quest collect/reach objectives
+      if (!cine && !mpBlock && typeof Lua !== "undefined" && Lua.ready) Lua.tickRoutines(); // NPC daily routines (js/lua; inert until the runtime is ready)
+      if (!cine && !mpBlock && typeof Tutorial !== "undefined" && Tutorial.tick) Tutorial.tick(); // Tūhura source-reach reward
+      if (!cine && !mpBlock && typeof GoalsArc !== "undefined") GoalsArc.tick(dt); // post-Bifrost "First days in Newhaven" arc
+      if (!cine && !mpBlock && typeof Eggs !== "undefined") Eggs.tick(dt); // easter-egg condition watchers (1 Hz inside)
       render();
     } catch (e) {
       console.error("frame error:", e);

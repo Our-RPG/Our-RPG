@@ -160,35 +160,6 @@ function targetName(tg) {
   return "it";
 }
 
-// ---- "Edit <name>" context-menu entries (object workshop, gameplay/objedit.js) ----
-// A stable identity descriptor for the object under a menu target — what the
-// workshop panel keys its votes/proposals on — or null for targets with no
-// editable identity.
-function editDescFor(tg) {
-  if (tg.kind === "monster" || tg.kind === "livestock") return { type: "monster", key: tg.mon.kind, name: targetName(tg), x: tg.mon.x, y: tg.mon.y };
-  if (tg.kind === "npc") return { type: "npc", key: tg.npc.mix || "npc_" + (tg.npc.name || "villager").toLowerCase(), name: tg.npc.name, x: tg.npc.x, y: tg.npc.y };
-  // x/y: the clicked instance's tile — the workshop panel snapshots the live
-  // 3D geometry there for its billboard cells (objedit.js snapshotFor)
-  if (tg.kind === "door") return { type: "structure", key: tg.door.kind === "gate" ? "gate" : "door", name: targetName(tg), x: tg.door.x, y: tg.door.y };
-  if (tg.kind === "ladder") return { type: "structure", key: "ladder", name: "ladder", x: tg.m.ladder.x, y: tg.m.ladder.y };
-  if (tg.kind === "riding" || tg.kind === "placed") return { type: "item", key: tg.ent.id, name: ITEMS[tg.ent.id].name, x: tg.ent.x, y: tg.ent.y };
-  if (tg.kind === "obstacle") return { type: "obstacle", key: (tg.ob.name || "obstacle").toLowerCase().replace(/\s+/g, "_"), name: tg.ob.name, x: tg.ob.x, y: tg.ob.y };
-  if (tg.kind === "portal") return { type: "structure", key: "portal", name: "Ancient portal", x: tg.node.x, y: tg.node.y };
-  if (tg.kind === "station" || tg.kind === "dynstation") return { type: "station", key: tg.node.type, name: targetName(tg), x: tg.node.x, y: tg.node.y };
-  if (tg.kind === "unlitfire") return { type: "station", key: "campfire", name: "fire", x: tg.node.x, y: tg.node.y };
-  if (tg.kind === "farm") return tg.node.crop ? { type: "crop", key: tg.node.crop.kind, name: targetName(tg), x: tg.node.x, y: tg.node.y }
-    : { type: "structure", key: "farm_plot", name: "farm plot", x: tg.node.x, y: tg.node.y };
-  if (tg.kind === "node") return { type: "node", key: tg.node.type, name: targetName(tg), x: tg.node.x, y: tg.node.y };
-  if (tg.kind === "ground") return { type: "item", key: tg.item.id, name: ITEMS[tg.item.id].name };
-  return null;
-}
-function pushEdit(items, desc) {
-  if (!desc || typeof ObjEdit === "undefined") return;
-  const label = `Edit ${desc.name}`;
-  if (items.some(it => it.label === label)) return;
-  items.push({ label, fn: () => ObjEdit.open(desc) });
-}
-
 canvas.addEventListener("mousemove", e => {
   const t = canvasTile(e);
   if (!world || !world.inMap(t.x, t.y)) { hover = null; setHoverText(""); return; }
@@ -335,7 +306,6 @@ function buildTileMenu(t) {
       }
       const lex = typeof husbExamine === "function" && husbExamine(tg.mon);
       if (lex) items.push({ label: `Examine ${targetName(tg)}`, fn: () => log(lex, "sys") });
-      pushEdit(items, editDescFor(tg));
       continue;
     }
     // picked-bare Pomiculture fruit tree: WATER it (regrow the fruit) or CHOP it.
@@ -350,7 +320,6 @@ function buildTileMenu(t) {
         const chop = { label: "Chop tree", fn: () => doTarget(tg) };
         if (hasCan) { items.push(water, chop); } else { items.push(chop); }
         items.push({ label: `Examine ${targetName(tg)}`, fn: () => log("A bare fruit tree — water it to regrow the fruit once it's rested, or fell it for logs.", "sys") });
-        pushEdit(items, editDescFor(tg));
         continue;
       }
     }
@@ -415,7 +384,6 @@ function buildTileMenu(t) {
       exam = NODE_EXAMINE[tg.node.type] || (nt2 ? `${nt2.name}. (${nt2.skill} ${nt2.req})` : null);
     }
     if (exam) items.push({ label: `Examine ${targetName(tg)}`, fn: () => log(exam, "sys") });
-    { const ed = editDescFor(tg); if (ed) { ed.exam = exam || ed.exam; pushEdit(items, ed); } }
   }
   // items lying on the tile: "Take All" first (so left-click grabs everything),
   // then a "Take <item>" line per stack — placed at the FRONT of the menu.
@@ -428,9 +396,6 @@ function buildTileMenu(t) {
       g0.push({ label: `Take ${nm}${g.qty > 1 ? ` (x${g.qty})` : ""}`, fn: () => setGoal({ type: "pickup", item: g }, g.x, g.y, 1) });
     }
     items.unshift(...g0);
-    // one Edit per distinct item kind on the tile, down with the other Edits
-    for (const id of [...new Set(groundHere.map(g => g.id))])
-      if (ITEMS[id]) pushEdit(items, { type: "item", key: id, name: ITEMS[id].name });
   }
   // decorations aren't interactive targets, so they're not in targetsAt — offer
   // Take (pick it up; respawns after 300s) + Examine for whatever decoration
@@ -484,7 +449,6 @@ function buildTileMenu(t) {
           }
         } });
       }
-      pushEdit(items, { type: "decor", key: dk.split("#")[0], name: decorName(dk), exam: decorExamine(dk), x: t.x, y: t.y });
     }
   }
   // village lamplighter candles aren't decor tiles (they're conjured per frame
@@ -498,59 +462,10 @@ function buildTileMenu(t) {
         ? "A household candle burns within, its glow seeping out through shutters and thatch."
         : `A fine wax candle burns atop a ${standName || "sturdy"} stand — set out by the lamplighters at dusk and gathered in again at dawn.`;
       items.push({ label: `Examine ${cs.inside ? "candle" : "candle stand"}`, fn: () => log(dex, "sys") });
-      if (!cs.inside) pushEdit(items, { type: "decor", key: cs.stand || "candlestand_iron", name: "candle stand", exam: dex, x: t.x, y: t.y });
     }
   }
-  // "Walk here" goes ABOVE the tile-level Edit entries below, so on a plain
-  // tile it's the TOP option and a left-click always walks — never opens the
-  // workshop. (Menus led by a real target — Attack/Talk/Gather — are unchanged.)
   items.push({ label: "Walk here", fn: () => walkTo(t.x, t.y) });
-  // the player: right-click your own tile to edit your character
-  if (t.x === player.x && t.y === player.y) {
-    const cname = (typeof CHAR_LIST !== "undefined" && player.character != null && CHAR_LIST[player.character]
-      && (CHAR_LIST[player.character].name || CHAR_LIST[player.character].folder)) || "yourself";
-    pushEdit(items, { type: "player", key: "player", name: cname });
-  }
-  // building roofs: a click on a roofed building's footprint (the ground pick
-  // passes through the roof to the tile beneath) offers "Edit roof" — but only
-  // while the roof is actually VISIBLE, i.e. the player isn't inside that
-  // building (render3d hides the roof for the building you're in).
-  if (world.insideBuilding) {
-    const rb = world.insideBuilding(t.x, t.y);
-    if (rb && rb.roof && rb !== world.insideBuilding(player.x, player.y))
-      pushEdit(items, { type: "roof", key: rb.stone ? "roof_stone" : "roof_wood", spr: rb.roof,
-        spire: rb.kind === "spire", name: "roof", x: t.x, y: t.y });
-  }
-  // the ground itself — every tile's terrain is editable. Votes are keyed per
-  // terrain FAMILY (biome "bg_4", tint base "dirt", the road, a floor), while
-  // `spr` keeps this tile's exact art variant for the panel to highlight.
-  if (world.getGround) {
-    const gk = String(world.getGround(t.x, t.y) || "");
-    if (gk) {
-      const bm = /^(?:bg|at)_(\d+)/.exec(gk);
-      const fam = gk === "dirt#1" ? "road" : bm ? "bg_" + bm[1] : gk.split("#")[0];
-      // at_* biome-atlas keys display as their bg_* fallback variant (same
-      // regional-personality pick the renderer uses when the atlas is tainted)
-      const spr = gk.startsWith("at_") ? "bg_" + bm[1] + "_" + world.personalityAt(t.x, t.y) : gk;
-      pushEdit(items, { type: "terrain", key: fam, spr, name: terrainName(gk, t.x, t.y), x: t.x, y: t.y });
-    }
-  }
   return items;
-}
-
-// Human-readable name for a ground-tile key ("bg_4_2" -> "Forest", "dirt#1" -> "Road")
-function terrainName(gk, x, y) {
-  const k = String(gk);
-  const m = /^(?:bg|at)_(\d+)/.exec(k);
-  if (m) {
-    const b = world.BIOME_NAMES && world.BIOME_NAMES[+m[1]];
-    if (b) return b;
-    return world.isWater(x, y) ? "water" : "ground";
-  }
-  if (k === "dirt#1") return "Road";
-  const base = k.split("#")[0];
-  if (base.startsWith("floor_")) return base.slice(6).replace(/_/g, " ") + " floor";
-  return base.replace(/^g_/, "").replace(/_/g, " ");
 }
 
 // Callers (3):

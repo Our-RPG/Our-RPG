@@ -209,6 +209,9 @@ js/gameplay/pulse.js
 # TAIAO_SERVER_URL. Order: api core first; actionlog wraps the choke points
 # (after pulse.js so both wrap chains stack); UI last.
 js/net/serverapi.js
+# the two hard gates (account modal + reconnect curtain) — after serverapi so
+# AccountGate can use Server; consumed by tutorial.js and main.js at runtime.
+js/net/gate-ui.js
 js/net/telemetry.js
 js/net/actionlog.js
 js/net/savesync.js
@@ -223,6 +226,10 @@ js/net/seedroll.js
 # ShopSync/RegionSync, so it must follow combat + the Phase-2 layer.
 js/net/livesync.js
 js/net/live-ui.js
+# Phase-4 global presence: the cross-zone hub socket (online roster + DMs) and
+# its UI. hubsync must precede social-ui (which guards on `typeof Hub`).
+js/net/hubsync.js
+js/net/social-ui.js
 js/net/account-ui.js
 js/gameplay/koha.js
 js/gameplay/goals-arc.js

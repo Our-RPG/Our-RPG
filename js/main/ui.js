@@ -231,10 +231,6 @@ function renderInv() {
         if (def.reveal && typeof useReveal === "function") items.push({ label: `Consult ${def.name}`, fn: () => useReveal(i) });
         if (def.light && typeof lightCandle === "function") items.push({ label: `Light ${def.name}`, fn: () => lightCandle(i) });
         items.push({ label: `Examine ${def.name}`, fn: () => examineItem(s) });
-        // object workshop (gameplay/objedit.js): vote on the item's icon,
-        // equip slots, edibility, stacking… — same panel as world objects
-        if (typeof ObjEdit !== "undefined")
-          items.push({ label: `Edit ${def.name}`, fn: () => ObjEdit.open({ type: "item", key: s.id, name: def.name }) });
         items.push({ label: `Drop ${def.name}`, fn: () => {
           dropOnGround(s.id, s.qty, player.x, player.y, player.level | 0);
           player.inv[i] = null;
@@ -291,18 +287,6 @@ function renderInv() {
     hint.textContent = "Nothing equipped. Click gear in your pack to wear it.";
     eg.appendChild(hint);
   }
-}
-// "back_of_head" -> "Back Of Head", "rune3" -> "Rune slot 3" — the empty-slot
-// tooltip fallback (renderInv() would otherwise blank the HTML's initial
-// title on the very first render, since it unconditionally overwrites it).
-// Callers (1):
-//  main/ui.js:200
-function slotLabel(slot) {
-  const m = slot.match(/^rune(\d)$/);
-  if (m) return "Rune slot " + m[1];
-  // "pauldron1" -> "Pauldron 1" (a trailing digit needs its own space before
-  // title-casing, unlike the snake_case slots which already have one)
-  return slot.replace(/_/g, " ").replace(/(\d+)$/, " $1").replace(/\b\w/g, c => c.toUpperCase());
 }
 // combat style is derived from what's in the main hand (combat.js
 // combatStyle()) — there is no style selector any more

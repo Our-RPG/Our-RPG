@@ -618,43 +618,6 @@ const SHOP_ICON = {
   clothier: "clothesshop", provisioner: "foodshop",
 };
 
-// markers for a chunk, cached on the chunk object
-// Callers (0):
-//  none found
-function chunkMarkers(ch) {
-  if (ch.wmMarkers) return ch.wmMarkers;
-  const out = [];
-  const CS = world.CHUNK;
-  for (const n of ch.nodes) {
-    if (n.type === "bank") out.push({ x: n.x, y: n.y, c: "#ffd75e", label: "Bank", iconType: "bank" });
-    else if (n.type === "altar") out.push({ x: n.x, y: n.y, c: "#b47fff", label: "Runestone altar", iconType: "altar" });
-    else if (n.station) out.push({ x: n.x, y: n.y, c: "#d8c88f", label: STATIONS[n.type].name, iconType: STATION_ICON[n.type] || null });
-    else if (n.type.startsWith("fishspot")) out.push({ x: n.x, y: n.y, c: "#7fd4ff", label: NODE_TYPES[n.type].name, iconType: "fish" });
-  }
-  for (const lb of ch.labels || [])
-    out.push({ x: lb.x, y: lb.y, c: lb.c, label: lb.label, text: true });
-  // most notable resource: highest-tier gatherable in the chunk
-  let bestNode = null, bestReq = 9;
-  for (const n of ch.nodes) {
-    const nt = NODE_TYPES[n.type];
-    const rock = nt && (/mining$/.test(nt.skill));
-    if (nt && nt.req > bestReq && (rock || nt.skill === "Woodcutting")) { bestReq = nt.req; bestNode = n; }
-  }
-  if (bestNode) {
-    const skill = NODE_TYPES[bestNode.type].skill;
-    out.push({ x: bestNode.x, y: bestNode.y, c: "#fff", label: NODE_TYPES[bestNode.type].name,
-               iconType: (/mining$/.test(skill)) ? "mine" : "tree" });
-  }
-  // mob concentrations
-  const counts = {};
-  for (const [k] of ch.spawnDefs) counts[k] = (counts[k] || 0) + 1;
-  for (const k in counts)
-    if (counts[k] >= 3 && MONSTERS[k])
-      out.push({ x: ch.spawnDefs.find(s => s[0] === k)[1], y: ch.spawnDefs.find(s => s[0] === k)[2], c: "#ff5e5e", label: `${MONSTERS[k].name} camp (lvl ${MONSTERS[k].lvl})`, iconType: "quest" });
-  ch.wmMarkers = out;
-  return out;
-}
-
 // Callers (1):
 //  gameplay/world.js:503
 const WM_LABELED_POI = new Set(["guild","manor","fishvillage","lighthouse","inn","wizardtower","arena","battlefield","maze","portal","observatory","shipwreck"]);
@@ -2193,50 +2156,6 @@ const MM_TILES_W = 112, MM_TILES_H = 112; // window size in tiles (2px per tile)
 // each rebuild from the icon canvas's live CSS width so icons stay aligned with
 // the terrain at any minimap size (see renderMinimap).
 let MM_ICON_SCALE = mmIconCanvas.width / MM_TILES_W;
-// Callers (0):
-//  none found
-function chunkMini(ch) {
-  if (ch.mini && !ch.miniDirty) return ch.mini;
-  const CS = world.CHUNK;
-  const cv = ch.mini || document.createElement("canvas");
-  cv.width = CS * 2; cv.height = CS * 2;
-  const c = cv.getContext("2d");
-  for (let y = 0; y < CS; y++)
-    for (let x = 0; x < CS; x++) {
-      const gk = ch.ground[y * CS + x];
-      c.fillStyle = MM_COLORS[baseKey(gk)] || BG_MM[gk] || "#888";
-      c.fillRect(x * 2, y * 2, 2, 2);
-      const dk = ch.decor[y * CS + x];
-      if (dk && dk.startsWith("wall_wood")) { c.fillStyle = "#9a938a"; c.fillRect(x * 2, y * 2, 2, 2); }
-    }
-  // dark coastline outline on water tiles that touch land, OSRS-map style
-  c.fillStyle = "#202e44";
-  for (let y = 0; y < CS; y++)
-    for (let x = 0; x < CS; x++) {
-      if (!isWaterKey(ch.ground[y * CS + x])) continue;
-      const wx = ch.cx * CS + x, wy = ch.cy * CS + y;
-      const coast = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx2, dy2]) => {
-        const nx = x + dx2, ny = y + dy2;
-        if (nx >= 0 && ny >= 0 && nx < CS && ny < CS)
-          return !isWaterKey(ch.ground[ny * CS + nx]);
-        return !world.isWater(wx + dx2, wy + dy2);
-      });
-      if (coast) c.fillRect(x * 2, y * 2, 2, 2);
-    }
-  for (const n of ch.nodes) {
-    if (n.station) c.fillStyle = "#ffd75e";
-    else if (n.farm) c.fillStyle = "#b06a2c";
-    else if (!NODE_TYPES[n.type]) continue;
-    else if (NODE_TYPES[n.type].skill === "Woodcutting") c.fillStyle = "#1d4d12";
-    else if ((/mining$/.test(NODE_TYPES[n.type].skill))) c.fillStyle = "#555";
-    else if (NODE_TYPES[n.type].skill === "Foraging") c.fillStyle = "#7a3a8a";
-    else c.fillStyle = "#7fd4ff";
-    c.fillRect((n.x - ch.cx * CS) * 2, (n.y - ch.cy * CS) * 2, 2, 2);
-  }
-  ch.mini = cv;
-  ch.miniDirty = false;
-  return cv;
-}
 // Callers (1):
 //  gameplay/world.js:640
 // Static minimap layers (chunk map images + node dots/icons) composited onto

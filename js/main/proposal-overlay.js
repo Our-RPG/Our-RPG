@@ -32,7 +32,7 @@ const ProposalOverlay = (function () {
   const COMM_LS = "taiao_community_layer_v1";         // community layer; default ON
   const TOKEN_LS = "taiao_session_v1";                 // shared with serverapi.js + the studio
   const SERVER_LS = "taiao_server_url_v1";             // studio's overridable origin
-  const SERVER_DEFAULT = "https://taiao-server.dwyer-finn.workers.dev";
+  const SERVER_DEFAULT = "https://our-rpg.com";
   const MAX_PROPOSALS = 60;
   const MAX_BYTES = 12000000;
 

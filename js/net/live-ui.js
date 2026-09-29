@@ -10,8 +10,13 @@
 //          box and as overhead bubbles (render3d.js draws them).
 //   Trade: invite from the nearby-players strip → both offer items (bank
 //          click grammar: click=1, Shift=5, Alt=all) → both Accept → swap.
-//          NOTE the relay trusts clients — before this EVER goes live it
-//          also needs server-side escrow/validation on top of moderation.
+//          The swap is SERVER-AUTHORITATIVE: the LiveZone DO holds both offers,
+//          commits only when both sides have accepted the exact offers shown,
+//          and hands each client a single idempotent `tcommit` to apply. A
+//          drop mid-commit is re-delivered on reconnect. (The one residual gap
+//          is that saves are opaque blobs, so the server can't prove a client
+//          truly owns what it offers — fabrication by save-editing needs a
+//          server-authoritative inventory, a larger project.)
 "use strict";
 
 (function () {
@@ -78,7 +83,7 @@
   box.id = "livechat";
   box.innerHTML = `<div class="lc-lines"></div>
     <div class="lc-hint">/ to chat</div>
-    <input maxlength="240" placeholder="Say something to everyone… (Enter)">`;
+    <input maxlength="240" placeholder="Say something to those nearby… (Enter, or /w name msg)">`;
   document.body.appendChild(box);
   const linesEl = box.querySelector(".lc-lines");
   const inputEl = box.querySelector("input");
@@ -106,7 +111,18 @@
     e.stopPropagation();
     if (e.key === "Enter") {
       const text = inputEl.value.trim();
-      if (text) Live.sendChat(text);
+      if (text) {
+        // "/w <name> <message>" whispers a direct message via the global hub;
+        // anything else is local (proximity) chat.
+        const wm = text.match(/^\/w(?:hisper)?\s+(\S+)\s+([\s\S]+)$/i);
+        if (wm && typeof Hub !== "undefined") {
+          const id = Hub.idByName(wm[1]);
+          if (id) Hub.sendDM(id, wm[2]);
+          else if (typeof log === "function") log('No one online named "' + wm[1] + '".', "sys");
+        } else {
+          Live.sendChat(text);
+        }
+      }
       inputEl.value = "";
       box.classList.remove("typing");
       inputEl.blur();
@@ -127,7 +143,7 @@
   Live.onRoster(f => {
     if (f.chat && !announcedChat) {
       announcedChat = true;
-      chatLine("Public chat is on — press / to talk. Be kind; this is our place.", true);
+      chatLine("Local chat is on — press / to talk to those around you. Be kind; this is our place.", true);
     }
   });
 
@@ -178,8 +194,11 @@
     if (!T || !T.open || T.myAccept) return;
     if (!haveAll(T.mine)) { note("You no longer have some offered items."); return; }
     T.myAccept = true;
-    Live.sendTrade({ t: "ta", to: T.peerId, seq: T.theirSeq });
-    maybeComplete(); renderTrade();
+    // the SERVER decides the swap: it commits only when both sides have accepted
+    // the exact offers on the table, and hands each of us a single tcommit to
+    // apply. We never touch inventories here.
+    Live.sendTrade({ t: "ta", to: T.peerId });
+    renderTrade();
   };
 
   const itemName = id => (typeof ITEMS !== "undefined" && ITEMS[id] && ITEMS[id].name) || id;
@@ -203,9 +222,8 @@
     if (!e && next > 0) T.mine.push([id, next]);
     else if (e && next > 0) e[1] = next;
     else if (e) T.mine.splice(T.mine.indexOf(e), 1);
-    T.mySeq++;
-    T.myAccept = T.theirAccept = false;   // any change voids both accepts
-    Live.sendTrade({ t: "to", to: T.peerId, items: T.mine, seq: T.mySeq });
+    T.myAccept = T.theirAccept = false;   // any change voids both accepts (server mirrors this)
+    Live.sendTrade({ t: "to", to: T.peerId, items: T.mine });
     renderTrade();
   }
 
@@ -265,19 +283,32 @@
     inv.classList.remove("on");
     renderTrade();
   }
-  function maybeComplete() {
-    if (!T || !T.myAccept || !T.theirAccept) return;
-    // final verification, then swap. The relay trusts clients — good enough
-    // for a dark-launch; server escrow is a prerequisite for going live.
-    for (const [id] of T.theirs)
-      if (typeof ITEMS === "undefined" || !ITEMS[id]) { note("Trade cancelled — unknown item."); return cancel(true); }
-    if (!haveAll(T.mine)) { note("Trade cancelled — items missing."); return cancel(true); }
-    for (const [id, n] of T.mine) removeItem(id, n);
-    for (const [id, n] of T.theirs) addItem(id, n);
-    note("Trade with " + T.peerName + " complete.");
-    chatLine("Traded with <b>" + esc(T.peerName) + "</b>.", true);
-    T = null;
-    renderTrade();
+  // The swap is applied ONCE, when the server hands us a `tcommit`, and never
+  // before. tcommit is idempotent by trade id (a dropped-then-recovered commit
+  // must not double-apply), tracked in a small localStorage set.
+  const APPLIED_KEY = "taiao_trade_applied";
+  function loadApplied() {
+    try { return new Set(JSON.parse(localStorage.getItem(APPLIED_KEY) || "[]")); } catch (e) { return new Set(); }
+  }
+  function saveApplied(set) {
+    try { localStorage.setItem(APPLIED_KEY, JSON.stringify([...set].slice(-200))); } catch (e) {}
+  }
+  function applyCommit(m) {
+    const tid = m.tid;
+    if (!tid) return;
+    const applied = loadApplied();
+    if (!applied.has(tid)) {
+      for (const [id, n] of (m.give || [])) if (n > 0) removeItem(id, n);
+      for (const [id, n] of (m.get || [])) if (n > 0 && typeof ITEMS !== "undefined" && ITEMS[id]) addItem(id, n);
+      applied.add(tid); saveApplied(applied);
+      const who = (T && T.peerId === m.peerId && T.peerName) ? T.peerName : "another player";
+      note("Trade with " + who + " complete.");
+      chatLine("Traded with <b>" + esc(who) + "</b>.", true);
+    }
+    // (re-)ack so the server can retire the escrow record, even if an earlier
+    // ack was lost on a disconnect — harmless once it's already gone
+    Live.sendTrade({ t: "tack", tid });
+    if (T && T.peerId === m.peerId) { T = null; renderTrade(); }
   }
 
   window.LiveTrade = {
@@ -309,17 +340,19 @@
       inv.classList.add("on");
       return;
     }
+    // the server's committed swap — apply once, even if no window is open (it
+    // can arrive on reconnect after a mid-trade drop). Handled before the
+    // peer-match guard because tcommit carries peerId, not id.
+    if (m.t === "tcommit") { applyCommit(m); return; }
     if (!T || m.id !== T.peerId) return;
     if (m.t === "to") {
       if (!T.open) openTradeWith(m.id, m.name || T.peerName);
       T.theirs = (m.items || []).filter(it => it && it[0]);
-      T.theirSeq = m.seq | 0;
-      T.myAccept = T.theirAccept = false;
+      T.myAccept = T.theirAccept = false;   // their change voids both accepts
       renderTrade();
     } else if (m.t === "ta") {
-      if ((m.seq | 0) !== T.mySeq) return;   // they accepted a stale offer — ignore
       T.theirAccept = true;
-      maybeComplete(); renderTrade();
+      renderTrade();
     } else if (m.t === "tc") {
       note(T.peerName + " cancelled the trade.");
       cancel(false);

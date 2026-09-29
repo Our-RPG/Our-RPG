@@ -13,10 +13,12 @@ const CFG = {
   PIXELLAB_V2: "https://api.pixellab.ai/v2",
   PIXELLAB_V1: "https://api.pixellab.ai/v1",
 
-  // The Taiao Phase-1 worker (accounts + workshop votes). Overridable in
-  // Settings so a self-hoster can point at their own deployment. Must be an
-  // origin the worker's ALLOWED_ORIGINS lets in (localhost:8899 in dev).
-  TAIAO_SERVER_DEFAULT: "https://taiao-server.dwyer-finn.workers.dev",
+  // The Taiao Phase-1 worker (accounts + workshop votes). our-rpg.com routes
+  // /api/* to the worker, so the deployed Workshop (our-rpg.com/workshop)
+  // calls it same-origin — no CORS. Overridable in Settings so a self-hoster
+  // can point at their own deployment. Must be an origin the worker's
+  // ALLOWED_ORIGINS lets in (localhost:8899 in dev).
+  TAIAO_SERVER_DEFAULT: "https://our-rpg.com",
 
   // Poll cadence for PixelLab's async jobs (characters / objects / rotations).
   POLL_MS: 2500,

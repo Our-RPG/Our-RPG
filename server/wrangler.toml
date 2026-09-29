@@ -27,6 +27,7 @@ crons = ["0 9 * * 1", "30 14 * * *"]
 bindings = [
   { name = "REGION", class_name = "RegionLedger" },
   { name = "LIVE", class_name = "LiveZone" },
+  { name = "HUB", class_name = "GlobalHub" },
 ]
 
 [[migrations]]
@@ -36,6 +37,12 @@ new_sqlite_classes = ["RegionLedger"]
 [[migrations]]
 tag = "v3-live-zone"
 new_sqlite_classes = ["LiveZone"]
+
+# Phase 4: one global Durable Object relays cross-zone presence — the online
+# roster and direct messages (hub.js).
+[[migrations]]
+tag = "v4-global-hub"
+new_sqlite_classes = ["GlobalHub"]
 
 [[d1_databases]]
 binding = "DB"
@@ -60,8 +67,8 @@ RP_ID = "our-rpg.com"
 # protocols are fully built client AND server side, but refused until these
 # are "on" — flip them (and redeploy) once moderation is staffed. No client
 # rebuild needed; the server advertises the flags in the roster message.
-LIVE_CHAT = "off"
-LIVE_TRADE = "off"
+LIVE_CHAT = "on"
+LIVE_TRADE = "on"
 
 # Secrets (set with `wrangler secret put NAME`), all optional:
 #   TURNSTILE_SECRET  — enables Turnstile verification on register/login

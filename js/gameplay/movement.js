@@ -1,14 +1,9 @@
 // ===== Taiao — player movement =====
 "use strict";
 
-// 8-way facing from a tile delta (matches CHAR_DIRS / DIR8 sprite directions)
-function dir8From(dx, dy) {
-  const sx = Math.sign(dx), sy = Math.sign(dy);
-  if (sx === 0 && sy === 0) return null;
-  if (sy > 0) return sx > 0 ? "south-east" : sx < 0 ? "south-west" : "south";
-  if (sy < 0) return sx > 0 ? "north-east" : sx < 0 ? "north-west" : "north";
-  return sx > 0 ? "east" : "west";
-}
+// 8-way facing from a tile delta — dir8From() lives in gameplay/monsters.js
+// (both files share the concatenated bundle scope; that single definition
+// serves every caller here).
 
 // The 8 unit tile deltas in CHAR_DIRS order (south, south-east, east, ... clockwise).
 // Callers (1): gameplay/movement.js (camera-relative WASD)

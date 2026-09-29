@@ -99,6 +99,7 @@
   function hello() {
     myId = (Server.user && Server.user.id) | 0;
     send({ t: "hello", x: player.x, y: player.y, lvl: player.level | 0,
+           clvl: (typeof combatLevel === "function" ? combatLevel() : 1) | 0,
            character: player.character, outfit: player.outfit || "Idle" });
     helloSent = true;
     // re-announce whatever we're mid-doing so a fresh zone sees it
@@ -110,7 +111,7 @@
     if (!p || !p.id || p.id === myId) return null;
     let rp = players.get(p.id);
     if (!rp) {
-      rp = { id: p.id, name: "?", x: 0, y: 0, px: 0, py: 0, level: 0,
+      rp = { id: p.id, name: "?", x: 0, y: 0, px: 0, py: 0, level: 0, clvl: 0,
              dir8: "south", moving: null, character: null, outfit: "Idle",
              act: null, _say: null, last: Date.now() };
       players.set(p.id, rp);
@@ -118,6 +119,7 @@
     if (p.name != null) rp.name = String(p.name);
     if (p.x != null) { rp.x = p.x; rp.y = p.y; rp.px = PX(p.x); rp.py = PX(p.y); }
     if (p.lvl != null) rp.level = p.lvl | 0;
+    if (p.clvl != null) rp.clvl = p.clvl | 0;
     if (p.character !== undefined) rp.character = p.character;
     if (p.outfit !== undefined) rp.outfit = p.outfit || "Idle";
     if (p.act !== undefined) rp.act = p.act;
@@ -153,6 +155,7 @@
         rp.px = PX(m.fx); rp.py = PX(m.fy);
         if (m.d8) rp.dir8 = m.d8;
         rp.level = m.lvl | 0;
+        if (m.clvl != null) rp.clvl = m.clvl | 0;
         rp.last = Date.now();
         return;
       }
@@ -162,6 +165,7 @@
         rp.x = m.x; rp.y = m.y; rp.px = PX(m.x); rp.py = PX(m.y);
         if (m.d8) rp.dir8 = m.d8;
         rp.level = m.lvl | 0;
+        if (m.clvl != null) rp.clvl = m.clvl | 0;
         rp.last = Date.now();
         return;
       }
@@ -205,10 +209,11 @@
     // movement: one message per tile step, sent the moment it STARTS — the
     // one-way latency hides inside the step's own duration
     const mv = player.moving;
+    const clvl = (typeof combatLevel === "function" ? combatLevel() : 1) | 0;
     if (mv && mv !== lastMoving) {
       lastMoving = mv;
       send({ t: "m", fx: mv.fx, fy: mv.fy, tx: mv.tx, ty: mv.ty,
-             dur: Math.round(mv.dur), d8: player.dir8, lvl: player.level | 0 });
+             dur: Math.round(mv.dur), d8: player.dir8, lvl: player.level | 0, clvl });
       lastX = mv.tx; lastY = mv.ty; lastLvl = player.level | 0;
     } else if (!mv) {
       lastMoving = null;
@@ -216,7 +221,7 @@
       // respawn, Bifrost) — remotes snap
       if (player.x !== lastX || player.y !== lastY || (player.level | 0) !== lastLvl) {
         lastX = player.x; lastY = player.y; lastLvl = player.level | 0;
-        send({ t: "tp", x: player.x, y: player.y, d8: player.dir8, lvl: lastLvl });
+        send({ t: "tp", x: player.x, y: player.y, d8: player.dir8, lvl: lastLvl, clvl });
       }
     }
     // action state (mining/fighting/crafting…) — remotes show an indicator

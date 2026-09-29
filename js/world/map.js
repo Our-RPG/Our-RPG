@@ -70,78 +70,9 @@ function createWorldMap(ctx) {
     ctx.moveTo(x,y-0.5); ctx.lineTo(x-2.4,y-3);
     ctx.moveTo(x,y-1.5); ctx.lineTo(x+2.2,y-3.4); ctx.stroke();
   }
-  function mDrawBoulder(ctx, x, y) {
-    ctx.fillStyle='#8a8478'; ctx.beginPath(); ctx.arc(x,y,2.3,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#4e4a42'; ctx.lineWidth=1; ctx.stroke();
-  }
-  function mDrawCrag(ctx, x, y, wx, wy, color) {
-    const tilt=(rand2(wx,wy,S^0xc4a6)-0.5)*2.4;
-    ctx.strokeStyle=color; ctx.lineWidth=1.1;
-    ctx.beginPath(); ctx.moveTo(x-2.6,y-tilt); ctx.lineTo(x+2.6,y+tilt); ctx.stroke();
-  }
-  function mDrawShrub(ctx, x, y, c) {
-    ctx.fillStyle=c; ctx.beginPath(); ctx.arc(x,y,1.6,0,Math.PI*2); ctx.fill();
-  }
-  function mDrawAcacia(ctx, x, y) {
-    ctx.strokeStyle='#6a4a26'; ctx.lineWidth=1.2;
-    ctx.beginPath(); ctx.moveTo(x,y+3); ctx.lineTo(x,y-1.5); ctx.stroke();
-    ctx.fillStyle='#4a7a34'; ctx.beginPath(); ctx.ellipse(x,y-2.5,4,1.7,0,0,Math.PI*2); ctx.fill();
-  }
   function mDrawPuddle(ctx, x, y) {
     ctx.fillStyle='#414c3a'; ctx.beginPath(); ctx.ellipse(x,y,3.2,2.1,0,0,Math.PI*2); ctx.fill();
     ctx.fillStyle='#37422f'; ctx.beginPath(); ctx.ellipse(x+0.5,y+0.4,1.8,1.1,0,0,Math.PI*2); ctx.fill();
-  }
-  function mDrawCactus(ctx, x, y) {
-    ctx.fillStyle='#3e7a3a'; ctx.fillRect(x-1,y-3,2,6); ctx.fillRect(x-3,y-1.5,2,1.6); ctx.fillRect(x+1,y-0.5,2,1.6);
-  }
-  function mDrawPalm(ctx, x, y) {
-    ctx.strokeStyle='#8a6a3a'; ctx.lineWidth=1.2;
-    ctx.beginPath(); ctx.moveTo(x,y+3); ctx.lineTo(x+1,y-2); ctx.stroke();
-    ctx.strokeStyle='#2e7a30'; ctx.lineWidth=1.1;
-    ctx.beginPath();
-    for(const [fx,fy] of [[-3.5,-1],[3.5,-1],[-2.5,1.5],[2.5,1.5]]) {
-      ctx.moveTo(x+1,y-2); ctx.quadraticCurveTo(x+1+fx*0.6,y-3.5,x+1+fx,y-2+fy);
-    }
-    ctx.stroke();
-  }
-  function mDrawMushroom(ctx, x, y, wx, wy) {
-    ctx.fillStyle='#d8d0c0'; ctx.fillRect(x-1,y-1,2,4);
-    ctx.fillStyle=rand2(wx,wy,S^0x314)<0.5?'#b84040':'#8a50a8';
-    ctx.beginPath(); ctx.arc(x,y-1,3.4,Math.PI,0); ctx.closePath(); ctx.fill();
-    ctx.fillStyle='#ece8e0'; ctx.fillRect(x-1.8,y-2.6,1.2,1.2); ctx.fillRect(x+0.8,y-3.4,1.2,1.2);
-  }
-  function mDrawBurntTree(ctx, x, y) {
-    ctx.strokeStyle='#2c2824'; ctx.lineWidth=1.3;
-    ctx.beginPath(); ctx.moveTo(x,y+3); ctx.lineTo(x,y-2.5);
-    ctx.moveTo(x,y-0.5); ctx.lineTo(x-2,y-2.6); ctx.moveTo(x,y-1.4); ctx.lineTo(x+2,y-3); ctx.stroke();
-  }
-  function mDrawReed(ctx, x, y) {
-    ctx.strokeStyle='#7ac07a'; ctx.lineWidth=1;
-    ctx.beginPath();
-    for(const dx of [-2,0,2]) { ctx.moveTo(x+dx,y+2.5); ctx.lineTo(x+dx*1.3,y-2.5); }
-    ctx.stroke();
-  }
-  function mDrawBamboo(ctx, x, y, wx, wy) {
-    for(let i=0; i<3; i++) {
-      const dx=(hash2i(wx,wy,S^(0xba0+i))%5)-2;
-      ctx.strokeStyle=i%2?'#9ec848':'#7ea838'; ctx.lineWidth=1;
-      ctx.beginPath(); ctx.moveTo(x+dx,y+2.5); ctx.lineTo(x+dx+0.6,y-3.5); ctx.stroke();
-    }
-  }
-  function mDrawCrystal(ctx, x, y, wx, wy) {
-    const big=3+rand2(wx,wy,S^0xc57)*2.5;
-    ctx.fillStyle='#b8a8e0'; ctx.strokeStyle='#584a80'; ctx.lineWidth=0.9;
-    ctx.beginPath(); ctx.moveTo(x,y-big); ctx.lineTo(x+2,y+2); ctx.lineTo(x-2,y+2); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle='#d8ccf4';
-    ctx.beginPath(); ctx.moveTo(x+2.5,y-big*0.5); ctx.lineTo(x+3.8,y+2); ctx.lineTo(x+1.2,y+2); ctx.closePath(); ctx.fill();
-  }
-  function mDrawBone(ctx, x, y, wx, wy) {
-    const a=rand2(wx,wy,S^0xb0e)*Math.PI;
-    ctx.strokeStyle='#e0dcc8'; ctx.lineWidth=1.2;
-    ctx.beginPath(); ctx.moveTo(x-Math.cos(a)*3,y-Math.sin(a)*3); ctx.lineTo(x+Math.cos(a)*3,y+Math.sin(a)*3); ctx.stroke();
-  }
-  function mDrawFlower(ctx, x, y, wx, wy) {
-    ctx.fillStyle=rand2(wx,wy,S^0xf10)<0.5?'#d8c23a':'#c4453a'; ctx.fillRect(x-1,y-1,2,2);
   }
   // Draw a sprite from items32.png (16 cols × 18 rows, 32px + 1px gap)
   function mSpr(ctx, x, y, c, r, sz) {

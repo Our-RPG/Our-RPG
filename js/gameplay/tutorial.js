@@ -2195,6 +2195,15 @@ const Tutorial = (() => {
     log("The crossing took the night. Far behind, the mist has closed over Tūhura Isle — no chart, ship or portal will ever find it again.", "sys");
   }
   function graduate() {
+    // The crossing leads into the shared, live world — so on server builds it
+    // requires an account. AccountGate.require blocks with a create/login modal
+    // and re-enters graduate() once there's a session (a no-op, immediate
+    // pass-through in offline/dev builds). Guard against re-showing mid-wait.
+    if (typeof AccountGate !== "undefined" &&
+        typeof Server !== "undefined" && Server.enabled() && !Server.logged()) {
+      AccountGate.require(() => graduate());
+      return;
+    }
     if (typeof log === "function")
       log("Sigrid's wayfinding song rises — and the sky answers with a pillar of light.", "gold");
     if (typeof Bifrost !== "undefined" && Bifrost.start) {

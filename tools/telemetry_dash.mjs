@@ -20,7 +20,7 @@ import os from "node:os";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const OUTDIR = path.join(ROOT, "analytics");
 const CACHE = path.join(OUTDIR, "cache");
-const SERVER = process.env.TAIAO_SERVER_URL_ADMIN || "https://taiao-server.dwyer-finn.workers.dev";
+const SERVER = process.env.TAIAO_SERVER_URL_ADMIN || "https://our-rpg.com";
 
 const args = process.argv.slice(2);
 const flag = f => args.includes(f);

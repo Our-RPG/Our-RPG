@@ -58,14 +58,6 @@ function beginCraft(recipe, node, qty) {
 }
 
 // Callers (1):
-//  skills/crafting.js:49
-function recipeOutputQty(recipe) {
-  let qty = recipe.qty || 1;
-  if (recipe.scaleYield) qty += Math.floor(eff(recipe.skill) / recipe.scaleYield);
-  return qty;
-}
-
-// Callers (1):
 //  skills/crafting.js:45
 function recipeBurns(recipe) {
   if (!recipe.burnUntil || !recipe.burnt) return false;

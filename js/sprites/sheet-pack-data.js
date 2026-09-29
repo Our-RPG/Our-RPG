@@ -6,7 +6,7 @@
 "use strict";
 (function () {
   if (typeof ASSET_DATA === "undefined" || typeof SHEET_OFFSET === "undefined") return;
-  var A = "assets/sheets/icon-pack.72665f98.webp";
+  var A = "assets/sheets/icon-pack.fee99ed4.webp";
   ASSET_DATA["as"] = A; SHEET_OFFSET["as"] = { ox: 772, oy: 2320 };   // 512x64 assets/sheet-src/as-sheep-dir.webp
   ASSET_DATA["ay"] = A; SHEET_OFFSET["ay"] = { ox: 514, oy: 1868 };   // 256x256 assets/sheet-src/ay-alloy-icons.webp
   ASSET_DATA["bi"] = A; SHEET_OFFSET["bi"] = { ox: 1030, oy: 1868 };   // 512x192 assets/sheet-src/bi-boat-icons.webp

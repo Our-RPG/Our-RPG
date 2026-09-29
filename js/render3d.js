@@ -115,10 +115,11 @@ const R3D = (() => {
   const _tiltAxis = new THREE.Vector3();
   const _qYaw = new THREE.Quaternion(), _qTilt = new THREE.Quaternion(), _bbQuat = new THREE.Quaternion();
   const SKY = 0x87b5d4;
-  // Golden hour: the camera never pitches above the horizon, so the "sky" the
-  // player sees IS the fog (and fog-swallowed geometry). Dusk therefore lives
-  // in the fog colour: lerp SKY → this apricot as the sun sinks, instead of
-  // multiplying SKY by the warm tint (blue × orange = muddy grey-green).
+  // Golden hour: at low zoom the camera never pitches above the horizon, so
+  // the "sky" the player sees IS the fog colour (== scene.background). Dusk
+  // therefore lives in that background colour: lerp SKY → this apricot as the
+  // sun sinks, instead of multiplying SKY by the warm tint (blue × orange =
+  // muddy grey-green).
   const SKY_DUSK = new THREE.Color(0xf0a05c);
   const _skyTarget = new THREE.Color();
   let duskW = 0;        // 0 high sun … 1 sun on the horizon (this frame, incl. cloud cut)
@@ -126,10 +127,8 @@ const R3D = (() => {
   // sea sun-glint uniforms: xy = ground dir TOWARD the sun, z = strength, w = time (s)
   const glintUni = { value: new THREE.Vector4(-0.7, -0.55, 0, 0) };
   const glintCamUni = { value: new THREE.Vector3() };
-  // the sea backdrop's haze ramp: distance from the eye (world units) over
-  // which the plane fades IN — so it reads as fog thickening toward the
-  // horizon, invisible up close where the real water tiles show. Tracks the
-  // scene fog's near/far each frame (see the frame loop).
+  // the sea backdrop's haze ramp mirrors depth fog's near/far (see the frame
+  // loop) so the plane fades in exactly where fog already hides real terrain.
   const seaHazeUni = { value: new THREE.Vector2(28, 52) };
   // ---- zoom-tilt: zoomed out, the camera levels toward the horizon ----
   // The classic orbit pitches ~44° down, so even the top of the screen looks
@@ -786,8 +785,8 @@ const R3D = (() => {
     // Amortized building. Walking across a chunk border used to stack five
     // ~100ms mesh builds (plus inline data generation) into a single frame —
     // the "new region" hitch. Now, per frame, the outer ring advances ONE
-    // step of a three-stage pipeline per chunk, nearest-first (fog hides the
-    // edge, so the staggering is invisible):
+    // step of a three-stage pipeline per chunk, nearest-first (it sits past
+    // the depth-fog cutoff so the staggering is invisible):
     //   1. generate the chunk's 3x3 DATA neighbourhood (one chunk per frame —
     //      groundY probes reach into the margins);
     //   2. pre-warm the fresh groundY pass a ~6ms slice per frame (it was
@@ -878,7 +877,7 @@ const R3D = (() => {
   function initSea() {
     // The distant-sea backdrop — "the horizon is never void". It is DRAWN as
     // atmospheric HAZE, not an opaque slab: transparent, its alpha ramping
-    // from 0 up close to 1 at the fog horizon (seaGlintPatch's uHaze), so the
+    // from 0 up close to 1 at the haze horizon (seaGlintPatch's uHaze), so the
     // real textured `bg_1_*` water tiles own the near field and the plane only
     // materialises as soft haze toward the horizon and through the far-LOD's
     // open-water holes. Previously it was an opaque plane z-fighting the
@@ -888,6 +887,9 @@ const R3D = (() => {
       color: 0x3c7c9e, transparent: true, depthWrite: false,
     });
     seaGlintPatch(seaMat);   // sky-temperature tint, the sun's reflection path + haze alpha
+    // Sized to exactly match the camera's far clip (1600, see init()) — safe
+    // because depth fog always fully obscures everything before the camera
+    // can reach that far.
     sea = new THREE.Mesh(new THREE.PlaneGeometry(3200, 3200), seaMat);
     sea.rotation.x = -Math.PI / 2;
     sea.position.y = -STEP_H - 0.12;
@@ -897,8 +899,9 @@ const R3D = (() => {
 
   // ---------- sky dome ----------
   // A camera-centred gradient sphere behind everything (depthTest off,
-  // renderOrder -10): horizon colour = the fog colour (so terrain melts into
-  // the sky seamlessly), zenith its own deeper blue, plus the REAL sun — a
+  // renderOrder -10): horizon colour = fog colour (== scene.background, so
+  // the fog IS the sky — terrain melts into it seamlessly at the fog cutoff),
+  // zenith its own deeper blue, plus the REAL sun — a
   // warm glow and a disc at the sun's true azimuth/elevation. Only visible
   // once the zoom-tilt lets the view reach the horizon; costs one draw call.
   function initSkyDome() {
@@ -3217,29 +3220,6 @@ void main() {
     return shadowDirMat;
   }
   function newSH() { return { pos: [], uv: [], idx: [], n: 0 }; }
-  function shQuad(sh, x0, z0, x1, z1, y = 0.018) { // x0 = west tip, x1 = east base
-    sh.pos.push(x0, y, z0, x1, y, z0, x1, y, z1, x0, y, z1);
-    sh.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
-    sh.idx.push(sh.n, sh.n + 1, sh.n + 2, sh.n, sh.n + 2, sh.n + 3);
-    sh.n += 4;
-  }
-  // terrain-conforming shadow: tessellated per tile so the shadow drops/climbs
-  // each half-block tier it crosses instead of floating over (or vanishing
-  // under) the steps. yOf(tx, tz) returns the y for a tile.
-  function shQuadSteps(sh, x0, z0, x1, z1, yOf) {
-    for (let tz = Math.floor(z0); tz < z1; tz++)
-      for (let tx = Math.floor(x0); tx < x1; tx++) {
-        const ax = Math.max(tx, x0), az = Math.max(tz, z0);
-        const bx = Math.min(tx + 1, x1), bz = Math.min(tz + 1, z1);
-        const y = yOf(tx, tz);
-        const u0 = (ax - x0) / (x1 - x0), u1 = (bx - x0) / (x1 - x0);
-        const v0 = (az - z0) / (z1 - z0), v1 = (bz - z0) / (z1 - z0);
-        sh.pos.push(ax, y, az, bx, y, az, bx, y, bz, ax, y, bz);
-        sh.uv.push(u0, v0, u1, v0, u1, v1, u0, v1);
-        sh.idx.push(sh.n, sh.n + 1, sh.n + 2, sh.n, sh.n + 2, sh.n + 3);
-        sh.n += 4;
-      }
-  }
   function shMesh(sh, rec, parent) {
     if (!sh.n) return null;
     const g = new THREE.BufferGeometry();
@@ -6256,7 +6236,7 @@ void main() {
         const p = project(rp.px, rp.py, rhh);
         if (p.behind) continue;
         octx.fillStyle = "#a8ffc9";                    // green = a fellow player
-        octx.fillText(rp.name, p.x, p.y - 6 * uiK);
+        octx.fillText(rp.name + (rp.clvl ? " (lvl " + rp.clvl + ")" : ""), p.x, p.y - 6 * uiK);
         // what they're doing right now, at a glance
         if (rp.act)
           octx.fillText(rp.act === "gather" ? "⛏" : rp.act === "combat" ? "⚔" : "🔨",
@@ -6328,6 +6308,24 @@ void main() {
     if (inCombat || player.hp < maxHp()) {
       if (headPt) barAt(headPt.x, headPt.y - 9 * uiK, player.hp / maxHp());
       else bar(player.px, player.py, player.hp / maxHp(), 1.35 * pch + playerLiftY);
+    }
+    // your own nameplate — same green as the fellow players around you, so you
+    // read as one of them. Only once you've an account and left the isle.
+    {
+      const onIsle = player.tutorial && typeof player.tutorial === "object" && !player.tutorial.graduated;
+      if (!onIsle && typeof Server !== "undefined" && Server.enabled() && Server.logged() && Server.user) {
+        const np = headPt ? { x: headPt.x, y: headPt.y - 20 * uiK, behind: false }
+          : project(player.px, player.py, 1.75 * pch + playerLiftY);
+        if (!np.behind) {
+          octx.font = nameFont;
+          octx.textAlign = "center";
+          octx.shadowColor = "rgba(0,0,0,0.9)"; octx.shadowBlur = 3 * uiK;
+          octx.fillStyle = "#a8ffc9";
+          const cl = (typeof combatLevel === "function" ? combatLevel() : 0) | 0;
+          octx.fillText(Server.user.username + (cl ? " (lvl " + cl + ")" : ""), np.x, np.y);
+          octx.shadowBlur = 0;
+        }
+      }
     }
     // Vanished (veil+shadow technique): grey wisps mark the unseen caster
     if (player.unseenUntil && now < player.unseenUntil) {
@@ -6691,15 +6689,16 @@ void main() {
       const tc = tintUni.value, k = Math.min(1, dt / 1800);
       tc.r += (tr - tc.r) * k; tc.g += (tg - tc.g) * k; tc.b += (tb - tc.b) * k;
       satUni.value += (ts - satUni.value) * k;
-      // sky/fog: lerp toward the dusk apricot as the sun sinks — the fog IS the
-      // visible sky here. Sun down: the old blue-hour tint of SKY (the darkness
-      // overlay does the actual darkening).
+      // sky/background: lerp toward the dusk apricot as the sun sinks — this
+      // IS the fog colour, the only sky visible at low zoom. Sun down: the
+      // old blue-hour tint of SKY (the darkness overlay does the actual
+      // darkening).
       if (sunState.up) _skyTarget.setHex(SKY).lerp(SKY_DUSK, w);
       else _skyTarget.setHex(SKY).multiply(tc);
-      // biome air: the haze pulls toward the biome's own colour (the fog IS
-      // the sky here) — pea-green over the swamp, rust over the red desert,
-      // violet through the mushroom forest. Halved at night so the dark
-      // stays cool rather than colour-washed.
+      // biome air: the haze pulls toward the biome's own colour (the
+      // background IS the sky here) — pea-green over the swamp, rust over
+      // the red desert, violet through the mushroom forest. Halved at night
+      // so the dark stays cool rather than colour-washed.
       _atmosFog.setRGB(atmos.fogR, atmos.fogG, atmos.fogB);
       _skyTarget.lerp(_atmosFog, atmos.fogW * (sunState.up ? 1 : 0.5));
       if (scene.background) scene.background.lerp(_skyTarget, k);
@@ -6811,15 +6810,12 @@ void main() {
     // zoom-tilt: raising the aim point levels the view (~44° down at the
     // default zoom → ~21° at max), bringing the horizon and sky into frame
     camera.lookAt(followX + sy * fb, 0.4 + followY + 6.2 * _cz * tiltK, followZ + cyw * fb);
-    // rain closes the fog in (a downpour swallows the horizon); overcast alone
-    // hazes it only slightly. The tilt pushes the fog far out so the far
-    // terrain ring reads as a hazy vista instead of a wall.
+    // rain closes the fog in (a downpour swallows the horizon); overcast
+    // alone hazes it only slightly. The tilt pushes the fog far out so the
+    // far terrain ring reads as a vista instead of an abrupt backdrop.
     const fogK = wfog ? Math.max(0.45, 1 - wfog.precip * 0.4 - wfog.cloud * 0.08) : 1;
     scene.fog.near = 28 * _cz * fogK;
     scene.fog.far = (52 * _cz + 380 * tiltK) * fogK;
-    // the sea-haze plane fades in over the same range the fog thickens, so the
-    // distant sea and the fogged near water meet seamlessly and the backdrop
-    // never reads as a hard opaque band
     seaHazeUni.value.set(scene.fog.near, scene.fog.far);
     glintCamUni.value.copy(camera.position);   // glint path radiates from the eye
     if (skyDome) skyDome.position.copy(camera.position);

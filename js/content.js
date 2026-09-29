@@ -830,14 +830,6 @@ function biomeMobsInBand(biomeId, lo, hi) {
   return under.length ? under : list.slice(0, 3);
 }
 
-// Callers (0):
-//  none found
-function monstersInBand(lo, hi, theme) {
-  let out = BESTIARY.filter(b => b.lvl >= lo && b.lvl <= hi && (!theme || b.theme === theme));
-  if (!out.length && theme) out = BESTIARY.filter(b => b.theme === theme && b.lvl <= hi);
-  return out.length ? out : BESTIARY.slice(0, 6);
-}
-
 // ---------- villagers ----------
 // Callers (3):
 //  render3d.js:80 world/chunks.js:319,321

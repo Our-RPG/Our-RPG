@@ -194,7 +194,7 @@ console.log(`wrote studio/js/gaps-data.js — ${gaps.length} gap(s): ` + JSON.st
 if (process.argv.slice(2).includes("--push")) {
   const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
   if (!ADMIN_TOKEN) { console.error("--push needs the ADMIN_TOKEN env var set."); process.exit(1); }
-  const server = (process.env.TAIAO_SERVER_URL || "https://taiao-server.dwyer-finn.workers.dev").replace(/\/+$/, "");
+  const server = (process.env.TAIAO_SERVER_URL || "https://our-rpg.com").replace(/\/+$/, "");
   console.log(`pushing ${gaps.length} subject(s) to ${server}/api/admin/gaps …`);
   try {
     const res = await fetch(server + "/api/admin/gaps", {

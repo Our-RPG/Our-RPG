@@ -91,7 +91,7 @@ dist/taiao-web*.zip
 # telemetry analytics dumps (player data — repo is public, never commit)
 analytics/
 
-# QuestScript source map — generated from scripts/**/*.qs by tools/build.mjs
+# Lua source bundle — generated from scripts/**/*.lua by tools/build.mjs
 js/lua/lua-src-gen.js
 
 # Assembled Workshop site (studio/tools/build_site.mjs) — deploy artifact, not source.

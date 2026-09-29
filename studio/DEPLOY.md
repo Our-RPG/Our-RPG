@@ -1,5 +1,15 @@
 # Deploying Our RPG Workshop
 
+> **Canonical deployment (2026-09-29): the Workshop ships as part of the
+> our-rpg.com site.** `tools/build_ourrpg_site.sh` at the repo root builds
+> one static tree — game at `/`, Workshop at `/workshop` — and the
+> taiao-server worker is routed at `our-rpg.com/api/*` (see
+> `server/wrangler.toml`), so the Workshop calls the API **same-origin: the
+> CORS/ALLOWED_ORIGINS and pages.dev steps below only matter for a
+> standalone-Pages deployment**, which is now the fallback path, not the
+> primary one. The build mechanics below (build_site.mjs, zone baking, gap
+> pushing, D1 migrations, secrets) all still apply unchanged.
+
 The Workshop (`studio/`) is plain HTML/JS with no build step for local dev
 (`python3 -m http.server 8899` at the repo root, see `studio/README.md`), but
 shipping it as its own public site needs one prebuilt bundle instead of

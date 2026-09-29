@@ -1,6 +1,8 @@
-// ===== Taiao — object workshop (right-click "Edit <thing>") =====
-// A per-object community editor: every world object's context menu offers
-// "Edit x" below "Examine x" (input.js editDescFor/pushEdit). The panel shows
+// ===== Taiao — object workshop =====
+// A per-object community editor. Formerly reachable via an "Edit x" entry on
+// every world object's context menu; that entry was removed once Our RPG
+// Workshop (studio/) took over as the community art/data editing surface, so
+// ObjEdit.open() is currently unreachable from the game UI. The panel shows
 // the object's CURRENT art — all 8 direction sprites where they exist (8-dir
 // monsters, mix NPCs), plus extra variant sections for husbandry animals
 // (tended/spent frames, baby form) — beside any proposed alternative sets, and
