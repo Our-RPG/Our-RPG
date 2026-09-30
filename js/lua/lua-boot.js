@@ -23,6 +23,40 @@
       const factory = new wasmoon.LuaFactory(base("libs/lua/glue.wasm"));
       const engine = await factory.createEngine();   // openStandardLibs + coroutine lib on
 
+      // ---- CONCURRENT-dispatch fix: registry-anchor doString's coroutines ----
+      // Upstream wasmoon's callByteCode anchors each doString's new coroutine
+      // at an ABSOLUTE index on the GLOBAL stack, then lua_remove()s that index
+      // when the awaited run completes — possibly seconds later. With many
+      // dispatches in flight at once (every villager routine is one, looping
+      // continuously), an earlier completion shifts all later anchors down a
+      // slot, so later completions remove the WRONG slot — unanchoring a
+      // coroutine that is still RUNNING. Lua's GC then frees the live thread
+      // and the shared lua_State corrupts progressively: js_function metatable
+      // identity checks fail, _G entries (__run, tostring) turn nil, the wasm
+      // heap faults ("index out of bounds") — and every NPC routine dies,
+      // freezing the town (npc._luaRoutine gates the legacy JS wander OFF).
+      // Fix: pin each thread in the REGISTRY (stable integer keys, immune to
+      // stack traffic) and pop xmove'd results so the global stack can't grow.
+      // Instance-level override — the vendored libs/lua/wasmoon.js is untouched.
+      engine.callByteCode = async function (loader) {
+        const g = this.global;
+        const thread = g.newThread();  // pushed on the global stack…
+        const ref = g.lua.luaL_ref(g.address, wasmoon.LUA_REGISTRYINDEX); // …popped & pinned
+        try {
+          loader(thread);
+          const result = await thread.run(0);
+          if (result.length > 0) {
+            this.cmodule.lua_xmove(thread.address, g.address, result.length);
+            const v = g.getValue(g.getTop() - result.length + 1);
+            g.setTop(g.getTop() - result.length);
+            return v;
+          }
+          return undefined;
+        } finally {
+          g.lua.luaL_unref(g.address, wasmoon.LUA_REGISTRYINDEX, ref);
+        }
+      };
+
       // inject every __-prefixed host fn + the two engine callbacks
       const inj = Object.assign({}, L.HOST, { __register: L.registerKey, __err: L.reportErr });
       for (const k in inj) engine.global.set(k, inj[k]);
