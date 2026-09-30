@@ -4631,9 +4631,28 @@ void main() {
     return rec;
   }
 
+  // the building whose ROOM the player is standing in, or null. Bbox tests
+  // aren't enough: organic bboxes contain courtyards/alleys, and row-house
+  // bboxes overlap — "indoors" means an actual room interior (or a legacy
+  // rect / mansion-wing interior). Shared by roof culling and drawNight.
+  function playerIndoors() {
+    const b = world.insideBuilding && world.insideBuilding(player.x, player.y);
+    if (!b) return null;
+    const m = metaOf(b);
+    if (m.rooms)
+      return m.rooms.some(r => player.x > r.x && player.x < r.x + r.w - 1 &&
+        player.y > r.y && player.y < r.y + r.h - 1) ? b : null;
+    if (player.x > b.x0 && player.x < b.x0 + b.w - 1 &&
+        player.y > b.y0 && player.y < b.y0 + b.h - 1) return b;
+    if (m.wings && m.wings.some(w2 => player.x > w2.x0 && player.x < w2.x0 + w2.w - 1 &&
+        player.y > w2.y0 && player.y < w2.y0 + w2.h - 1)) return b;
+    return null;
+  }
+
   function syncStructures() {
     if (!world.buildingMeta || !world.structAt) return;
     const px = player.x, py = player.y;
+    const indoors = !!playerIndoors();
     const seen = new Set();
     // new structures build at most one per frame (they enter view range well
     // before the camera reaches them, so spreading the builds out is
@@ -4659,12 +4678,10 @@ void main() {
       // furniture stay up; the walls still collide exactly as before.
       const inside = rec.vols.some(vv => px >= vv.x0 && px < vv.x1 && py >= vv.z0 && py < vv.z1);
       const lv = inside ? Math.min(player.level | 0, rec.m.storeys - 1) : -1;
-      // under the eaves but not indoors (narrow alleys, doorsteps): the
-      // overhanging roof would hide the player — drop it so the lane ahead
-      // stays readable; it pops back two tiles out
-      const underEaves = !inside && rec.vols.some(vv =>
-        px >= vv.x0 - 1.4 && px < vv.x1 + 1.4 && py >= vv.z0 - 1.4 && py < vv.z1 + 1.4);
-      rec.roofGroup.visible = !inside && !underEaves;
+      // stepping INSIDE any building lifts EVERY roof in view — neighbouring
+      // rooflines can't curtain the room you're standing in from any camera
+      // angle (outdoors, all roofs stand)
+      rec.roofGroup.visible = !indoors && !inside;
       rec.storeyGroups.forEach((sg, s) => {
         sg.group.visible = !inside || s <= lv;
         const flat = inside && s === lv;
@@ -5945,6 +5962,23 @@ void main() {
       const r = L.r * pxTile;
       if (p.x < -r || p.x > W + r || p.y < -r || p.y > H + r) continue;
       lights.push({ x: p.x, y: p.y, r, s: L.s, col: L.col, gr: (L.gr != null ? L.gr * pxTile : null), gs: L.gs });
+    }
+    // indoors, the household lamps are lit: punch a full-strength clear hole
+    // over every room of the building the player is standing in, so the whole
+    // interior reads bright while the streets outside stay night-dark
+    const inb = playerIndoors();
+    if (inb) {
+      const bm = world.buildingMeta(inb);
+      const rects = bm.rooms
+        ? bm.rooms.map(r => [r.x, r.y, r.w, r.h])
+        : [[inb.x0, inb.y0, inb.w, inb.h],
+           ...(bm.wings || []).map(w2 => [w2.x0, w2.y0, w2.w, w2.h])];
+      for (const [rx, ry, rw, rh] of rects) {
+        const p = project(PX(rx + rw / 2), PX(ry + rh / 2), 0.4);
+        if (p.behind) continue;
+        lights.push({ x: p.x, y: p.y, r: (Math.max(rw, rh) * 0.8 + 1.4) * pxTile, s: 1,
+          col: [255, 208, 148], gr: Math.max(rw, rh) * 0.45 * pxTile, gs: 0.08 });
+      }
     }
     // bioluminescent biome decor: each mushroom/tree/rock is its own soft glow
     for (const bl of _bioLights) {

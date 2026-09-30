@@ -61,7 +61,7 @@ function createWorldChunks(ctx) {
                       "sail_square", "sail_squarerig", "sail_lateen", "sail_gaff", "sail_lugsail", "sail_topsail",
                       "sail_topgallant", "sail_royal", "sail_staysail", "sail_foresail", "sail_mizzen", "sail_spanker",
                       "sail_jib", "sail_stormjib", "sail_studding", "sail_fullrig", "sail_masterwork"],
-    shipyard:        ["timber_beam", "planks_seasoned", "cask_ships", "rigging", "boat_dinghy", "powder_keg", "fender", "boat_cover", "boards_stacked"],
+    shipyard:        ["timber_beam", "planks_seasoned", "cask_ships", "rigging", "powder_keg", "fender", "boat_cover", "boards_stacked"], // no hulls indoors — boats never generate inside buildings
     charcoal_clamp:  ["pitch_pot", "cask_chemical", "kiln", "barrel_scorched", "bucket", "crucible"],
     lime_kiln:       ["kiln", "pot_lidded", "cask_water", "hearthstone", "bucket", "cistern"],
     masons_yard:     ["roof_tiles_stack", "roof_tiles_section", "chimney_pot", "chimney_stack", "cistern", "grille",
@@ -966,10 +966,20 @@ function createWorldChunks(ctx) {
         items.push([key, slots[i][0], slots[i][1]]);
       }
       furnishInterior(b, items);
-      // a shipyard also holds one hull on the stocks (rotated so all hulls show)
+      // a shipyard keeps one hull ON THE STOCKS out in the yard beside the
+      // door (rotated by position so every hull surfaces somewhere) — never
+      // indoors: boats/ships must not generate inside buildings
       if (b.job === "shipyard") {
         const hk = SHIP_FLEET[hash2i(b.x0, b.y0, S ^ 0x51a7) % SHIP_FLEET.length];
-        furnishInterior(b, [[hk, 2, h - 3]]);
+        const d = b.rooms && b.door ? b.door
+          : { x: b.x0 + (b.w >> 1), y: b.y0 + b.h - 1, angle: 3 };
+        const ang = d.angle == null ? 3 : d.angle;
+        const [ox2, oy2] = [[-1, 0], [0, -1], [1, 0], [0, 1]][ang]; // W N E S outward
+        const hx = d.x + ox2 * 3 + (ang % 2 ? 0 : 2);               // 3 out, 2 aside
+        const hy = d.y + oy2 * 3 + (ang % 2 ? 2 : 0);
+        if (inCh(hx, hy) && blocked[li(hx, hy)] !== 1 && !decor[li(hx, hy)] &&
+            !isWaterKey(ground[li(hx, hy)]) && !String(ground[li(hx, hy)]).startsWith("floor"))
+          deco(hx, hy, hk, true);
       }
     };
 

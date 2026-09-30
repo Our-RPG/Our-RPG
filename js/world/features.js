@@ -1255,7 +1255,16 @@ function createWorldFeatures(ctx) {
   // directions — selection is asymmetric) with a settlement budget: small
   // components get a canonical "roadnet:<min cell>" id; blowing the budget
   // means the endless mainland web → "main".
-  const ROADNET_BUDGET = 40;        // settlements — only a freak mega-web exceeds this
+  // BUG (found 2026-09-30): budget was 40, but ordinary finite regional webs
+  // routinely run bigger than that (Newhaven's OWN true component measures
+  // 41; a shire cluster a zone away measured 117) — so both got force-
+  // labelled "main" by sheer component size, not because they actually touch
+  // Newhaven, and every settlement in that distant, disconnected 117-member
+  // web showed up as "Bank of Newhaven". Budget raised well past realistic
+  // regional-web sizes so it's a pathological-explosion guard again, not a
+  // correctness bug; AND the guard itself no longer lies about "main" —
+  // see the seen.has("0,0") check below.
+  const ROADNET_BUDGET = 1500;      // settlements — only a freak mega-web exceeds this
                                     // (it then degenerates to sharing "main")
   const roadNetCache = new Map();   // "vcx,vcy" (village cell) → net id
   const netMembersCache = new Map(); // net id → [[vcx,vcy]...] (finite nets only)
@@ -1295,7 +1304,13 @@ function createWorldFeatures(ctx) {
     };
     let id = null;
     for (let i = 0; i < q.length && !id; i++) {
-      if (seen.size > ROADNET_BUDGET) { id = "main"; break; }
+      // Budget blown — bail out. Don't ASSUME this oversized web is
+      // Newhaven's just because it's big: fall through (id stays null) to
+      // the normal canonical-id logic below, which only assigns "main" if
+      // the BFS actually reached (0,0) — otherwise it gets its own
+      // "roadnet:<min cell seen so far>" id, same shape as any other finite
+      // network.
+      if (seen.size > ROADNET_BUDGET) break;
       const [cx, cy] = q[i];
       // outgoing: the roads this settlement itself chose to build
       for (const pe of roadSelection(cx, cy)) {
