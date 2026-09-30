@@ -73,10 +73,16 @@ const ZoneStore = (function () {
           if (m) { _manifestFrom.set(k, "static"); return m; }
           const base = apiBase();
           if (!base) return null;
-          return fetch(base + "/api/zones/manifest?zx=" + zx + "&zy=" + zy, { cache: "force-cache" })
-            .then(r => r.ok ? r.json() : null)
-            .then(m2 => { if (m2) _manifestFrom.set(k, "server"); return m2; })
-            .catch(() => null);
+          // v= keys the URL by publish time, so a re-published (or deleted +
+          // re-baked) zone never collides with a stale CDN/browser cache entry
+          return communityIndex().then(() => {
+            const info = communityInfo(zx, zy);
+            const v = info && info.publishedAt ? "&v=" + info.publishedAt : "";
+            return fetch(base + "/api/zones/manifest?zx=" + zx + "&zy=" + zy + v, { cache: "force-cache" })
+              .then(r => r.ok ? r.json() : null)
+              .then(m2 => { if (m2) _manifestFrom.set(k, "server"); return m2; })
+              .catch(() => null);
+          });
         }));
     }
     return _manifests.get(k);
@@ -87,7 +93,11 @@ const ZoneStore = (function () {
   function mapUrl(zx, zy, meta) {
     const from = _manifestFrom.get(key(zx, zy));
     const serverSide = from ? from === "server" : isStatic(zx, zy) === false;
-    if (serverSide) return apiBase() + "/api/zones/map?zx=" + zx + "&zy=" + zy;
+    if (serverSide) {
+      const info = communityInfo(zx, zy);
+      const v = info && info.publishedAt ? "&v=" + info.publishedAt : "";
+      return apiBase() + "/api/zones/map?zx=" + zx + "&zy=" + zy + v;
+    }
     return STUDIO_BASE + "assets/zones/" + ((meta && meta.image) || ("zone_" + zx + "_" + zy + ".png"));
   }
 

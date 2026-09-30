@@ -246,6 +246,40 @@ const GenJobs = (function () {
   // (Single-image "image" kind isn't in any PixelLab list, so it can't be
   // recovered this way — only characters and objects.)
   const ts = it => (typeof it.created_at === "number" ? it.created_at : (Date.parse(it.created_at || "") || 0));
+
+  // Find the id of the PixelLab-library item that best matches a Workshop job's
+  // recipe: same kind + identical prompt, generated at/after the job began. `used`
+  // stops two jobs claiming the same library row in one pass; `savedSet` (optional)
+  // skips library ids already pinned to the gallery. Returns { id, isChar } or null.
+  // The single-image "image" kind isn't in any PixelLab list, so it never matches.
+  function findLibraryMatch(job, chars, objs, used, savedSet) {
+    if (job.pixellab_kind === "image") return null;
+    const isChar = job.pixellab_kind === "character";
+    const list = isChar ? chars : objs, tag = isChar ? "c" : "o";
+    const want = String(job.prompt || "").trim();
+    if (!want) return null;
+    const m = list
+      .map(it => ({ id: String(it.id || it.character_id || it.object_id || ""), p: String(it.prompt || it.description || "").trim(), t: ts(it) }))
+      .filter(x => x.id && !used.has(tag + x.id) && !(savedSet && savedSet.has(x.id)) && x.p === want && x.t >= (job.created_at - 120000))
+      .sort((a, b) => b.t - a.t)[0];
+    if (!m) return null;
+    used.add(tag + m.id);
+    return { id: m.id, isChar };
+  }
+
+  // Download a matched library item's art, mark the job completed, and add the
+  // sprite to the gallery (keyed "job:<id>" via addToGallery, so it dedupes
+  // against an in-tab completion of the same job). Returns true if art landed.
+  async function ingestMatch(job, matchId, isChar) {
+    const dirs = isChar ? await PixelLab.characterArt(matchId) : await PixelLab.objectArt(matchId);
+    if (!dirs || !Object.keys(dirs).length) return false;
+    const result = { dirs };
+    await Taiao.genComplete(job.id, result);
+    resultCache.set(job.id, result);
+    try { await addToGallery(job.id, jobMetaFromRow(job), result); } catch (_) {}
+    return true;
+  }
+
   let reconcileBusy = false, reconcileAt = 0;
   async function reconcilePending(rows) {
     const pending = (rows || []).filter(r => r.status === "generating" && !inFlight.has(r.id) && !resuming.has(r.id));
@@ -265,27 +299,61 @@ const GenJobs = (function () {
       const used = new Set();
       for (const r of refless) {
         if (resuming.has(r.id) || inFlight.has(r.id)) continue;
-        const isChar = r.pixellab_kind === "character";
-        const list = isChar ? chars : objs, tag = isChar ? "c" : "o";
-        const want = String(r.prompt || "").trim();
-        const match = list
-          .map(it => ({ id: String(it.id || it.character_id || it.object_id || ""), p: String(it.prompt || it.description || "").trim(), t: ts(it) }))
-          .filter(x => x.id && !used.has(tag + x.id) && x.p === want && x.t >= (r.created_at - 120000))
-          .sort((a, b) => b.t - a.t)[0];
+        const match = findLibraryMatch(r, chars, objs, used);
         if (!match) continue;
-        used.add(tag + match.id);
         resuming.add(r.id);
-        try {
-          const dirs = isChar ? await PixelLab.characterArt(match.id) : await PixelLab.objectArt(match.id);
-          if (dirs && Object.keys(dirs).length) {
-            const result = { dirs };
-            await Taiao.genComplete(r.id, result);
-            resultCache.set(r.id, result);
-            try { await addToGallery(r.id, jobMetaFromRow(r), result); } catch (_) {}
-          }
-        } catch (_) {} finally { resuming.delete(r.id); }
+        try { await ingestMatch(r, match.id, match.isChar); }
+        catch (_) {} finally { resuming.delete(r.id); }
       }
     } finally { reconcileBusy = false; notifyBoards(); }
+  }
+
+  // -------------------------------------------------- library → gallery sync
+  // The Profile page's "automatic pull": every generation ever ACTIVATED on the
+  // Workshop (any gen_jobs status — completed, failed, or still generating) is
+  // matched against the current PixelLab account library, and any matching
+  // library item that isn't already represented in the gallery is pulled in.
+  // This is broader than reconcilePending (which only recovers still-"generating"
+  // jobs): it catches art that finished on PixelLab after a job was given up on,
+  // or was re-run inside PixelLab itself, and keeps the gallery in step with the
+  // library without the manual "Add selected" step. Keyed "job:<id>", so a job
+  // yields at most one gallery row and never duplicates an in-tab completion.
+  // Returns the number of sprites newly added. Self-throttles.
+  let libSyncBusy = false, libSyncAt = 0;
+  async function syncLibraryToGallery() {
+    if (!PixelLab.hasKey() || !Taiao.logged()) return 0;
+    if (libSyncBusy || Date.now() - libSyncAt < 20000) return 0;
+    libSyncBusy = true; libSyncAt = Date.now();
+    try {
+      let jobs = [], gallery = [];
+      try { jobs = await Taiao.genMine(); } catch (_) { return 0; }
+      try { gallery = await Taiao.galleryMine(); } catch (_) {}
+      // Everything already on the shelf: "job:<id>" keys from prior pulls/in-tab
+      // completions, plus raw library ids from manual pins (skip re-pulling both).
+      const saved = new Set((gallery || []).map(g => String(g.pixellab_id)));
+      const savedLibIds = new Set([...saved].filter(k => !k.startsWith("job:")));
+      const candidates = (jobs || []).filter(j =>
+        j.pixellab_kind !== "image" &&
+        !saved.has("job:" + j.id) &&
+        !inFlight.has(j.id) && !resuming.has(j.id));
+      if (!candidates.length) return 0;
+      let chars = [], objs = [];
+      const needChars = candidates.some(j => j.pixellab_kind === "character");
+      const needObjs = candidates.some(j => j.pixellab_kind === "object8" || j.pixellab_kind === "object1");
+      if (needChars) { try { chars = (await PixelLab.listCharacters()).items || []; } catch (_) {} }
+      if (needObjs) { try { objs = (await PixelLab.listObjects()).items || []; } catch (_) {} }
+      const used = new Set();
+      let added = 0;
+      for (const job of candidates) {
+        if (resuming.has(job.id) || inFlight.has(job.id)) continue;
+        const match = findLibraryMatch(job, chars, objs, used, savedLibIds);
+        if (!match) continue;
+        resuming.add(job.id);
+        try { if (await ingestMatch(job, match.id, match.isChar)) added++; }
+        catch (_) {} finally { resuming.delete(job.id); }
+      }
+      return added;
+    } finally { libSyncBusy = false; notifyBoards(); }
   }
 
   // ----------------------------------------------------------------- board
@@ -403,5 +471,5 @@ const GenJobs = (function () {
     return refresh;
   }
 
-  return { suggest, execute, mountBoard, resumePending, reconcilePending, uploadToGame, setReference, regenerateFromGallery, galleryCategoryFor };
+  return { suggest, execute, mountBoard, resumePending, reconcilePending, syncLibraryToGallery, uploadToGame, setReference, regenerateFromGallery, galleryCategoryFor };
 })();

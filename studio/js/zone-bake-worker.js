@@ -147,18 +147,9 @@ onmessage = async e => {
       return;
     }
 
-    // chunks: [{index, c:[cx,cy]}] — harvested in small batches so the page
-    // can stream progress + checkpoint which chunks are done.
-    if (d.type === "monsters") {
-      const BATCH = 8;
-      for (let i = 0; i < d.chunks.length; i += BATCH) {
-        const batch = d.chunks.slice(i, i + BATCH);
-        const records = C.harvestMonsterChunks(self, batch.map(b => b.c), d.cities, null);
-        postMessage({ token: d.token, monsterBatch: { indices: batch.map(b => b.index), records } });
-      }
-      postMessage({ token: d.token, monstersDone: true });
-      return;
-    }
+    // (No monster-spawn job: the zone pages never render spawn data, so bakes
+    // stopped producing it 2026-09-30. ZoneBakeCore keeps the harvest fns for
+    // the node CLI's opt-in --monstersonly.)
 
     if (d.type === "merge") {
       const man = C.mergeShires(self, d.man, { minTiles: d.minTiles, log: s => postMessage({ token: d.token, log: s }) });

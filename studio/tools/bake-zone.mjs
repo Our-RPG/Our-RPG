@@ -2,7 +2,7 @@
 // ===== Taiao Workshop — zone bake CLI =====
 // The one-command CLI twin of the Zones tab's "Generate zone" button
 // (bake-server.mjs) — for baking from a terminal (or scripting a batch of
-// zones) instead of clicking through the UI. Runs the exact same six passes
+// zones) instead of clicking through the UI. Runs the exact same five passes
 // in the exact same order — bake-common.mjs's PASSES is the one shared
 // source of truth with the button, so the two can't drift apart — then
 // leaves the WHOLE studio consistent in one shot: zone page, refreshed zone
@@ -18,7 +18,7 @@
 //
 // Wall-clock, roughly (a real multi-core machine): terrain+features a
 // minute or two; NPCs is the big one — 15-40 minutes (the real world-gen NPC
-// pipeline, see zone-npcs.mjs); cities/monsters/merge/biomes a few minutes
+// pipeline, see zone-npcs.mjs); cities/merge/biomes a few minutes
 // each. Budget the better part of an hour per zone end to end.
 import fs from "node:fs";
 import path from "node:path";
@@ -113,7 +113,7 @@ async function main() {
   console.log(`Zone ${zx},${zy} baked in ${mins} min.`);
   console.log(`  terrain PNG:      ${pngPath}  (${pngSize})`);
   console.log(`  manifest JSON:    ${manPath}  (${manSize})`);
-  console.log(`  NPCs / shires / monster spawns: ${npcCount} / ${cityCount} / ${monsterCount}`);
+  console.log(`  NPCs / shires: ${npcCount} / ${cityCount}`);
   console.log(`  zone index now has ${zoneList.length} zone(s): ${zoneList.join(", ")}`);
   console.log(`  new static NPC pages: ${afterNpcPages - beforeNpcPages}  (zone total: ${afterNpcPages})`);
   console.log(`  zone page: studio/zones/${zx}.${zy}.html`);

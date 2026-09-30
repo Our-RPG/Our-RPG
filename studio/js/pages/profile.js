@@ -498,7 +498,7 @@ function myGalleryCard() {
   const c = el("div.card");
   c.appendChild(el("h3", null, ["My profile gallery ", el("span.hint", { text: "every sprite you've generated" })]));
   c.appendChild(el("p.tagline", { html:
-    "Every sprite you generate in the Workshop lands here automatically, tagged with a proposed <b>sprite id</b> and category. From here you can <b>regenerate</b> it (the old one stays, a fresh take appears alongside it), <b>delete</b> it, or <b>publish</b> it to the public catalogue at <span class='mono'>/workshop/sprites/</span> — where it goes live under your sprite id and tag." }));
+    "Every sprite you generate in the Workshop lands here automatically, tagged with a proposed <b>sprite id</b> and category. This also keeps itself in step with your <b>PixelLab library</b>: when a generation you started in the Workshop finishes on PixelLab — even if you'd closed the tab or it was re-run there — it's pulled in here on its own. From here you can <b>regenerate</b> it (the old one stays, a fresh take appears alongside it), <b>delete</b> it, or <b>publish</b> it to the public catalogue at <span class='mono'>/workshop/sprites/</span> — where it goes live under your sprite id and tag." }));
   const body = el("div");
   c.appendChild(body);
 
@@ -593,8 +593,29 @@ function myGalleryCard() {
     idInput.focus();
   }
 
+  // Automatic PixelLab-library → gallery sync. Runs once when the page opens
+  // (key present + signed in), then on a light poll while the page stays open,
+  // so library additions matching a Workshop-activated generation appear on
+  // their own. GenJobs.syncLibraryToGallery self-throttles; the interval clears
+  // itself once this card is no longer in the DOM (a re-render replaces it).
+  let syncTimer = null;
+  async function autoSync() {
+    if (!document.body.contains(c)) { if (syncTimer) { clearInterval(syncTimer); syncTimer = null; } return; }
+    if (!Taiao.logged() || !PixelLab.hasKey()) return;
+    let added = 0;
+    try { added = await GenJobs.syncLibraryToGallery(); } catch (_) {}
+    if (added) {
+      toast("Pulled " + added + " sprite" + (added === 1 ? "" : "s") + " from your PixelLab library.", "ok", 5000);
+      refresh();
+    }
+  }
+
   c._refresh = refresh;
   refresh();
+  // Defer the first sync to a macrotask so the caller has appended this card to
+  // the DOM (autoSync's contains-check would otherwise skip the on-load run).
+  setTimeout(autoSync, 0);
+  syncTimer = setInterval(autoSync, 45000);
   Taiao.onAuth(() => refresh());
   return c;
 }

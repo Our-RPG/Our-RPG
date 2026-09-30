@@ -16,11 +16,13 @@ export const PRERENDER = path.join(TOOLS, "prerender-zone.mjs");
 
 // the passes that reproduce a zone[0,0]-parity manifest + overview, with a rough
 // progress band each (heaviest first). null flag = the default terrain+features bake.
+// Monster spawns are NOT baked (dropped 2026-09-30): the zone pages never render
+// them, and the pass was the second-heaviest. prerender-zone.mjs keeps its
+// --monstersonly flag for anyone who wants the data on a manifest by hand.
 export const PASSES = [
   { flag: null, band: [0, 10], msg: "terrain & features" },
-  { flag: "--npcsonly", band: [10, 55], msg: "NPCs" },
-  { flag: "--citiesonly", band: [55, 75], msg: "shire dossiers & POIs" },
-  { flag: "--monstersonly", band: [75, 88], msg: "monster spawns" },
+  { flag: "--npcsonly", band: [10, 60], msg: "NPCs" },
+  { flag: "--citiesonly", band: [60, 88], msg: "shire dossiers & POIs" },
   { flag: "--mergeshires", band: [88, 92], msg: "merging shires" },
   { flag: "--biomesonly", band: [92, 100], msg: "biome tile histograms" },
 ];

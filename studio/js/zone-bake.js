@@ -19,11 +19,13 @@
 
 const ZoneBake = (function () {
   const ZONE_T = 15000, MPX = 64, STEP = 2;          // bake resolution — same as prerender-zone.mjs default
-  const MONSTER_RADIUS = 130, MERGE_MIN_TILES = 4500000, BIOME_STEP = 60;
+  const PREVIEW_STEP = 8;                            // the instant zoomed-out biome overview (~944px)
+  const MERGE_MIN_TILES = 4500000, BIOME_STEP = 60;
   const WG = { seed: 1337, landE: 0.483, rockE: 0.655, chunk: 32, vcell: 144, pcell: 30, icell: 44, gensig: "studio" };
-  // per-pass progress bands — MUST stay aligned with tools/bake-common.mjs
-  const BANDS = [[0, 10], [10, 55], [55, 75], [75, 88], [88, 92], [92, 100]];
-  const STAGE_MSGS = ["terrain & features", "NPCs", "shire dossiers & POIs", "monster spawns", "merging shires", "biome tile histograms"];
+  // per-pass progress bands — MUST stay aligned with tools/bake-common.mjs.
+  // (No monster-spawn pass: the zone pages never render spawn data.)
+  const BANDS = [[0, 10], [10, 60], [60, 88], [88, 92], [92, 100]];
+  const STAGE_MSGS = ["terrain & features", "NPCs", "shire dossiers & POIs", "merging shires", "biome tile histograms"];
   const HEARTBEAT_MS = 30000, CHECKPOINT_MS = 45000;
 
   let S = null;   // the one active bake's state
@@ -113,36 +115,35 @@ const ZoneBake = (function () {
   // ---- pass 0: terrain + features → manifest {meta, feat} + map.png ------
   // (region streaming needs custom per-message handlers, so this drives the
   // zone-worker pool directly instead of through wrap.request)
-  async function passTerrainImpl() {
-    const { zx, zy } = S;
-    const zoneMap = ZONE_T / 2, MT = MPX * STEP;
-    const cMap = zx * zoneMap, cMapY = zy * zoneMap;
+  const gridFor = step => {
+    const zoneMap = ZONE_T / 2, MT = MPX * step;
+    const cMap = S.zx * zoneMap, cMapY = S.zy * zoneMap;
     const mapMinX = cMap - zoneMap / 2, mapMinY = cMapY - zoneMap / 2;
     const mapMaxX = cMap + zoneMap / 2, mapMaxY = cMapY + zoneMap / 2;
     const mx0 = Math.floor(mapMinX / MT), mx1 = Math.floor((mapMaxX - 1e-6) / MT);
     const my0 = Math.floor(mapMinY / MT), my1 = Math.floor((mapMaxY - 1e-6) / MT);
     const cols = mx1 - mx0 + 1, rows = my1 - my0 + 1;
-    const imgW = cols * MPX, imgH = rows * MPX;
-    const originMapX = mx0 * MT, originMapY = my0 * MT;
-
-    const nT = poolSize();
-    log("Rendering terrain " + imgW + "×" + imgH + "px across " + nT + " workers…");
-    S.tpool = await Promise.all(Array.from({ length: nT }, () => spawn("zone-worker.js")));
+    return { MT, cols, rows, imgW: cols * MPX, imgH: rows * MPX, originMapX: mx0 * MT, originMapY: my0 * MT };
+  };
+  // render the whole zone at `step` across the terrain-worker pool, streaming
+  // progress into the [f0,f1] slice of the pass-0 band. Returns the canvas.
+  async function renderZoneCanvas(step, f0, f1, label) {
+    const G = gridFor(step);
     const cv = document.createElement("canvas");
-    cv.width = imgW; cv.height = imgH;
+    cv.width = G.imgW; cv.height = G.imgH;
     const g = cv.getContext("2d");
-    const total = cols * rows; let done = 0;
-    const rowBands = bands(Array.from({ length: rows }, (_, i) => i), nT);
+    const total = G.cols * G.rows; let done = 0;
+    const rowBands = bands(Array.from({ length: G.rows }, (_, i) => i), S.tpool.length);
     await Promise.all(rowBands.map((band, bi) => new Promise((res, rej) => {
       const w = S.tpool[bi].w, r0 = band[0], r1 = band[band.length - 1];
-      const token = "t" + bi;
+      const token = "t" + step + "_" + bi;
       w.onmessage = ev => {
         const d = ev.data;
         if (!d || d.token !== token) return;
         if (d.regionTile) {
           g.putImageData(new ImageData(new Uint8ClampedArray(d.px), MPX, MPX), d.regionTile.ox, r0 * MPX + d.regionTile.oy);
           done++;
-          if (done % 16 === 0 || done === total) setPct(0, bandPct(0, 0.8 * done / total), "terrain " + done + "/" + total);
+          if (done % 8 === 0 || done === total) setPct(0, bandPct(0, f0 + (f1 - f0) * done / total), label + " " + done + "/" + total);
           return;
         }
         if (d.regionDone) res();
@@ -150,10 +151,33 @@ const ZoneBake = (function () {
       };
       w.onerror = err => rej(new Error(err.message || "terrain worker error"));
       w.postMessage({ type: "region", token,
-        mapX0: originMapX, mapY0: originMapY + r0 * MT,
-        mapX1: originMapX + cols * MT, mapY1: originMapY + (r1 + 1) * MT,
-        step: STEP, MPX, MAP_COLORS: ZMAP_COLORS, MAP_WATER: ZMAP_WATER });
+        mapX0: G.originMapX, mapY0: G.originMapY + r0 * G.MT,
+        mapX1: G.originMapX + G.cols * G.MT, mapY1: G.originMapY + (r1 + 1) * G.MT,
+        step, MPX, MAP_COLORS: ZMAP_COLORS, MAP_WATER: ZMAP_WATER });
     })));
+    return cv;
+  }
+  async function passTerrainImpl() {
+    const { zx, zy } = S;
+    const nT = poolSize();
+    S.tpool = await Promise.all(Array.from({ length: nT }, () => spawn("zone-worker.js")));
+
+    // FIRST: the fast zoomed-out overview — the whole zone with every biome
+    // visible, rendered in well under a minute and pushed to the server, so
+    // the baker (and everyone watching the progress bar) sees the zone's
+    // shape immediately while the real bake grinds on.
+    const pv = await renderZoneCanvas(PREVIEW_STEP, 0.02, 0.14, "biome overview");
+    try {
+      const pvBlob = await new Promise((res, rej) => pv.toBlob(b => b ? res(b) : rej(new Error("preview encode failed")), "image/png"));
+      if (S.ui.onPreview) { try { S.ui.onPreview(URL.createObjectURL(pvBlob)); } catch (_) {} }
+      await putCk("preview", pvBlob, "image/png");
+    } catch (e) { log("Overview upload skipped: " + e.message); }   // non-fatal — purely cosmetic
+
+    // then the real thing at full bake resolution
+    log("Rendering terrain across " + nT + " workers…");
+    const G = gridFor(STEP);
+    const { imgW, imgH, originMapX, originMapY } = G;
+    const cv = await renderZoneCanvas(STEP, 0.15, 0.8, "terrain");
 
     // features over the image's exact map extent (same as queryFeatures in
     // prerender-zone.mjs: villages/rivers/roads; POIs/icons stay out of the
@@ -271,50 +295,12 @@ const ZoneBake = (function () {
     await syncProgress();
   }
 
-  // ---- pass 3: monster spawns (fanned out, per-chunk checkpoints) --------
-  async function passMonsters(man, have) {
-    const { zx, zy } = S;
-    const pool = await bakePool();
-    const { cities } = await ensureEnum();
-    const chunks = ZoneBakeCore.monsterChunkList(cities, MONSTER_RADIUS);
-    let doneIdx = new Set(), records = [];
-    if (have && have.monsters) {
-      const ck = await getCk("monsters");
-      if (ck && Array.isArray(ck.done) && Array.isArray(ck.records)) {
-        doneIdx = new Set(ck.done); records = ck.records;
-        log("Resuming monsters: " + doneIdx.size + "/" + chunks.length + " chunks already done.");
-      }
-    }
-    const todo = chunks.map((c, i) => ({ index: i, c })).filter(e => !doneIdx.has(e.index));
-    log(chunks.length + " wild chunks around " + cities.length + " cities…");
-    const checkpoint = makeCheckpointer("monsters", () => ({ done: [...doneIdx], records }));
-    if (todo.length) {
-      await Promise.all(bands(todo, pool.length).map((group, gi) => pool[gi].request(
-        { type: "monsters", zx, zy, chunks: group, cities },
-        {
-          doneKey: "monstersDone",
-          monsterBatch: d => {
-            d.indices.forEach(i => doneIdx.add(i)); records.push(...d.records);
-            setPct(3, bandPct(3, doneIdx.size / chunks.length),
-              "monster spawns — " + doneIdx.size + "/" + chunks.length + " chunks (" + records.length + " spawns)");
-            checkpoint(false);
-          },
-        }
-      )));
-    }
-    man.monsters = ZoneBakeCore.dedupeMonsters(records, zx, zy);
-    man.monsterRadius = MONSTER_RADIUS;
-    await putCk("manifest", JSON.stringify(man), "application/json");
-    setPct(4, BANDS[4][0], STAGE_MSGS[4]);
-    await syncProgress();
-  }
-
-  // ---- passes 4+5: merge shires, biome histograms ------------------------
+  // ---- passes 3+4: merge shires, biome histograms ------------------------
   async function passMerge(man) {
     const pool = await bakePool();
     const merged = await pool[0].request({ type: "merge", man, minTiles: MERGE_MIN_TILES }, { doneKey: "merged", log });
     await putCk("manifest", JSON.stringify(merged), "application/json");
-    setPct(5, BANDS[5][0], STAGE_MSGS[5]);
+    setPct(4, BANDS[4][0], STAGE_MSGS[4]);
     await syncProgress();
     return merged;
   }
@@ -327,7 +313,7 @@ const ZoneBake = (function () {
 
   // ---- publish -----------------------------------------------------------
   async function publishZone(man) {
-    setPct(5, 99, "publishing");
+    setPct(4, 99, "publishing");
     // pages.json: the compact npc id→name index the server uses to synthesize
     // each baked NPC's static page shell (no HTML is ever stored)
     let pages = null;
@@ -336,7 +322,7 @@ const ZoneBake = (function () {
     }
     if (pages) await putCk("pages", JSON.stringify(pages), "application/json");
     const r = await api("/api/zones/publish", { zx: S.zx, zy: S.zy });
-    setPct(6, 100, "published");
+    setPct(5, 100, "published");
     return r;
   }
 
@@ -357,7 +343,7 @@ const ZoneBake = (function () {
       }
       if (!man) stage = 0;
       if (stage > 0 && !have.map) stage = 0;   // map lost — redo the terrain pass
-      setPct(stage, Math.max(claim.zone ? claim.zone.pct : 0, BANDS[Math.min(stage, 5)][0]), STAGE_MSGS[Math.min(stage, 5)]);
+      setPct(stage, Math.max(claim.zone ? claim.zone.pct : 0, BANDS[Math.min(stage, 4)][0]), STAGE_MSGS[Math.min(stage, 4)]);
       S.hb = setInterval(() => {
         api("/api/zones/progress", { zx, zy, stage: S.stage, pct: S.pct, msg: S.msg })
           .catch(e => { if (/holds this bake|No bake in progress/.test(e.message)) { S.lost = e.message; } });
@@ -369,10 +355,8 @@ const ZoneBake = (function () {
       if (S.lost) throw new Error(S.lost);
       if (stage <= 2) await passCities(man);
       if (S.lost) throw new Error(S.lost);
-      if (stage <= 3) await passMonsters(man, have);
-      if (S.lost) throw new Error(S.lost);
-      if (stage <= 4) man = await passMerge(man);
-      if (stage <= 5) man = await passBiomes(man);
+      if (stage <= 3) man = await passMerge(man);
+      if (stage <= 4) man = await passBiomes(man);
       const r = await publishZone(man);
       if (typeof ZoneStore !== "undefined") ZoneStore.invalidate();
       return r;

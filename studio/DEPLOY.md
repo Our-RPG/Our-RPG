@@ -42,9 +42,9 @@ node studio/tools/bake-zone.mjs --zx 1 --zy 0        # bake zone 1,0
 node studio/tools/bake-zone.mjs --zx 1 --zy 0 --fast # skip per-POI names (faster)
 ```
 
-It runs the same six passes as the Zones tab's "Generate zone" button
-(terrain & features → NPCs → shire dossiers & POIs → monster spawns → merge
-shires → biome histograms — `studio/tools/bake-common.mjs` is the one shared
+It runs the same five passes as the Zones tab's "Generate zone" button
+(terrain & features → NPCs → shire dossiers & POIs → merge shires → biome
+histograms — no monster-spawn pass since 2026-09-30; zone pages don't render it — `studio/tools/bake-common.mjs` is the one shared
 pass list, so the button and the CLI can never drift apart), then
 automatically regenerates the NPC static pages (`update-zone-index.mjs`) and
 the page shell (`gen_pages.mjs`) — one command leaves the whole studio
@@ -53,7 +53,7 @@ zone JSON directly at runtime, no index step of their own).
 
 Expected wall-time per pass (real multi-core machine): terrain & features a
 minute or two; **NPCs is the long one, 15–40 minutes** (the real in-game NPC
-pipeline); cities/monsters/merge/biomes a few minutes each. Budget the
+pipeline); cities/merge/biomes a few minutes each. Budget the
 better part of an hour for a whole zone.
 
 `--min <tiles>` overrides the shire-merge threshold (default 4,500,000,
@@ -62,7 +62,7 @@ matching `prerender-zone.mjs`'s own default).
 ### Community baking (in the player's browser)
 
 Since 2026-09-30 the deployed site can bake zones WITHOUT a local checkout:
-the Zones tab's "Generate zone" runs the same six passes in the visitor's
+the Zones tab's "Generate zone" runs the same five passes in the visitor's
 own browser (`studio/js/zone-bake.js` + `zone-bake-worker.js`, sharing the
 node pipeline's algorithms via `studio/js/zone-bake-core.js`) and publishes
 the manifest + map to the server (`server/src/zones.js`, R2 `zones/…`, D1

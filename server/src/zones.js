@@ -39,8 +39,10 @@ const KINDS = {                           // checkpoint kinds → R2 filename + 
   manifest: { file: "manifest.json", type: "application/json", max: 16 * 1024 * 1024 },
   map:      { file: "map.png",       type: "image/png",        max: 12 * 1024 * 1024 },
   npcs:     { file: "npcs.json",     type: "application/json", max: 10 * 1024 * 1024 },
-  monsters: { file: "monsters.json", type: "application/json", max: 10 * 1024 * 1024 },
   pages:    { file: "pages.json",    type: "application/json", max: 2 * 1024 * 1024 },
+  // the fast zoomed-out all-biomes overview, rendered & uploaded in the first
+  // minute of a bake so watchers see the zone's shape while the real bake runs
+  preview:  { file: "preview.png",   type: "image/png",        max: 4 * 1024 * 1024 },
 };
 
 const zoneOk = v => Number.isInteger(v) && Math.abs(v) <= COORD_MAX;
@@ -82,23 +84,39 @@ export async function state(req, env, url) {
   return json({ ok: true, zone: row ? pub(row) : null }, 200, { "cache-control": "no-store" });
 }
 
-// The published manifest / map image. Immutable once live, so cache hard.
+// A published artifact's cache policy. In-app loads always carry &v=<publishedAt>
+// (ZoneStore), and that content is immutable for that version → cache a year.
+// A bare request (direct deep-link, no v) gets only 60s, so a DELETED or
+// re-baked zone stops serving its stale copy within a minute instead of
+// lingering for a day (we can't purge Cloudflare's edge cache from here).
+const cacheFor = url => url.searchParams.get("v")
+  ? "public, max-age=31536000, immutable"
+  : "public, max-age=60";
+
+// The published manifest / map image.
 export async function manifest(req, env, url) {
   const c = coords(url); if (!c) return err("Bad zone coordinates.");
   const obj = await env.VAULT.get(liveKey(c.zx, c.zy, "manifest.json"));
   if (!obj) return err("Zone not baked.", 404);
   return new Response(obj.body, { headers: {
     "content-type": "application/json; charset=utf-8",
-    "cache-control": "public, max-age=86400",
+    "cache-control": cacheFor(url),
   } });
 }
 export async function mapImage(req, env, url) {
   const c = coords(url); if (!c) return err("Bad zone coordinates.");
   const obj = await env.VAULT.get(liveKey(c.zx, c.zy, "map.png"));
-  if (!obj) return err("Zone not baked.", 404);
-  return new Response(obj.body, { headers: {
+  if (obj) return new Response(obj.body, { headers: {
     "content-type": "image/png",
-    "cache-control": "public, max-age=86400",
+    "cache-control": cacheFor(url),
+  } });
+  // mid-bake: serve the zoomed-out biome overview uploaded at the start of the
+  // bake, so anyone watching the progress bar sees the zone taking shape
+  const pv = await env.VAULT.get(bakeKey(c.zx, c.zy, "preview.png"));
+  if (!pv) return err("Zone not baked.", 404);
+  return new Response(pv.body, { headers: {
+    "content-type": "image/png",
+    "cache-control": "no-store",
   } });
 }
 
@@ -219,7 +237,9 @@ export async function publish(req, env) {
   // light structural validation — same shape the static zone_<x>_<y>.json bakes have
   if (!man || !man.meta || man.meta.zx !== zx || man.meta.zy !== zy)
     return err("Manifest meta does not match this zone.", 422);
-  for (const k of ["npcs", "cities", "monsters"])
+  // monsters are optional — zone pages don't render spawn data, so bakes
+  // stopped producing it (2026-09-30); old manifests that carry it still pass
+  for (const k of ["npcs", "cities"])
     if (!Array.isArray(man[k])) return err("Manifest is missing its " + k + " pass.", 422);
   if (!man.feat || !Array.isArray(man.feat.villages)) return err("Manifest is missing its features pass.", 422);
   const mapObj = await env.VAULT.get(bakeKey(zx, zy, "map.png"));
@@ -236,9 +256,10 @@ export async function publish(req, env) {
     `UPDATE community_zones SET status = 'live', stage = 6, pct = 100, msg = 'published',
        npc_count = ?, city_count = ?, monster_count = ?, quest_count = ?, published_at = ?, updated_at = ?
      WHERE zx = ? AND zy = ?`
-  ).bind(man.npcs.length, man.cities.length, man.monsters.length, quests, t, t, zx, zy).run();
+  ).bind(man.npcs.length, man.cities.length, (man.monsters || []).length, quests, t, t, zx, zy).run();
   for (const kind of Object.values(KINDS)) await env.VAULT.delete(bakeKey(zx, zy, kind.file));
-  return json({ ok: true, npcs: man.npcs.length, cities: man.cities.length, monsters: man.monsters.length });
+  await env.VAULT.delete(bakeKey(zx, zy, "monsters.json"));   // legacy checkpoint from pre-2026-09-30 bakes
+  return json({ ok: true, npcs: man.npcs.length, cities: man.cities.length });
 }
 
 /* ---- synthesized page shells -------------------------------------------- */
