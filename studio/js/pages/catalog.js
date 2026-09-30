@@ -2155,10 +2155,20 @@ async function handleSpriteUpload(cat, fileInp, idIn) {
 function spriteCreateCard() {
   const card = el("div.card");
   card.appendChild(el("div.sectitle", null, [el("h3", null, ["Create a sprite ", el("span.hint", { text: "generate with PixelLab, or upload your own" })])]));
-  if (!Taiao.logged())
-    card.appendChild(el("div.banner.info", { html: '<a href="#/settings">Sign in</a> to generate — it tracks your in-progress generations so they survive a refresh (uploads work without signing in).' }));
-  else if (!PixelLab.hasKey())
-    card.appendChild(el("div.banner.warn", { html: 'Add your PixelLab API key in <a href="#/settings">Settings</a> to generate (uploads work without a key).' }));
+  // The prompt to sign in / add a key re-evaluates whenever auth resolves — auth
+  // lands ~300ms after boot, so a signed-in player must not be left staring at a
+  // stale "Sign in to generate" banner.
+  const notice = el("div");
+  card.appendChild(notice);
+  function refreshNotice() {
+    clear(notice);
+    if (!Taiao.logged())
+      notice.appendChild(el("div.banner.info", { html: '<a href="#/settings">Sign in</a> to generate — it tracks your in-progress generations so they survive a refresh (uploads work without signing in).' }));
+    else if (!PixelLab.hasKey())
+      notice.appendChild(el("div.banner.warn", { html: 'Add your PixelLab API key in <a href="#/settings">Settings</a> to generate (uploads work without a key).' }));
+  }
+  refreshNotice();
+  Taiao.onAuth(refreshNotice);
   card.appendChild(el("div.btn-row", { style: "flex-wrap:wrap;gap:.5rem" }, [
     el("button.btn.primary.sm", { text: "Generate new sprite with PixelLab", onclick: openUnifiedGenerateDialog }),
   ]));

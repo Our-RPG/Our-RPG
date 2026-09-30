@@ -21,10 +21,9 @@ routes = [
 
 # Weekly workshop digest — Monday 09:00 UTC (Monday evening NZT) — plus the
 # Phase-2 daily tick: rank recompute, envelope sweep, stale-stock sweep.
-# Every-minute tick advances server-side sprite generations (Phase 8); weekly
-# digest (Mon 09:00 UTC) + the Phase-2 daily tick (2:30 am NZT).
+# Weekly workshop digest (Mon 09:00 UTC) + the Phase-2 daily tick (2:30 am NZT).
 [triggers]
-crons = ["* * * * *", "0 9 * * 1", "30 14 * * *"]
+crons = ["0 9 * * 1", "30 14 * * *"]
 
 # Phase 2: one Durable Object per world region holds the shared mutation
 # ledger (node depletion, picked decor, station heat).

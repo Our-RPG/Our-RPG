@@ -295,17 +295,11 @@ const Taiao = (function () {
     return r && r.ok ? r.fields : {};
   }
 
-  // ---- generation jobs: server-driven PixelLab generation -----------------
-  // (server/src/gen.js — see js/genjobs.js). Phase 8: the SERVER now runs the
-  // whole PixelLab pipeline with the player's stored key (see PixelLab key
-  // endpoints below), so a sprite finishes and lands in the gallery even with
-  // the tab closed, and syncs wherever the player logs in. genRequest kicks one
-  // off; genMine/genJob read the durable board. (genStart/progress/complete/fail
-  // are the older client-driven path, kept for compatibility.)
-  async function genRequest(jobMeta) {
-    if (!logged()) return { error: "Sign in to generate." };
-    return call("/api/gen/request", { body: jobMeta });
-  }
+  // ---- generation jobs: a durable status board for PixelLab generations ---
+  // (server/src/gen.js — see js/genjobs.js). The server never talks to PixelLab
+  // and never sees the key: the browser runs the generation with the player's
+  // local key; this just tracks start/progress/complete/fail so an in-flight
+  // generation survives a hard refresh (recovered by genjobs' reconcile pass).
   async function genStart(jobMeta) {
     if (!logged()) return { error: "Sign in to generate." };
     return call("/api/gen/start", { body: jobMeta });
@@ -323,18 +317,6 @@ const Taiao = (function () {
     return r && r.ok ? r.job : null;
   }
   const genDelete = id => call("/api/gen/delete", { body: { id: Number(id) } });
-
-  // ---- stored PixelLab key: lets the server generate on your behalf --------
-  // (server/src/secrets.js). Saved encrypted server-side; only a set/masked hint
-  // ever comes back. Uploaded from Settings alongside the browser-local copy the
-  // Profile page still uses to LIST your PixelLab account history.
-  const savePixellabKey = key => call("/api/pixellab/key", { body: { key } });
-  async function pixellabKeyStatus() {
-    if (!logged()) return { set: false };
-    const r = await call("/api/pixellab/key");
-    return r && r.ok ? r : { set: false };
-  }
-  const deletePixellabKey = () => call("/api/pixellab/key/delete", { body: {} });
 
   // ---- private PixelLab gallery: the contributor's own shelf ---------------
   // (server/src/profile.js). Once a PixelLab key is signed in, the Profile page
@@ -407,8 +389,7 @@ const Taiao = (function () {
     endorseCostume, flagCostume, voteCostume, tally,
     castVote, myVote,
     curator, listMine, pendingQueue, review,
-    genRequest, genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
-    savePixellabKey, pixellabKeyStatus, deletePixellabKey,
+    genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
     galleryAdd, galleryMine, galleryItem, galleryDelete,
     publishSprite, listPublishedSprites, publishedSpriteItem,
   };

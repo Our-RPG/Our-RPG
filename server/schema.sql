@@ -243,22 +243,10 @@ CREATE TABLE IF NOT EXISTS gen_jobs (
   pixellab_ref  TEXT,                                 -- characterId or background_job_id, once known (resumable kinds only)
   status        TEXT NOT NULL DEFAULT 'generating',   -- generating|completed|failed|deleted
   error         TEXT,
-  driver        TEXT NOT NULL DEFAULT 'client',       -- 'server' = advanced by the every-minute cron poller (Phase 8)
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gen_jobs_user ON gen_jobs(user_id, status, created_at);
-
--- ============================== Phase 8 ====================================
--- Server-side sprite generation. The PixelLab key moves from browser-only to
--- stored-here (encrypted with the PIXELLAB_ENC_KEY worker secret), so the server
--- can drive the whole PixelLab pipeline — create, poll, download, add to the
--- gallery — independent of the player's browser. Plaintext is never stored.
-CREATE TABLE IF NOT EXISTS user_secrets (
-  user_id          INTEGER PRIMARY KEY REFERENCES users(id),
-  pixellab_key_enc TEXT,                               -- "base64(iv):base64(ciphertext)"; null once cleared
-  updated_at       INTEGER NOT NULL
-);
 
 -- ============================== Phase 7 ====================================
 -- The contributor's private PixelLab gallery. Once a PixelLab key is signed

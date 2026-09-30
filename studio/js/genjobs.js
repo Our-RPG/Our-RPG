@@ -44,27 +44,75 @@ const GenJobs = (function () {
   // ------------------------------------------------------------- execution
   // jobMeta: { spriteType, spriteId, label, subject?, prompt, pixellabKind,
   //            bodyType?, seed?, view?, size?, template?, reference?, negative? }
-  // Phase 8: the SERVER runs the whole PixelLab pipeline with the player's stored
-  // key and auto-adds the finished sprite to their gallery. execute() just kicks
-  // it off and returns the job id; the board polls until it finishes — even
-  // across a hard refresh, or from another device. The old second `_pixellabFn`
-  // argument (the client-side generator) is accepted-but-ignored so the existing
-  // call sites keep working unchanged.
-  async function execute(jobMeta, _pixellabFn) {
-    const r = await Taiao.genRequest(jobMeta);
-    if (!r || !r.ok) throw new Error((r && r.error) || "Couldn't start the generation.");
-    notifyBoards();
-    return r.id;
+  // The generation runs CLIENT-side with the player's own key (which never leaves
+  // this browser). The server only remembers that a job is in progress + its
+  // recipe (Taiao.genStart) so a card survives a refresh; on completion the
+  // finished sprite is added to the player's gallery. If the tab is closed before
+  // completion, reconcilePending() (below) recovers the result after a refresh by
+  // matching the PixelLab account's recent generations against this metadata.
+  async function execute(jobMeta) {
+    const startRes = await Taiao.genStart(jobMeta);
+    if (!startRes || !startRes.ok) throw new Error((startRes && startRes.error) || "Couldn't start the generation.");
+    const jobId = startRes.id;
+    inFlight.add(jobId); notifyBoards();
+    try {
+      const result = await runPixellab(jobMeta, ref => { Taiao.genProgress(jobId, ref); });
+      await Taiao.genComplete(jobId, result);
+      resultCache.set(jobId, result);
+      try { await addToGallery(jobId, jobMeta, result); } catch (_) {}
+      return jobId;
+    } catch (e) {
+      await Taiao.genFail(jobId, e && e.message || String(e));
+      throw e;
+    } finally {
+      inFlight.delete(jobId); notifyBoards();
+    }
   }
 
-  // spriteType (character|monster|object|ui) → gallery category. Kept for callers
-  // that still map a type to a gallery bucket.
+  // The actual PixelLab call for a recipe, built from jobMeta (so every call site
+  // passes the same shape). onRef fires with the resumable id (character id /
+  // background job id) as soon as it's known, so genProgress can persist it.
+  function runPixellab(meta, onRef) {
+    const kind = meta.pixellabKind, desc = meta.prompt;
+    const view = meta.view || "high top-down";
+    const size = meta.size || (kind === "object1" ? 32 : kind === "image" ? 64 : 128);
+    const seed = meta.seed, reference = meta.reference, template = meta.template || "mannequin";
+    if (kind === "character") return PixelLab.createCharacter({ description: desc, view, size, template, seed, reference, onRef }).then(r => ({ dirs: r.dirs }));
+    if (kind === "object8") return PixelLab.createObject8({ description: desc, view, size, seed, reference, onRef }).then(r => ({ dirs: r.dirs }));
+    if (kind === "object1") return PixelLab.createObject1({ description: desc, view, size, seed }).then(src => ({ image: src }));
+    return PixelLab.generateImage({ description: desc, view, size, reference }).then(src => ({ image: src }));
+  }
+
+  // spriteType (character|monster|object|ui) → gallery category.
   function galleryCategoryFor(spriteType) { return spriteType === "ui" ? "item" : (spriteType || "object"); }
 
-  // Regenerate from a gallery item: request a FRESH server-side generation with
-  // the same recipe. A new job → a new gallery row once it finishes; the original
-  // item is untouched. Library-pinned items store pixellab_kind as
-  // character|object; map object→object8 so it regenerates as a rotatable object.
+  // Every completed generation is auto-added to the profile gallery, keyed by
+  // "job:<genJobId>" so each generation (incl. a regenerate) is its own row and
+  // a re-run of the same job never duplicates.
+  async function addToGallery(jobId, meta, result) {
+    const dirs = result && result.dirs, image = result && result.image;
+    const thumb = image || (dirs && (dirs.south || Object.values(dirs)[0])) || "";
+    if (!thumb) return;
+    return Taiao.galleryAdd({
+      category: galleryCategoryFor(meta.spriteType),
+      pixellabKind: meta.pixellabKind,
+      pixellabId: "job:" + jobId,
+      spriteId: meta.spriteId,
+      subject: meta.subject || null,
+      name: meta.label || meta.spriteId,
+      prompt: meta.prompt,
+      bodyType: meta.bodyType || null,
+      seed: meta.seed != null && meta.seed !== "" ? String(meta.seed) : null,
+      createdAt: Date.now(),
+      thumb,
+      result: dirs ? { dirs } : { image },
+    });
+  }
+
+  // Regenerate from a gallery item: a FRESH client generation with the same
+  // recipe → a new job → a new gallery row once it finishes; the original is
+  // untouched. Library-pinned items store pixellab_kind as character|object; map
+  // object→object8 so it regenerates as a rotatable object.
   const regenKind = k => (k === "object" ? "object8" : (k || "image"));
   async function regenerateFromGallery(item) {
     const spriteType = item.category === "item" ? "ui" : (item.category || "object");
@@ -170,7 +218,6 @@ const GenJobs = (function () {
   // server's own staleness timeout (gen.js `mine`) to eventually fail.
   async function resumeOne(row) {
     if (row.status !== "generating" || inFlight.has(row.id) || resuming.has(row.id)) return;
-    if (row.driver === "server") return;   // Phase 8: the cron poller owns these — never client-poll them
     if (!row.pixellab_ref || (row.pixellab_kind !== "character" && row.pixellab_kind !== "object8")) return;
     if (!PixelLab.hasKey()) return;   // this browser can't resume without the key
     resuming.add(row.id);
@@ -188,6 +235,58 @@ const GenJobs = (function () {
     }
   }
   function resumePending(rows) { rows.forEach(resumeOne); }
+
+  // ------------------------------------------------------ refresh reconcile
+  // The server only knows a job is in progress (+ its prompt/kind). After a hard
+  // refresh — where the tab may have been closed through completion — we use the
+  // LOCAL key to pull the PixelLab account's recent generations and match them to
+  // pending jobs: same kind + identical prompt, generated at/after the job began.
+  // A match's art is downloaded, the job completed, and the sprite added to the
+  // gallery. This recovers generations without the key ever touching the server.
+  // (Single-image "image" kind isn't in any PixelLab list, so it can't be
+  // recovered this way — only characters and objects.)
+  const ts = it => (typeof it.created_at === "number" ? it.created_at : (Date.parse(it.created_at || "") || 0));
+  let reconcileBusy = false, reconcileAt = 0;
+  async function reconcilePending(rows) {
+    const pending = (rows || []).filter(r => r.status === "generating" && !inFlight.has(r.id) && !resuming.has(r.id));
+    if (!pending.length || !PixelLab.hasKey()) return;
+    // Precise path first: jobs that saved a resumable ref before the refresh.
+    pending.forEach(r => { if (r.pixellab_ref) resumeOne(r); });
+    const refless = pending.filter(r => !r.pixellab_ref && r.pixellab_kind !== "image");
+    if (!refless.length) return;
+    if (reconcileBusy || Date.now() - reconcileAt < 6000) return;   // throttle the history pulls
+    reconcileBusy = true; reconcileAt = Date.now();
+    try {
+      let chars = [], objs = [];
+      const needChars = refless.some(r => r.pixellab_kind === "character");
+      const needObjs = refless.some(r => r.pixellab_kind === "object8" || r.pixellab_kind === "object1");
+      if (needChars) { try { chars = (await PixelLab.listCharacters()).items || []; } catch (_) {} }
+      if (needObjs) { try { objs = (await PixelLab.listObjects()).items || []; } catch (_) {} }
+      const used = new Set();
+      for (const r of refless) {
+        if (resuming.has(r.id) || inFlight.has(r.id)) continue;
+        const isChar = r.pixellab_kind === "character";
+        const list = isChar ? chars : objs, tag = isChar ? "c" : "o";
+        const want = String(r.prompt || "").trim();
+        const match = list
+          .map(it => ({ id: String(it.id || it.character_id || it.object_id || ""), p: String(it.prompt || it.description || "").trim(), t: ts(it) }))
+          .filter(x => x.id && !used.has(tag + x.id) && x.p === want && x.t >= (r.created_at - 120000))
+          .sort((a, b) => b.t - a.t)[0];
+        if (!match) continue;
+        used.add(tag + match.id);
+        resuming.add(r.id);
+        try {
+          const dirs = isChar ? await PixelLab.characterArt(match.id) : await PixelLab.objectArt(match.id);
+          if (dirs && Object.keys(dirs).length) {
+            const result = { dirs };
+            await Taiao.genComplete(r.id, result);
+            resultCache.set(r.id, result);
+            try { await addToGallery(r.id, jobMetaFromRow(r), result); } catch (_) {}
+          }
+        } catch (_) {} finally { resuming.delete(r.id); }
+      }
+    } finally { reconcileBusy = false; notifyBoards(); }
+  }
 
   // ----------------------------------------------------------------- board
   const TYPE_ICON = { character: "🧑", monster: "👹", object: "📦", ui: "🏷" };
@@ -292,7 +391,7 @@ const GenJobs = (function () {
       let jobs = [];
       try { jobs = await Taiao.genMine(); } catch (_) {}
       if (opts.subject) jobs = jobs.filter(j => j.subject === opts.subject);
-      resumePending(jobs.filter(j => j.status === "generating"));
+      reconcilePending(jobs);   // resume ref'd jobs + history-match the rest (recovers work finished while away)
       await renderBoard(container, jobs, opts);
       const anyGenerating = jobs.some(j => j.status === "generating");
       if (anyGenerating && !timer) timer = setInterval(refresh, 4000);
@@ -304,5 +403,5 @@ const GenJobs = (function () {
     return refresh;
   }
 
-  return { suggest, execute, mountBoard, resumePending, uploadToGame, setReference, regenerateFromGallery, galleryCategoryFor };
+  return { suggest, execute, mountBoard, resumePending, reconcilePending, uploadToGame, setReference, regenerateFromGallery, galleryCategoryFor };
 })();
