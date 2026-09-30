@@ -58,8 +58,10 @@ function growSettlement(opts) {
     for (let x = 0; x < N; x++) {
       const wx = ox + x, wy = oy + y;
       const dx = wx - cx, dy = wy - cy;
-      // square bound — the city wall ring is Chebyshev (|dx|==R), gates on axes
-      cls[y * N + x] = (Math.max(Math.abs(dx), Math.abs(dy)) > R - 3) ? edgeCls
+      // rectangular bound — the wall box is |dx|<=R, |dy|<=R-insetY (wide
+      // cities pull both y walls in); every room stays inside it
+      cls[y * N + x] = (Math.abs(dx) > R - 3 ||
+                        Math.abs(dy) > R - 3 - (opts.insetY || 0)) ? edgeCls
         : tileClass(wx, wy);
     }
 

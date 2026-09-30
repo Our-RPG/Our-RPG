@@ -1244,24 +1244,28 @@ function createWorldChunks(ctx) {
     };
     for (const v of villages) {
       // city wall ring (stone) with gates on the cross roads
+      // walls may be a RECTANGLE: Ry is the y half-extent (Newhaven pulls
+      // both y walls 25 tiles in); ordinary cities have Ry === R
+      const vRy = v.Ry != null ? v.Ry : v.R;
       if (v.wall) {
         const R = v.R;
-        // pave the entire interior with stone flags, block vegetation
+        // the interior keeps its natural BIOME ground (no city paving) but
+        // stays clear of vegetation: the sentinel alone, never the tile —
+        // trees in a 2-wide alley would seal streets the growth engine
+        // proved open
         for (let y = by; y < by + CHUNK; y++)
           for (let x = bx; x < bx + CHUNK; x++) {
             const dx = x - v.x, dy = y - v.y;
-            if (Math.abs(dx) < R && Math.abs(dy) < R && !isW(x, y)) {
-              ground[li(x, y)] = "floor_stone";
-              if (!blocked[li(x, y)]) blocked[li(x, y)] = 2; // sentinel: no vegetation on paving
-            }
+            if (Math.abs(dx) < R && Math.abs(dy) < vRy && !isW(x, y) &&
+                !blocked[li(x, y)]) blocked[li(x, y)] = 2;
           }
         // stone wall ring with gates where roads cross
         for (let y = by; y < by + CHUNK; y++)
           for (let x = bx; x < bx + CHUNK; x++) {
             const dx = x - v.x, dy = y - v.y;
-            const onVert = Math.abs(dx) === R && Math.abs(dy) < R;
-            const onHorz = Math.abs(dy) === R && Math.abs(dx) < R;
-            const onCorner = Math.abs(dx) === R && Math.abs(dy) === R;
+            const onVert = Math.abs(dx) === R && Math.abs(dy) < vRy;
+            const onHorz = Math.abs(dy) === vRy && Math.abs(dx) < R;
+            const onCorner = Math.abs(dx) === R && Math.abs(dy) === vRy;
             // never wall over a bridge deck (the road bridging a river through
             // the ring) — gatesForVillage puts a gate on the crossing instead
             if ((onVert || onHorz || onCorner) && Math.abs(dx) > 2 && Math.abs(dy) > 2 && !isW(x, y) &&
@@ -1272,28 +1276,21 @@ function createWorldChunks(ctx) {
             }
           }
       }
-      // plaza + cross roads (dirt paths for non-walled villages, already stone for walled)
+      // plaza + dirt cross roads for EVERY settlement (walled cities keep
+      // biome ground now, so their arteries are worn dirt paths too)
       for (let y = by; y < by + CHUNK; y++)
         for (let x = bx; x < bx + CHUNK; x++) {
           const dx = x - v.x, dy = y - v.y;
-          if (!v.wall) {
-            if (Math.abs(dx) <= 1 || Math.abs(dy) <= 1) {
-              if (Math.max(Math.abs(dx), Math.abs(dy)) < v.R && !isW(x, y) && !decor[li(x, y)]) {
-                ground[li(x, y)] = "dirt#1";
-                blocked[li(x, y)] = 0;
-              }
-            }
-            if (dx * dx + dy * dy < 9 && !isW(x, y)) {
+          if (Math.abs(dx) <= 1 || Math.abs(dy) <= 1) {
+            if (Math.abs(dx) < v.R && Math.abs(dy) < vRy && !isW(x, y) && !decor[li(x, y)]) {
               ground[li(x, y)] = "dirt#1";
-              decor[li(x, y)] = null;
               blocked[li(x, y)] = 0;
             }
-          } else {
-            // walled city: clear the road corridor and plaza decor
-            if ((Math.abs(dx) <= 1 || Math.abs(dy) <= 1 || dx * dx + dy * dy < 9) && !isW(x, y)) {
-              decor[li(x, y)] = null;
-              blocked[li(x, y)] = 2;
-            }
+          }
+          if (dx * dx + dy * dy < 9 && !isW(x, y)) {
+            ground[li(x, y)] = "dirt#1";
+            decor[li(x, y)] = null;
+            blocked[li(x, y)] = 0;
           }
         }
       // Secondary city streets: paint the block-grid roads between buildings

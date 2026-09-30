@@ -4524,7 +4524,7 @@ void main() {
 
   // --- walled city ring structure ---
   function buildVillageStruct(v) {
-    const R = v.R, cx = v.x, cz = v.y;
+    const R = v.R, Ry = v.Ry != null ? v.Ry : v.R, cx = v.x, cz = v.y; // rectangular ring (Newhaven)
     const group = new THREE.Group();
     const rec = { group, geoms: [], storeyGroups: [], slabs: [], roofGroup: null, doors: [], v,
       vols: [], cx, cz };
@@ -4557,7 +4557,7 @@ void main() {
       if (capB !== false) sbWallFace(sb, "wall_stone", horiz ? ox1 : ox0, horiz ? oz0 : oz1, ox1, oz1, capY(capB), yT, horiz ? SH_E : SH_S);
       sbFloor(sb, "floor_stone", ox0, oz0, ox1, oz1, yT); // walkway deck
       if (horiz) {
-        const outerN = tz0 === cz - R;
+        const outerN = tz0 === cz - Ry;
         sbMerlons(fb, ox0, outerN ? oz0 : oz1, ox1, outerN ? oz0 : oz1, yT, !outerN);
       } else {
         const outerW = tx0 === cx - R;
@@ -4570,18 +4570,19 @@ void main() {
     // corners are separate turrets). Each span is then split into sub-runs of
     // equal terrain lift so the walkway steps along like terraces.
     const bridged = (x, y) => (world.getDecor(x, y) || "").startsWith("stone_bridge");
-    const turretAt = (sx, sz) => !wat(cx + sx * R, cz + sz * R);
+    const turretAt = (sx, sz) => !wat(cx + sx * R, cz + sz * Ry);
     const spans = (fixed, isRow) => {
       let a = null;
-      for (let d = -R + 1; d <= R - 1; d++) {
+      const lim = isRow ? R : Ry; // rows run the full width; columns span |dy| < Ry
+      for (let d = -lim + 1; d <= lim - 1; d++) {
         const tx = isRow ? cx + d : fixed, tz = isRow ? fixed : cz + d;
         const wall = Math.abs(d) > 2 && !wat(tx, tz) && !bridged(tx, tz);
         if (wall && a === null) a = d;
-        if ((!wall || d === R - 1) && a !== null) {
-          const b2 = wall && d === R - 1 ? d : d - 1;
+        if ((!wall || d === lim - 1) && a !== null) {
+          const b2 = wall && d === lim - 1 ? d : d - 1;
           const sFix = isRow ? Math.sign(fixed - cz) : Math.sign(fixed - cx);
-          const capA = !(a === -R + 1 && (isRow ? turretAt(-1, sFix) : turretAt(sFix, -1)));
-          const capB = !(b2 === R - 1 && (isRow ? turretAt(1, sFix) : turretAt(sFix, 1)));
+          const capA = !(a === -lim + 1 && (isRow ? turretAt(-1, sFix) : turretAt(sFix, -1)));
+          const capB = !(b2 === lim - 1 && (isRow ? turretAt(1, sFix) : turretAt(sFix, 1)));
           const lifts = [];
           for (let d2 = a; d2 <= b2; d2++)
             lifts.push(lift(isRow ? cx + d2 : fixed, isRow ? fixed : cz + d2));
@@ -4602,13 +4603,13 @@ void main() {
         }
       }
     };
-    spans(cz - R, true);
-    spans(cz + R, true);
+    spans(cz - Ry, true);
+    spans(cz + Ry, true);
     spans(cx - R, false);
     spans(cx + R, false);
     // corner turrets (their tops ride the local terrain lift too)
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const tx = cx + sx * R, tz = cz + sz * R;
+      const tx = cx + sx * R, tz = cz + sz * Ry;
       if (wat(tx, tz)) continue;
       const T = H + 0.7 + lift(tx, tz);
       sbWallFace(sb, "wall_stone", tx, tz, tx + 1, tz, WB, T, SH_N);

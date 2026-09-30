@@ -1268,24 +1268,11 @@ function createWorldMap(ctx) {
     const pathCss=`rgb(${MAP_PATH.join(',')})`;
     for(const v of villages) {
       const ox=(v.x-baseX)*TILE, oy=(v.y-baseY)*TILE;
-      // walled city: the whole interior is stone flags in the world (chunks.js
-      // paves Chebyshev < R), so the map shows the same — otherwise the empty
-      // quarters read as a bare hillshaded-grass gradient instead of city ground
-      if(v.kind==='city'&&v.wall) {
-        const x0=Math.max(0,(v.x-v.R-baseX)), x1=Math.min(CS,(v.x+v.R-baseX));
-        const y0=Math.max(0,(v.y-v.R-baseY)), y1=Math.min(CS,(v.y+v.R-baseY));
-        for(let ty=Math.floor(y0); ty<y1; ty++)
-          for(let tx=Math.floor(x0); tx<x1; tx++) {
-            const i=G(tx,ty);
-            if(waterAt(i)) continue;             // ponds/rivers stay visible
-            const wx=baseX+tx, wy=baseY+ty;
-            const j=(rand2(wx,wy,S^0xf1a6)-0.5)*14;
-            ctx.fillStyle=`rgb(${(150+j)|0},${(148+j)|0},${(140+j)|0})`;
-            ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
-          }
-      }
+      // (city interiors keep their biome ground on the map too — the world
+      // no longer paves them; buildings + paths carry the city read)
+      const vRy=v.Ry!=null?v.Ry:v.R;
       if(v.kind==='city') {
-        const Rpx=v.R*TILE;
+        const Rpx=v.R*TILE, RyPx=vRy*TILE;
         ctx.fillStyle=pathCss;
         if(v.layout===1) {
           ctx.strokeStyle=pathCss; ctx.lineWidth=TILE*2;
@@ -1296,7 +1283,7 @@ function createWorldMap(ctx) {
           for(const dx of [-off,0,off]) ctx.fillRect(ox+dx-TILE,oy-Rpx,TILE*2,Rpx*2);
           ctx.fillRect(ox-Rpx,oy-TILE,Rpx*2,TILE*2);
         } else {
-          ctx.fillRect(ox-TILE,oy-Rpx,TILE*2,Rpx*2);
+          ctx.fillRect(ox-TILE,oy-RyPx,TILE*2,RyPx*2);
           ctx.fillRect(ox-Rpx,oy-TILE,Rpx*2,TILE*2);
         }
         if(!v.keep) ctx.fillRect(ox-TILE*4,oy-TILE*4,TILE*8,TILE*8);
@@ -1364,11 +1351,11 @@ function createWorldMap(ctx) {
         }
       }
       if(v.kind==='city'&&v.wall) {
-        const Rpx=v.R*TILE, gate=TILE*2.5;
+        const Rpx=v.R*TILE, RyPx=vRy*TILE, gate=TILE*2.5;
         const segs=[];
         for(const s of [-1,1]) {
-          segs.push([ox-Rpx,oy+s*Rpx,ox-gate,oy+s*Rpx],[ox+gate,oy+s*Rpx,ox+Rpx,oy+s*Rpx]);
-          segs.push([ox+s*Rpx,oy-Rpx,ox+s*Rpx,oy-gate],[ox+s*Rpx,oy+gate,ox+s*Rpx,oy+Rpx]);
+          segs.push([ox-Rpx,oy+s*RyPx,ox-gate,oy+s*RyPx],[ox+gate,oy+s*RyPx,ox+Rpx,oy+s*RyPx]);
+          segs.push([ox+s*Rpx,oy-RyPx,ox+s*Rpx,oy-gate],[ox+s*Rpx,oy+gate,ox+s*Rpx,oy+RyPx]);
         }
         for(const [w,c] of [[TILE*1.5,'#35322a'],[TILE*0.8,'#85816f']]) {
           ctx.strokeStyle=c; ctx.lineWidth=w; ctx.lineCap='butt';
@@ -1376,8 +1363,8 @@ function createWorldMap(ctx) {
         }
         ctx.fillStyle='#85816f'; ctx.strokeStyle='#35322a'; ctx.lineWidth=1.5;
         for(const sx of [-1,1]) for(const sy of [-1,1]) {
-          ctx.fillRect(ox+sx*Rpx-TILE*1.5,oy+sy*Rpx-TILE*1.5,TILE*3,TILE*3);
-          ctx.strokeRect(ox+sx*Rpx-TILE*1.5,oy+sy*Rpx-TILE*1.5,TILE*3,TILE*3);
+          ctx.fillRect(ox+sx*Rpx-TILE*1.5,oy+sy*RyPx-TILE*1.5,TILE*3,TILE*3);
+          ctx.strokeRect(ox+sx*Rpx-TILE*1.5,oy+sy*RyPx-TILE*1.5,TILE*3,TILE*3);
         }
       }
       if(v.well) {

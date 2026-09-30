@@ -282,13 +282,13 @@ function createWorldFeatures(ctx) {
     return 1 + Math.max(0, e - 0.60) * 2.2;
   }
   function cityGates(v) {
-    const R = v.R + 2;
+    const R = v.R + 2, Ry = (v.Ry != null ? v.Ry : v.R) + 2; // map coords
     if (v.layout === 1) {
       const d = R * 0.75;
       return [[v.x - d, v.y - d], [v.x + d, v.y + d],
               [v.x - d, v.y + d], [v.x + d, v.y - d]];
     }
-    return [[v.x - R, v.y], [v.x + R, v.y], [v.x, v.y - R], [v.x, v.y + R]];
+    return [[v.x - R, v.y], [v.x + R, v.y], [v.x, v.y - Ry], [v.x, v.y + Ry]];
   }
   function roadAnchor(v, ox, oy) {
     if (v.kind !== "city") return [v.x, v.y];
@@ -796,69 +796,59 @@ function createWorldFeatures(ctx) {
 
   // ---------- settlements (port; Newhaven fixed at origin) ----------
   const NAME_A = [
-    "Ask","Asken","Aak","Aaken","Beork","Beorken","Beam","Lind","Thorn","Thyrn",
-    "Hasel","Alm","Eeow","Iiw","Eorth","Fearn","Riied","Reod","Braar","Braambel",
-    "Gors","Gras","Moos","Mistel","Wudu","Wudan","Holt","Bearu","Skeaga","Weald",
-    "Wold","Moor","Moores","Haath","Haathen","Fenn","Fennes","Mersk","Merskes","Mere",
-    "Meres","Saa","Saas","Ea","Ean","Burna","Burnan","Brook","Brookes","Stream",
-    "Water","Wateres","Ford","Fordes","Brykug","Brykuges","Weg","Weges","Diik",
-    "Diikes","Geat","Geates","Meark","Mearkes","Gemaare","Staan","Staanes","Klif",
-    "Klifes","Krag","Karr","Duun","Duunes","Beorg","Beorges","Hlaaw","Hlaawes","Hooh",
-    "Hoohes","Harykug","Harykuges","Denu","Dene","Dal","Kumb","Kumbes","Nas","Nases",
-    "Oora","Ooran","Eeg","Eeges","Land","Londes","Aker","Akeres","Kroft","Kroftes",
-    "Kot","Kotes","Haga","Hagan","Tuun","Tuunes","Haam","Haames","Burh","Burges",
-    "Kaster","Kastres","Stede","Stedes","Stoow","Stoowes","Wiik","Wiikes","Heall",
-    "Healle","Mynster","Mynstres","Eald","Ield","Niiwe","Niwe","East","Easter","West","Wester","North","Norther",
-    "Suuth","Suuther","Middel","Upp","Nider","Heah","Hean","Laag","Lag","Lagen",
-    "Braad","Braadan","Smal","Smale","Deop","Deopan","Keald","Kealden","Haat","Haaten",
-    "Hwiit","Hwiitan","Blak","Blakan","Sweart","Sweartan","Greene","Greenan","Bruun",
-    "Bruunan","Read","Readan","Graag","Graagan","Fealu","Fager","Beorht","Torht",
-    "Dimm","Dyrne","Wiid","Wiidan","Mikel","Lyytel","Lyytilan","Maare","Maaran",
-    "Freorig","Skeort","Skearp","Heard","Sooft","Stille","Wild","Wilde","Ruuh",
-    "Ruugan","Smook","Smookan","Wulf","Wulfes","Harafn","Harafnes","Beorn","Beornes","Eofor","Eofores","Hors",
-    "Horses","Hart","Heortes","Hind","Hinde","Kuu","Kuuan","Ox","Oxan","Skeap",
-    "Skeapes","Gaat","Gaates","Fox","Foxes","Hara","Haran","Bera","Beran","Otter",
-    "Otteres","Wyrm","Wyrmes","Snaka","Snakan","Naadre","Naadran","Fisk","Fiskes",
-    "Hafok","Hafokes","Earn","Earnes","Swan","Swanes","Goos","Gooses","Harook",
-    "Harookes","Kulfre","Kulfran","Dufe","Dufan","Beo","Beon","Myyra","Myyran",
-    "Frosk","Froskes","Athel","Athelrad","Alf","Alfrad","Alfred","Ead","Eadgar","Eadmund","Eadwine",
-    "Eadrik","Eadbald","Eadweard","Os","Osgaar","Oswine","Osweald","Wiig","Wiiges",
-    "Wiigmund","Wiigstan","Sig","Sige","Siges","Sigerik","Sigewulf","Here",
-    "Heremund","Hereward","Hild","Hilde","Mild","Keol","Keoles","Keolwulf",
-    "Ken","Keen","Kenred","Kyne","Kynewulf","Kynig","Kween","Kwen","God","Godes",
-    "Godrik","Godwine","Leof","Leofes","Leofwine","Leofrik","Wynn","Wyn","Wynes",
-    "Frith","Frith","Frithes","Gar","Gaares","Alla","Allan","Offa","Offan","Penda",
-    "Pendan","Kad","Kades","Kuth","Kuuth","Kuuthared","Dun","Dunn","Dunnan","Hegest",
-    "Hegestes","Horsa","Horsan","Sax","Saxes","Saxan","Theod","Theodes",
-    "Theodrik","Harood","Haroodgar","Harodwulf","Raad","Raades","Maar","Maares","Wald",
-    "Wealdes",
+    "Aba","Ada","Afa","Aga","Aha","Aka","Ala","Ama","Ana","Apa","Ara","Asa","Ata","Ava","Awa","Aya",
+    "Abe","Ade","Afe","Age","Ake","Ale","Ame","Ane","Ape","Are","Ase","Ate","Ave","Awe",
+    "Abi","Adi","Afi","Agi","Ahi","Aki","Ali","Ami","Ani","Api","Ari","Asi","Ati","Avi",
+    "Abo","Ado","Afo","Ago","Aho","Ako","Alo","Amo","Ano","Apo","Aro","Aso","Ato","Avo",
+    "Abu","Adu","Afu","Agu","Ahu","Aku","Alu","Amu","Anu","Apu","Aru","Asu","Atu","Avu",
+    "Ba","Be","Bi","Bo","Bu",
+    "Da","De","Di","Do","Du",
+    "Fa","Fe","Fi","Fo","Fu",
+    "Ga","Ge","Gi","Go","Gu",
+    "Ha","He","Hi","Ho","Hu",
+    "Ka","Ke","Ki","Ko","Ku",
+    "La","Le","Li","Lo","Lu",
+    "Ma","Me","Mi","Mo","Mu",
+    "Na","Ne","Ni","No","Nu",
+    "Pa","Pe","Pi","Po","Pu",
+    "Ra","Re","Ri","Ro","Ru",
+    "Sa","Se","Si","So","Su",
+    "Ta","Te","Ti","To","Tu",
+    "Va","Ve","Vi","Vo","Vu",
+    "Wa","We","Wi","Wo",
+    "Ya","Ye","Yi","Yo",
+    "Za","Ze","Zi","Zo",
+    "Bal","Ban","Bar","Bat","Bel","Ben","Ber","Bet","Bil","Bin","Bir","Bol","Bon","Bor",
+    "Dal","Dan","Dar","Dat","Del","Den","Der","Det","Dil","Din","Dir","Dol","Don","Dor",
+    "Fal","Fan","Far","Fat","Fel","Fen","Fer","Fet","Fil","Fin","Fir","Fol","Fon","For",
+    "Gal","Gan","Gar","Gat","Gel","Gen","Ger","Get","Gil","Gin","Gir","Gol","Gon","Gor",
+    "Hal","Han","Har","Hat","Hel","Hen","Her","Het","Hil","Hin","Hir","Hol","Hon","Hor",
+    "Kal","Kan","Kar","Kat","Kel","Ken","Ker","Ket","Kil","Kin","Kir","Kol","Kon","Kor",
+    "Lal","Lan","Lar","Lat","Lel","Len","Ler","Let","Lil","Lin","Lir","Lol","Lon","Lor",
+    "Mal","Man","Mar","Mat","Mel","Men","Mer","Met","Mil","Min","Mir","Mol","Mon","Mor",
+    "Nal","Nan","Nar","Nat","Nel","Nen","Ner","Net","Nil","Nin","Nir","Nol","Non","Nor",
+    "Pal","Pan","Par","Pat","Pel","Pen","Per","Pet","Pil","Pin","Pir","Pol","Pon","Por",
+    "Ral","Ran","Rar","Rat","Rel","Ren","Rer","Ret","Ril","Rin","Rir","Rol","Ron","Ror",
+    "Sal","San","Sar","Sat","Sel","Sen","Ser","Set","Sil","Sin","Sir","Sol","Son","Sor",
+    "Tal","Tan","Tar","Tat","Tel","Ten","Ter","Tet","Til","Tin","Tir","Tol","Ton","Tor",
+    "Val","Van","Var","Vat","Vel","Ven","Ver","Vet","Vil","Vin","Vir","Vol","Von","Vor",
   ];
   const NAME_B = [
-    "haam","haame","haamstede","haamtuun","tuun","tuune","tuunstede","tuunhaam",
-    "worth","weorth","worth","worthig","leah","leage","lea","leahstede",
-    "hyrst","hyrste","burh","burg","byrig","burhstede","keaster","kaster",
-    "brykug","brykuge","ford","forda","wiik","wiike","wik","stede","stedeham",
-    "stoow","stoowe","denu","dene","dal","dale","duun","duune","kumb","kumbe",
-    "mere","maare","wella","wiella","wyll","wylla","burna","burne","brook","brooke",
-    "ea","ean","stream","streame","laku","lakan","siik","siike","pyll","pol","flood",
-    "feld","felde","aker","akere","land","lond","londe","wudu","wuda","weald",
-    "wealde","wold","holt","holte","bearu","bearwe","skeaga","skeage","graaf",
-    "graf","graf","krofte","kroft","haga","hagan","haath","haathe","moor","moore",
-    "mersk","merske","fenn","fenne","riied","reod","mos","moos","harykug","harykuge",
-    "klif","klife","beorg","beorge","hlaaw","hlaawe","hooh","hoohe","hyll","hylle",
-    "hlink","hlinke","slad","slade","nas","nasse","oora","ooran","eeg","eege","iieg",
-    "iiege","skeat","skeate","snad","stybb","stybbes","kot","kote","arn","erne",
-    "heall","healle","sele","huus","hus","mynster","minster","kirike","kirikan",
-    "geat","geat","gate","weg","wege","pad","path","raad","raade","straat","straate",
-    "diik","diike","dik","geard","gearde","weall","wealle","meark","mearke","gemaare",
-    "setil","setile","sate","thorp","tharop","mylne","mylene","port","porte","wikstoow",
-    "keapstoow","keapwiik","haam","tuun","worth","weorth","leah","hyrst","burh","burg","kaster","keaster",
-    "wiik","stede","stoow","kot","heall","sele","huus","mynster","kirike","thorp",
-    "tharop","setil","geard","duun","denu","dal","kumb","feld","aker","land","lond","wudu","weald","wold",
-    "holt","bearu","skeaga","graaf","kroft","haga","haath","moor","mersk","fenn",
-    "harykug","klif","beorg","hlaaw","hooh","hyll","hlink","slad","nas","oora","eeg",
-    "iieg","skeat","snad","mere","wella","wiella","wyll","burna","brook","ea","stream","laku","siik",
-    "pyll","pol","flood","ford","brykug",
+    "a","ad","al","am","an","ar","as","at","av","ay",
+    "e","ed","el","em","en","er","es","et","ev","ey",
+    "i","id","il","im","in","ir","is","it","iv","ix",
+    "o","od","ol","om","on","or","os","ot","ov","ox",
+    "u","ud","ul","um","un","ur","us","ut","uv","ux",
+    "ba","ban","bar","be","ben","ber","bi","bin","bir","bo","bon","bor","bu","bun","bur",
+    "da","dan","dar","de","den","der","di","din","dir","do","don","dor","du","dun","dur",
+    "ga","gan","gar","ge","gen","ger","gi","gin","gir","go","gon","gor","gu","gun","gur",
+    "ka","kan","kar","ke","ken","ker","ki","kin","kir","ko","kon","kor","ku","kun","kur",
+    "la","lan","lar","le","len","ler","li","lin","lir","lo","lon","lor","lu","lun","lur",
+    "ma","man","mar","me","men","mer","mi","min","mir","mo","mon","mor","mu","mun","mur",
+    "na","nan","nar","ne","nen","ner","ni","nin","nir","no","non","nor","nu","nun","nur",
+    "ra","ran","rar","re","ren","rer","ri","rin","rir","ro","ron","ror","ru","run","rur",
+    "sa","san","sar","se","sen","ser","si","sin","sir","so","son","sor","su","sun","sur",
+    "ta","tan","tar","te","ten","ter","ti","tin","tir","to","ton","tor","tu","tun","tur",
   ];
   const REAL_NAMES = new Set();
   function genName(hx, hy, sa, sb) {
@@ -1239,7 +1229,10 @@ function createWorldFeatures(ctx) {
       // compass-gated (must stay byte-identical to villageInfo's layout)
       const layout = 0;
       v = { x: head.x, y: head.y, kind: head.kind, name: head.name, layout,
-            R: head.kind === "city" ? head.R : 17 };
+            R: head.kind === "city" ? head.R : 17,
+            // Newhaven's y walls sit 25 GAME tiles (12.5 map units) in —
+            // must stay byte-identical to villageInfo's Ry (roads aim gates)
+            Ry: (head.kind === "city" ? head.R : 17) - (origin ? 12.5 : 0) };
     }
     villageNodeCache.set(key, v);
     return v;
@@ -1603,16 +1596,19 @@ function createWorldFeatures(ctx) {
         seed: hash2i(vcx, vcy, S ^ 0x6001),
         // capitals (Newhaven + every road web's main branch) build out to
         // shire-capital scale; ordinary cities also grew with the walls
-        budget: kind === "city"
+        budget: (kind === "city"
           ? (isCapital ? 74 + hash2i(vcx, vcy, S ^ 0x6002) % 18
                        : 46 + hash2i(vcx, vcy, S ^ 0x6002) % 14)
-          : 6 + hash2i(vcx, vcy, S ^ 0x6003) % 5,
+          : 6 + hash2i(vcx, vcy, S ^ 0x6003) % 5) + (origin ? 16 : 0),
         walled: !!wall,
         maxStoreys: isCapital ? 4 : kind === "city" ? 3 : 2,
         roomCap: kind === "city" ? (isCapital ? 7 : 6) : 3,
         blockRooms: kind === "city" ? (isCapital ? 11 : 9) : 5,
         maxBlocks: kind === "city" ? (isCapital ? 14 : 11) : 4,
         roomMin: kind === "city" ? 6 : 5, roomMax: kind === "city" ? 9 : 8,
+        // Newhaven is a WIDE city: north and south walls both sit 25 tiles
+        // in, and every building must grow inside them
+        insetY: origin ? 25 : 0,
         tileClass,
       });
       // assign stations & traders to buildings (game-specific, not in Map.html)
@@ -1676,6 +1672,10 @@ function createWorldFeatures(ctx) {
       v = { x: x * 2, y: y * 2, name, kind, wall, keep, layout, well, field, origin,
         zone: head.zone, // the 15000² zone block this settlement is tied to
         R: (kind === "city" ? R : 17) * 2,
+        // rectangular wall: Ry = the Y half-extent (game tiles). Newhaven's
+        // north AND south walls sit 25 tiles in, making it a wide city —
+        // painter, gates, roads and map all read this (fallback: v.R)
+        Ry: (kind === "city" ? R : 17) * 2 - (origin ? 25 : 0),
         buildings: gBuildings,
         streets: null };
     }
@@ -2225,7 +2225,8 @@ function createWorldFeatures(ctx) {
       icons.push({ x: x - 3, y: y + 3, type: "water" });
       v = { x, y, name: info.name, kind: info.kind, buildings, icons,
             layout: info.layout, wall: info.wall, keep: info.keep, well: info.well, field: info.field,
-            R: info.R / 2, r: info.kind === 'city' ? info.R / 2 + 7 : 17 };
+            R: info.R / 2, Ry: (info.Ry != null ? info.Ry : info.R) / 2,
+            r: info.kind === 'city' ? info.R / 2 + 7 : 17 };
     }
     villageForMapCache.set(key, v);
     return v;

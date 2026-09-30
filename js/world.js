@@ -182,11 +182,11 @@ function genWorld() {
     let g = gateCache.get(k);
     if (g) return g;
     g = [];
-    const R = v.R;
+    const R = v.R, Ry = v.Ry != null ? v.Ry : v.R; // rectangular walls (Newhaven)
     const mk = (x, y, angle, leaf, plugs) =>
       g.push({ x, y, angle, leaf, plugs, kind: "gate", stone: true });
     for (const sy of [-1, 1]) { // north/south walls: horizontal runs (LocAngle NORTH=1/SOUTH=3)
-      const gy = v.y + sy * R, angle = sy < 0 ? 1 : 3;
+      const gy = v.y + sy * Ry, angle = sy < 0 ? 1 : 3;
       mk(v.x - 1, gy, angle, "l", [[v.x - 2, gy], [v.x + 1, gy], [v.x + 2, gy]]);
       mk(v.x, gy, angle, "r", []);
     }
@@ -204,12 +204,13 @@ function genWorld() {
       String(chunkAt(x, y).decor[lidx(chunkAt(x, y), x, y)] || "").startsWith("stone_bridge");
     const scanSide = (horiz, fixed, angle) => {
       let a = null;
-      for (let d = -R + 1; d <= R - 1; d++) {
+      const lim = horiz ? R : Ry; // vertical walls only span |dy| < Ry
+      for (let d = -lim + 1; d <= lim - 1; d++) {
         const x = horiz ? v.x + d : fixed, y = horiz ? fixed : v.y + d;
         const deck = Math.abs(d) > 2 && deckTile(x, y);
         if (deck && a === null) a = d;
-        if ((!deck || d === R - 1) && a !== null) {
-          const b2 = deck && d === R - 1 ? d : d - 1;
+        if ((!deck || d === lim - 1) && a !== null) {
+          const b2 = deck && d === lim - 1 ? d : d - 1;
           const len = b2 - a + 1;
           if (len <= 6) { // sane crossing; skip decks running along the wall
             const lo = a + ((len - 1) >> 1); // middle 2 tiles swing (1 if len==1)
@@ -229,8 +230,8 @@ function genWorld() {
         }
       }
     };
-    scanSide(true, v.y - R, 1);
-    scanSide(true, v.y + R, 3);
+    scanSide(true, v.y - Ry, 1);
+    scanSide(true, v.y + Ry, 3);
     scanSide(false, v.x - R, 0);
     scanSide(false, v.x + R, 2);
     gateCache.set(k, g);

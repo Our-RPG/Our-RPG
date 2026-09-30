@@ -487,10 +487,10 @@ function villageCandleSpots(v) {
   // FULL COVERAGE: a jittered grid of stands over the whole settlement so no
   // street or corner is left dark — spaced so their big pools overlap. Building
   // footprints are skipped (pushOut), duplicate tiles deduped (push).
-  const step = 8;
+  const step = 8, vRy = v.Ry != null ? v.Ry : v.R; // rectangular walls (Newhaven)
   for (let gx = -v.R; gx <= v.R; gx += step)
     for (let gy = -v.R; gy <= v.R; gy += step) {
-      if (gx * gx + gy * gy > v.R * v.R) continue;
+      if (gx * gx + gy * gy > v.R * v.R || Math.abs(gy) > vRy - 2) continue;
       pushOut(v.x + gx + (_hash01(gx * 1.3, gy * 2.7) - 0.5) * 3.5,
               v.y + gy + (_hash01(gy * 1.9, gx * 3.3) - 0.5) * 3.5);
     }
