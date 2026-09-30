@@ -1014,11 +1014,13 @@ function wmDraw() {
           }
         }
         if (v.kind === "city" && v.wall) {
-          const Rpx = v.R * zz, gate = zz * 2.5;
+          // rectangular walls: Ry = y half-extent (Newhaven) — must match
+          // renderMapChunk's baked draw or the two layers show BOTH boxes
+          const Rpx = v.R * zz, RyPx = (v.Ry != null ? v.Ry : v.R) * zz, gate = zz * 2.5;
           const segs = [];
           for (const s of [-1, 1]) {
-            segs.push([ox - Rpx, oy + s * Rpx, ox - gate, oy + s * Rpx], [ox + gate, oy + s * Rpx, ox + Rpx, oy + s * Rpx]);
-            segs.push([ox + s * Rpx, oy - Rpx, ox + s * Rpx, oy - gate], [ox + s * Rpx, oy + gate, ox + s * Rpx, oy + Rpx]);
+            segs.push([ox - Rpx, oy + s * RyPx, ox - gate, oy + s * RyPx], [ox + gate, oy + s * RyPx, ox + Rpx, oy + s * RyPx]);
+            segs.push([ox + s * Rpx, oy - RyPx, ox + s * Rpx, oy - gate], [ox + s * Rpx, oy + gate, ox + s * Rpx, oy + RyPx]);
           }
           wmCtx.lineCap = "butt";
           for (const [w, c] of [[Math.max(1, zz * 1.5), "#35322a"], [Math.max(0.6, zz * 0.8), "#85816f"]]) {
@@ -1028,8 +1030,8 @@ function wmDraw() {
           wmCtx.lineCap = "round";
           wmCtx.fillStyle = "#85816f"; wmCtx.strokeStyle = "#35322a"; wmCtx.lineWidth = 1.5;
           for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-            wmCtx.fillRect(ox + sx * Rpx - zz * 1.5, oy + sy * Rpx - zz * 1.5, zz * 3, zz * 3);
-            wmCtx.strokeRect(ox + sx * Rpx - zz * 1.5, oy + sy * Rpx - zz * 1.5, zz * 3, zz * 3);
+            wmCtx.fillRect(ox + sx * Rpx - zz * 1.5, oy + sy * RyPx - zz * 1.5, zz * 3, zz * 3);
+            wmCtx.strokeRect(ox + sx * Rpx - zz * 1.5, oy + sy * RyPx - zz * 1.5, zz * 3, zz * 3);
           }
         }
       }
@@ -1160,7 +1162,7 @@ function wmDraw() {
     for (const v of world.villagesNearForMap(mtx0, mty0, mtx1, mty1, 42)) {
       if (!revealAll && !inSeen(v.x * 2, v.y * 2)) continue;
       const [sx, sy] = toScreen(v.x * 2, v.y * 2);
-      const ly = sy - (v.kind === "city" ? v.R * 2 * z + 8 : 14 * z + 6);
+      const ly = sy - (v.kind === "city" ? (v.Ry != null ? v.Ry : v.R) * 2 * z + 8 : 14 * z + 6);
       wmCtx.font = v.kind === "city" ? "bold 15px OpenDyslexic, Arial, sans-serif" : "bold 12px OpenDyslexic, Arial, sans-serif";
       wmCtx.strokeStyle = "rgba(0,0,0,0.85)"; wmCtx.lineWidth = 3;
       wmCtx.strokeText(v.name, sx, ly);

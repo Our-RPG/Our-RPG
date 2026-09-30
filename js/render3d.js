@@ -3732,6 +3732,35 @@ void main() {
         }
     const isWallTile = (x, z) => inBB(x, z) && wallS[gi(x, z)] > 0;
     const inBld = (x, z) => inBB(x, z) && (wallS[gi(x, z)] > 0 || intS[gi(x, z)] > 0);
+    // party walls shared with NEIGHBOURING buildings: exactly ONE building may
+    // emit the geometry for a shared wall tile — the one standing TALLEST
+    // there (ties: smaller y0, then x0 wins) — otherwise two coplanar boxes
+    // with different materials (stone vs wood row-houses) z-fight and shimmer
+    const skipShared = new Set();
+    {
+      const theirH = new Map(); // gi -> tallest neighbour wall height there
+      const theirWin = new Map(); // gi -> that neighbour wins ties
+      const list = (world.buildingsNearLoaded || world.buildingsNear)(
+        b.x0 + (b.w >> 1), b.y0 + (b.h >> 1), Math.max(b.w, b.h) + 30);
+      for (const ob of list) {
+        if (ob === b || !ob.rooms) continue;
+        if (ob.x0 + ob.w < b.x0 || b.x0 + b.w < ob.x0 ||
+            ob.y0 + ob.h < b.y0 || b.y0 + b.h < ob.y0) continue;
+        const tieWin = ob.y0 < b.y0 || (ob.y0 === b.y0 && ob.x0 < b.x0);
+        for (const orr of ob.rooms)
+          for (let z = orr.y; z < orr.y + orr.h; z++)
+            for (let x = orr.x; x < orr.x + orr.w; x++) {
+              const edge = x === orr.x || x === orr.x + orr.w - 1 || z === orr.y || z === orr.y + orr.h - 1;
+              if (!edge || !inBB(x, z)) continue;
+              const k = gi(x, z);
+              if (!wallS[k]) continue;
+              const h2 = orr.s || 1;
+              if (h2 > (theirH.get(k) || 0)) { theirH.set(k, h2); theirWin.set(k, tieWin); }
+            }
+      }
+      for (const [k, h2] of theirH)
+        if (h2 > wallS[k] || (h2 === wallS[k] && theirWin.get(k))) skipShared.add(k);
+    }
     // openings: per-storey BITMASK of archway/door gaps through wall tiles
     // (a Great Labyrinth archway exists on exactly ONE floor — d.s)
     const openLv = new Map(); // gi -> storey bitmask
@@ -3797,6 +3826,7 @@ void main() {
         for (let x = ox; x < ox + W; x++) {
           if (!act(x, z)) continue;
           const k = gi(x, z);
+          if (skipShared.has(k)) continue; // a taller neighbour draws this party wall
           const open = !!((openLv.get(k) || 0) >> s & 1);
           // neighbour context: skip faces shared with another active wall tile
           const aN = act(x, z - 1), aS = act(x, z + 1), aW = act(x - 1, z), aE = act(x + 1, z);
@@ -5474,6 +5504,37 @@ void main() {
             if (storeys > 1 && bm.ladder) npc._ladder = [bm.ladder.x, bm.ladder.y];
             if (storeys > 1 && bm.ladders) npc._ladders = bm.ladders; // per-storey shafts
             listc.push(npc);
+          }
+        }
+        // Hand-authored Newhaven quest-givers (world/quest-anchors.js — Ranger
+        // Ash, Cook Bess, Archivist Wren, etc.) are rooted extras, not part of
+        // this listc (so the culler above never retires them), so they never
+        // went through the resident loop and never got a `_bed`. Give each one
+        // the SAME bed/owns assignment as the nearest non-trader/bank building
+        // in ITS OWN town (matches the formula just above) so they path home
+        // and actually lie down at night instead of freezing at their plaza
+        // spot. Distance-capped so this only ever claims a building in the
+        // giver's own settlement, whichever village happens to populate first.
+        if (typeof QUEST_GIVERS !== "undefined") {
+          for (const g of QUEST_GIVERS) {
+            const gn = world.npcs.find(n => n._script === g.script);
+            if (!gn || gn._bed) continue;
+            let best = null, bestD = 30;
+            for (const b of vbuild) {
+              if (b.job === "trader" || b.job === "bank") continue;
+              const d = Math.hypot((b.x0 + (b.w >> 1)) - gn.x, (b.y0 + (b.h >> 1)) - gn.y);
+              if (d < bestD) { bestD = d; best = b; }
+            }
+            if (!best) continue;
+            gn._owns = [best.x0, best.y0, best.w, best.h];
+            gn._ownsRooms = best.rooms || null;
+            const bm = world.buildingMeta ? world.buildingMeta(best) : null;
+            const storeys = (bm && bm.storeys) || 1;
+            gn._bed = best.rooms ? [best.rooms[0].x + 1, best.rooms[0].y + 1]
+              : [best.x0 + (best.w >> 1) - 1, best.y0 + 1];
+            gn._bedLevel = storeys > 1 ? storeys - 1 : 0;
+            if (storeys > 1 && bm.ladder) gn._ladder = [bm.ladder.x, bm.ladder.y];
+            if (storeys > 1 && bm.ladders) gn._ladders = bm.ladders;
           }
         }
       } else {

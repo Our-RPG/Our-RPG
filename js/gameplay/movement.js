@@ -491,6 +491,16 @@ function moveTo(nx, ny) {
   // Agility passive: a nimble character covers dry ground a little quicker on
   // foot (character-stats.js). Land travel only — never boats or wading.
   if (!water && typeof charAgiSpeedMul === "function") dur /= charAgiSpeedMul();
+  // Roads are FAST: on a laid path (the painter's dirt#1 — the road web and
+  // every settlement cross) or a bridge deck, travel runs at double pace.
+  // Both ends of the step must be on the going, so you don't surge while
+  // merely clipping a corner of the road. Land travel only.
+  if (!water) {
+    const onRoad = (x, y) =>
+      String(world.getGround(x, y) || "").startsWith("dirt#") ||
+      String(world.getDecor(x, y) || "").startsWith("stone_bridge");
+    if (onRoad(player.x, player.y) && onRoad(nx, ny)) dur /= 2;
+  }
   // no footstep audio for a ghost-ticked split body (gameplay/split.js)
   if (!(typeof Split !== "undefined" && Split.isGhost())) sfxStep(nx, ny, water, !!player.sailing);
   player.moving = { fx: player.x, fy: player.y, tx: nx, ty: ny, t: 0, dur, deck: deckNext };

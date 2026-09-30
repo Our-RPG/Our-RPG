@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v22"; // v22: biome-ground cities, wide-walled Newhaven
+const CACHE_VERSION = "taiao-v23"; // v23: map-overlay Ry, party-wall dedup, road speed
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),
