@@ -67,7 +67,9 @@ function boot({ withNpcNames }) {
     "sprites/mix-npc-data.js", "data.js", "biome-tiles.js", "content.js",
     "sprites/objects-data.js", "__SHOP__", "world/quest-anchors.js",
     ...(withNpcNames ? ["world/npc-names.js"] : []),
-    "world/terrain.js", "world/erosion.js", "world/features.js", "world/chunks.js",
+    "world/terrain.js", "world/erosion.js",
+    "world/citygrow.js", "world/labgen.js", // settlement accretion + maze plans (features/chunks call them)
+    "world/features.js", "world/chunks.js",
   ];
   const src = files.map(f => f === "__SHOP__" ? shopTypesSlice() : readGame(f)).join("\n;\n");
   const ctx = {

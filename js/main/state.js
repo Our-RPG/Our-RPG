@@ -383,6 +383,17 @@ function passable(x, y) {
     const m = world.buildingMeta(b);
     // mansion archways connect the hall's first floor to its wing rooms
     if (m.wingDoors && lv === 1 && m.wingDoors.some(d => d.x === x && d.y === y)) return true;
+    // organic multi-room buildings: upstairs is per ROOM; interior archways
+    // may exist on a single storey only (d.s — the Great Labyrinth's 3-D
+    // maze passages) or span every storey both rooms share (d.s == null)
+    if (m.rooms) {
+      if (m.idoors && m.idoors.some(d => d.x === x && d.y === y &&
+          (d.s == null || d.s === lv))) return true;
+      for (const r of m.rooms)
+        if (x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1)
+          return lv < (r.s || 1);
+      return false;
+    }
     if (x > b.x0 && x < b.x0 + b.w - 1 && y > b.y0 && y < b.y0 + b.h - 1) return lv < m.storeys;
     if (m.wings)
       for (const w of m.wings)

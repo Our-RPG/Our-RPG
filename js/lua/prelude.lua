@@ -31,7 +31,11 @@ function __run(kind, subject, ctxid)
   _current = ctxid
   local ok, err = pcall(h)
   _current = prev
-  if not ok then __err(subject, tostring(err)) end
+  -- a "__luaCancel" rejection is an NPC despawning mid-wait (lua-coro cancel):
+  -- expected housekeeping, never a script bug — stay silent about it
+  if not ok and not string.find(tostring(err), "__luaCancel", 1, true) then
+    __err(subject, tostring(err))
+  end
 end
 
 -- ---- persisted quest-stage store -------------------------------------------

@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v16"; // v16: Our RPG rebrand
+const CACHE_VERSION = "taiao-v17"; // v17: organic settlements + labyrinth overhaul
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

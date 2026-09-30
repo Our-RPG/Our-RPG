@@ -66,6 +66,8 @@ async function boot(d) {
     "../../js/world/quest-anchors.js",
     "../../js/world/terrain.js",
     "../../js/world/erosion.js",
+    "../../js/world/citygrow.js",
+    "../../js/world/labgen.js",
     "../../js/world/features.js",
     "../../js/world/chunks.js",
     "zone-bake-core.js"

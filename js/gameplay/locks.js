@@ -88,6 +88,15 @@ function lockAt(d) {
     const t = r2 < 0.6 ? 1 : 2;
     return { shop: 1, magic: 0, tier: t, ...LOCK_TIERS[t] };
   }
+  if (b && b.kind === "greatlab") {
+    // the Great Labyrinth: the south face welcomes anyone in; the north EXIT
+    // bears a grand arcane seal. The latch rule below (doorLocked: a door
+    // always opens from the INSIDE) means solving the maze IS the key — you
+    // walk out through the seal, but you can't walk in through it (short of
+    // dispelling a grand ward, the top of the Magic catalogue).
+    if (d.y === b.y0) return { magic: 3, tier: 3, item: "warded_lock" };
+    return null;
+  }
   if (b && /mansion|keep|lighthouse|observatory|tower/.test(b.kind || "")) {
     // the grand houses guard their vault chests behind serious lockwork
     if (r2 < 0.25) return { magic: 3, tier: 3, item: "warded_lock" };

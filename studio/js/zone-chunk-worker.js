@@ -46,7 +46,8 @@ function boot(d) {
   // paths are relative to THIS worker (/studio/js/) → the game lives at /js/
   importScripts(
     "../../js/data.js", "../../js/content.js",
-    "../../js/world/terrain.js", "../../js/world/features.js",
+    "../../js/world/terrain.js", "../../js/world/citygrow.js", "../../js/world/labgen.js",
+    "../../js/world/features.js",
     "../../js/world/erosion.js", "../../js/world/chunks.js",
   );
   terrain = createWorldTerrain();

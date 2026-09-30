@@ -15,6 +15,10 @@ function createWorldChunks(ctx) {
     GRASS_LIKE_B, FOREST_LIKE_B, SWAMP_LIKE_B, WATER_LIKE_B, ROCK_LIKE_B,
     localTierCap, rollTier,
   } = ctx;
+  // carved labyrinth hedges + Great Labyrinth plans (labgen.js) — map.js
+  // builds its own instance from the same (hash2i, rand2, S), so the map
+  // mirrors these walls exactly
+  const labMaze = createLabMaze(hash2i, rand2, S);
   const chunks = new Map();
   const obstacles = [];
   const npcs = [];
@@ -614,11 +618,13 @@ function createWorldChunks(ctx) {
           const lii3 = (x, y) => (y - ch.cy * CHUNK) * CHUNK + (x - ch.cx * CHUNK);
           const inThis3 = (x, y) => x >= ch.cx * CHUNK && x < (ch.cx + 1) * CHUNK &&
             y >= ch.cy * CHUNK && y < (ch.cy + 1) * CHUNK;
+          const inRooms3 = (x, y) => !b.rooms || b.rooms.some(r =>
+            x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1);
           let spot = null;
           outer3: for (let dy = 2; dy <= b.h - 2; dy++)
             for (let dx = 1; dx <= b.w - 2; dx++) {
               const x = b.x0 + dx, y = b.y0 + dy;
-              if (!inThis3(x, y)) continue;
+              if (!inThis3(x, y) || !inRooms3(x, y)) continue;
               if (!String(ch.ground[lii3(x, y)]).startsWith("floor")) continue;
               if (ch.blocked[lii3(x, y)] === 1 || ch.decor[lii3(x, y)]) continue;
               if (ch.nodes.some(n => n.x === x && n.y === y)) continue;
@@ -653,11 +659,13 @@ function createWorldChunks(ctx) {
       const lii = (x, y) => (y - ch.cy * CHUNK) * CHUNK + (x - ch.cx * CHUNK);
       const inThis = (x, y) => x >= ch.cx * CHUNK && x < (ch.cx + 1) * CHUNK &&
         y >= ch.cy * CHUNK && y < (ch.cy + 1) * CHUNK;
+      const inRoomsK = (x, y) => !b.rooms || b.rooms.some(r =>
+        x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1);
       let spot = null;
       outer: for (let dy = b.h - 2; dy >= 1; dy--)
         for (let dx = b.w - 2; dx >= 1; dx--) {
           const x = b.x0 + dx, y = b.y0 + dy;
-          if (!inThis(x, y)) continue;
+          if (!inThis(x, y) || !inRoomsK(x, y)) continue;
           if (!String(ch.ground[lii(x, y)]).startsWith("floor")) continue;
           if (ch.blocked[lii(x, y)] === 1 || ch.decor[lii(x, y)]) continue;
           if (ch.nodes.some(n => n.x === x && n.y === y)) continue;
@@ -842,15 +850,13 @@ function createWorldChunks(ctx) {
         } else {
           const b = bG[i];
           g = biomeGround(b === B.FARM && inVillage(wx, wy) ? B.GRASS : b, wx, wy);
-          // hedge maze walls on the 4-lattice
-          if (b === B.LABYRINTH) {
-            const mx2 = ((wx % 4) + 4) % 4, my2 = ((wy % 4) + 4) % 4;
-            const cx2 = Math.floor(wx / 4), cy2 = Math.floor(wy / 4);
-            if ((mx2 === 0 && rand2(cx2, cy2, S ^ 0xeb1) > 0.3) ||
-                (my2 === 0 && rand2(cx2, cy2, S ^ 0xeb2) > 0.3)) {
-              decor[li2] = "bush#1";
-              blocked[li2] = 1;
-            }
+          // hedge maze walls on the 4-lattice — a CARVED maze (labgen.js):
+          // perfect backtracker per supercell, braided ~10%, one gate per
+          // supercell border, so it's a real winding labyrinth yet always
+          // fully traversable
+          if (b === B.LABYRINTH && labMaze.hedgeWallAt(wx, wy)) {
+            decor[li2] = "bush#1";
+            blocked[li2] = 1;
           }
         }
         ground[li2] = g;
@@ -937,6 +943,10 @@ function createWorldChunks(ctx) {
       return slots;
     };
     const furnishTrade = (b) => {
+      // multi-room organic shop: stock the FIRST room (behind the exterior
+      // door, where placeJob put the station); bbox corners may be courtyard
+      if (b.rooms) b = { ...b, x0: b.rooms[0].x, y0: b.rooms[0].y,
+        w: b.rooms[0].w, h: b.rooms[0].h, rooms: undefined };
       const list = TRADE_DECOR[b.job] || TRADE_DECOR._default;
       if (!list || !list.length) return;
       const w = b.w, h = b.h;
@@ -964,7 +974,90 @@ function createWorldChunks(ctx) {
     };
 
     // --- settlement stamping ---
+    // multi-room organic building (citygrow.js): rooms are wall-inclusive
+    // rects sharing 1-tile wall lines; b.door is the exterior door, b.idoors
+    // the interior archways cut through shared walls. A tile is FLOOR if it
+    // is interior to any room, WALL if it lies only on perimeters. Row-house
+    // neighbours may share wall tiles across building records — whichever
+    // chunk/record stamps first wins; both write identical masonry.
+    const stampRoomsBuilding = (b, roof) => {
+      for (const r of b.rooms)
+        for (let y = r.y; y < r.y + r.h; y++)
+          for (let x = r.x; x < r.x + r.w; x++)
+            if (elevation(x * 0.5, y * 0.5) < LAND_E) return false;
+      stampedFeet.push({ x0: b.x0, y0: b.y0, w: b.w, h: b.h });
+      // ground-floor archways only: an upper-storey passage (d2.s > 0, the
+      // Great Labyrinth's 3-D maze) stays a BLOCKED wall tile down here —
+      // passable() opens it per-storey from the building meta instead
+      const isIdoor = (x, y) => b.idoors &&
+        b.idoors.some(d2 => d2.x === x && d2.y === y && (d2.s == null || d2.s === 0));
+      const isIntr = (x, y) => b.rooms.some(r =>
+        x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1);
+      const isBld = (x, y) => b.rooms.some(r =>
+        x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+      for (const r of b.rooms)
+        for (let y = r.y; y < r.y + r.h; y++)
+          for (let x = r.x; x < r.x + r.w; x++) {
+            if (!inCh(x, y)) continue;
+            const edge = (x === r.x || x === r.x + r.w - 1 || y === r.y || y === r.y + r.h - 1)
+              && !isIntr(x, y); // interior of a neighbouring room beats our wall — never true by construction
+            ground[li(x, y)] = b.stone ? "floor_stone" : "floor_wood";
+            decor[li(x, y)] = null;
+            blocked[li(x, y)] = 0;
+            if (!edge) continue;
+            if ((b.door.x === x && b.door.y === y) ||
+                (b.door2 && b.door2.x === x && b.door2.y === y) ||
+                isIdoor(x, y)) continue; // door/exit/archway gap
+            // side tag: prefer the 4-neighbour that is open ground (renderer
+            // hangs the wall loc on the OUTSIDE edge); interior party walls
+            // between rooms just need SOME tag — it marks them as structural
+            // (the 3D chunk mesh skips #dir wall decor; geometry owns them)
+            const openN = !isBld(x, y - 1), openS = !isBld(x, y + 1);
+            const openW = !isBld(x - 1, y), openE = !isBld(x + 1, y);
+            const isCorner = (openN || openS) && (openW || openE);
+            const dir = isCorner ? (openN ? "n" : "s") + (openW ? "w" : "e")
+              : openW ? "w" : openE ? "e" : openN ? "n" : openS ? "s" : "n";
+            const isSide = !isCorner && (openW || openE);
+            const mat = isCorner ? (b.stone ? "wall_stone_corner" : "wall_wood_corner")
+              : isSide ? (b.stone ? "wall_stone_side" : "wall_wood_side")
+              : b.stone ? "wall_stone" : "wall_wood";
+            decor[li(x, y)] = mat + "#" + dir;
+            blocked[li(x, y)] = 1;
+          }
+      // record owned by the chunk holding the bounding-box centre
+      const cxr = b.x0 + (b.w >> 1), cyr = b.y0 + (b.h >> 1);
+      if (inCh(cxr, cyr))
+        buildings.push({ x0: b.x0, y0: b.y0, w: b.w, h: b.h, stone: !!b.stone,
+          rooms: b.rooms, idoors: b.idoors, door: b.door, ladder: b.ladder,
+          door2: b.door2 || undefined,       // Great Labyrinth exit
+          ladders: b.ladders || undefined,   // one per vertical maze edge
+          stoneDoor: !!b.stoneDoor || undefined,
+          kind: b.kind || null, job: b.job || null, job2: b.job2 || null,
+          roof: roof || b.roof || (b.stone ? ROOFS_STONE[hash2i(b.x0, b.y0, S) % ROOFS_STONE.length] : ROOFS[hash2i(b.x0, b.y0, S) % ROOFS.length]) });
+      // clear + reserve the doorstep strips so vegetation never blocks a door
+      for (const dr of [b.door, b.door2]) {
+        if (!dr) continue;
+        const dd = [[-1, 0], [0, -1], [1, 0], [0, 1]][dr.angle]; // W N E S outward
+        const along = dr.angle % 2 ? [1, 0] : [0, 1];
+        for (let t = -1; t <= 1; t++) {
+          const fx = dr.x + dd[0] + along[0] * t, fy = dr.y + dd[1] + along[1] * t;
+          if (inCh(fx, fy) && !blocked[li(fx, fy)]) blocked[li(fx, fy)] = 2;
+        }
+      }
+      // vegetation margin: the ring just outside each room's walls (skip other
+      // buildings' floors and anything already blocked/reserved)
+      for (const r of b.rooms)
+        for (let y = r.y - 1; y <= r.y + r.h; y++)
+          for (let x = r.x - 1; x <= r.x + r.w; x++) {
+            const ring = x === r.x - 1 || x === r.x + r.w || y === r.y - 1 || y === r.y + r.h;
+            if (!ring || !inCh(x, y) || isBld(x, y)) continue;
+            if (!blocked[li(x, y)] && !String(ground[li(x, y)]).startsWith("floor"))
+              blocked[li(x, y)] = 2;
+          }
+      return true;
+    };
     const stampBuilding = (b, roof) => {
+      if (b.rooms) return stampRoomsBuilding(b, roof);
       let ok = true;
       for (let y = b.y0; y < b.y0 + b.h && ok; y++)
         for (let x = b.x0; x < b.x0 + b.w && ok; x++)
@@ -1066,12 +1159,18 @@ function createWorldChunks(ctx) {
     // room for it and lets it clip into/through the wall behind it
     const WIDE_STATIONS = new Set(["furnace", "malthouse", "bakehouse"]);
     const placeJob = (b, v, alt) => {
+      // multi-room buildings: the station lives in the FIRST room (the one
+      // behind the exterior door); bbox corners may be courtyard paving
+      const r0 = b.rooms ? b.rooms[0] : b;
+      const rx0 = b.rooms ? r0.x : b.x0, ry0 = b.rooms ? r0.y : b.y0;
+      const inRooms = (x, y) => !b.rooms || b.rooms.some(r =>
+        x > r.x && x < r.x + r.w - 1 && y > r.y && y < r.y + r.h - 1);
       // primary station: back-wall centre; a building's SECOND trade (large
       // city halls, b.job2) goes front-left so the two never collide
-      let cx2 = alt ? b.x0 + 2 + (WIDE_STATIONS.has(b.job) ? 1 : 0) : b.x0 + (b.w >> 1);
-      let cy2 = alt ? b.y0 + b.h - 3 : b.y0 + (WIDE_STATIONS.has(b.job) ? 2 : 1);
+      let cx2 = alt ? rx0 + 2 + (WIDE_STATIONS.has(b.job) ? 1 : 0) : rx0 + (r0.w >> 1);
+      let cy2 = alt ? ry0 + r0.h - 3 : ry0 + (WIDE_STATIONS.has(b.job) ? 2 : 1);
       if (!inCh(cx2, cy2)) return;
-      if (!String(ground[li(cx2, cy2)]).startsWith("floor") ||
+      if (!inRooms(cx2, cy2) || !String(ground[li(cx2, cy2)]).startsWith("floor") ||
           blocked[li(cx2, cy2)] === 1 || decor[li(cx2, cy2)]) {
         // the usual spot is over a river building's hollow channel: shift the
         // station (bank chest, anvil, trader…) to the nearest interior floor
@@ -1079,7 +1178,7 @@ function createWorldChunks(ctx) {
         let best = null;
         for (let yy = b.y0 + 1; yy < b.y0 + b.h - 1; yy++)
           for (let xx = b.x0 + 1; xx < b.x0 + b.w - 1; xx++) {
-            if (!inCh(xx, yy) || !String(ground[li(xx, yy)]).startsWith("floor")) continue;
+            if (!inCh(xx, yy) || !inRooms(xx, yy) || !String(ground[li(xx, yy)]).startsWith("floor")) continue;
             if (blocked[li(xx, yy)] === 1 || decor[li(xx, yy)]) continue;
             const dd = Math.abs(xx - cx2) + Math.abs(yy - cy2);
             if (!best || dd < best.d) best = { x: xx, y: yy, d: dd };
@@ -1629,6 +1728,14 @@ function createWorldChunks(ctx) {
           const b2 = house(9, 7, "bank", { stone: true });
           if (rand2(x,y,S^0x9118)<0.5) addNode("anvil",x+3,y+3,true,{station:true});
           furnishPoi(b2, ["bookshelf", "cabinet", "table2", "candelabra", "sign", "weathervane"]);
+          break;
+        }
+        case "greatlab": {
+          // the Great Labyrinth: a 3-storey stone maze building whose unique
+          // entrance→exit path is forced over the top floor (labgen.js).
+          // The plan is a pure function of the POI seat, so every chunk
+          // stamping a slice derives the identical building record.
+          stampBuilding(labMaze.greatLabBuilding(x / 2, y / 2));
           break;
         }
         case "maze":

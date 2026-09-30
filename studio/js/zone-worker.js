@@ -18,7 +18,7 @@ function boot(d) {
   self.ICELL = d.icell;
   self.WORLDGEN_SIG = d.gensig;
   // paths are relative to THIS worker (/studio/js/) → the game lives at /js/
-  importScripts("../../js/data.js", "../../js/world/terrain.js", "../../js/world/features.js");
+  importScripts("../../js/data.js", "../../js/world/terrain.js", "../../js/world/citygrow.js", "../../js/world/features.js");
   terrain = createWorldTerrain();
   features = createWorldFeatures(terrain);
   // the sealed special locations are never baked into the main map (they live in
@@ -44,13 +44,17 @@ onmessage = e => {
       const my0 = Math.floor(d.mapY0 / MT), my1 = Math.floor((d.mapY1 - 1e-6) / MT);
       const cols = mx1 - mx0 + 1, rows = my1 - my0 + 1;
       const originMapX = mx0 * MT, originMapY = my0 * MT;
-      postMessage({ regionMeta: { token: d.token, MPX, step, imgW: cols * MPX, imgH: rows * MPX, originMapX, originMapY }, n: cols * rows });
+      // token lives at the TOP level of every message — consumers (zone-bake.js,
+      // pages/zones.js) gate on d.token/m.token before looking at the payload,
+      // so nesting it only inside regionMeta/regionTile silently dropped every
+      // tile (and the meta) while regionDone still resolved, leaving a blank canvas.
+      postMessage({ token: d.token, regionMeta: { MPX, step, imgW: cols * MPX, imgH: rows * MPX, originMapX, originMapY }, n: cols * rows });
       let i = 0;
       for (let my = my0; my <= my1; my++) {
         for (let mx = mx0; mx <= mx1; mx++) {
           const px = features.macroPixels(step, mx, my, MPX, d.MAP_COLORS, d.MAP_WATER, false);
           i++;
-          postMessage({ regionTile: { token: d.token, ox: (mx - mx0) * MPX, oy: (my - my0) * MPX, MPX }, px: px.buffer, i, n: cols * rows }, [px.buffer]);
+          postMessage({ token: d.token, regionTile: { ox: (mx - mx0) * MPX, oy: (my - my0) * MPX, MPX }, px: px.buffer, i, n: cols * rows }, [px.buffer]);
         }
       }
       postMessage({ regionDone: true, token: d.token });

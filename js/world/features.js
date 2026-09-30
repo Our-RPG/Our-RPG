@@ -1235,9 +1235,9 @@ function createWorldFeatures(ctx) {
     let v = null;
     if (head) {
       const origin = vcx === 0 && vcy === 0;
-      const layout = head.kind === "city"
-        ? (origin ? 0 : hash2i(vcx, vcy, S ^ 0x5fff) % 3)
-        : hash2i(vcx, vcy, S ^ 0x5f01) % 3;
+      // layout retired with the organic overhaul — every settlement is
+      // compass-gated (must stay byte-identical to villageInfo's layout)
+      const layout = 0;
       v = { x: head.x, y: head.y, kind: head.kind, name: head.name, layout,
             R: head.kind === "city" ? head.R : 17 };
     }
@@ -1516,103 +1516,84 @@ function createWorldFeatures(ctx) {
         : vIsForest ? Math.max(0.05, stoneBias - 0.20)
         : vIsCold   ? Math.min(0.85, stoneBias + 0.10)
         : stoneBias;
-      let layout = 0, wall = false, keep = false, well = true, field = null;
-      let cityStreets = []; // secondary road network (map-coord offsets from centre)
+      // layout retired (always 0): every settlement is compass-gated now that
+      // building placement is organic (citygrow.js) instead of pattern-stamped
+      const layout = 0;
+      let wall = false, keep = false, well = true, field = null;
+      const cityStreets = null; // secondary street grid retired — alleys emerge
       if (kind === "city") {
-        // is this city its ROAD network's MAIN BRANCH? Then one inner block
-        // is given over to the grand 3-storey bank hall (kind "mainbank").
+        // is this city its ROAD network's MAIN BRANCH? Then it hosts the grand
+        // 3-storey bank hall (kind "mainbank") on the plaza's NE shoulder.
         // roadNetId/mainBranchFor run on villageHead/villageNode + the road
         // planner only — they never re-enter villageInfo, so no recursion.
         const mb = mainBranchFor(roadNetId(vcx, vcy));
         const isMainBranch = !!mb && mb.vcx === vcx && mb.vcy === vcy;
-        layout = origin ? 0 : hash2i(vcx, vcy, S ^ 0x5fff) % 3;
-        wall = origin ? true : layout !== 1 && rand2(vcx, vcy, S ^ 0x5eee) < 0.62;
+        wall = origin ? true : rand2(vcx, vcy, S ^ 0x5eee) < 0.62;
         keep = !origin && rand2(vcx, vcy, S ^ 0x5abc) < 0.32;
         well = !keep;
         if (keep) {
           const kw = 8 + hash2i(vcx, vcy, S ^ 0x5b01) % 3;
           buildings.push({ x: x - (kw >> 1), y: y - (kw >> 1), w: kw, h: kw, stone: true, stoneDoor: true, kind: "keep" });
         }
-        // Block-grid street network (evolving-city-generation style):
-        // streets at i*streetStep; buildings fill the blocks BETWEEN streets
-        // at (i+0.5)*streetStep so streets and buildings never overlap.
-        const streetStep = 8; // spacing between parallel streets (map coords)
-        const halfStep   = streetStep >> 1; // 4 map coords — offset to block centre
-        const g0 = Math.max(2, Math.floor((R - halfStep) / streetStep));
-        const sizeInner = 3 + hash2i(vcx, vcy, S ^ 0x5b02) % 2; // 3-4 map units
-        const sizeOuter = 2 + hash2i(vcx, vcy, S ^ 0x5b03) % 2; // 2-3 map units
-        // Secondary streets at non-zero integer multiples of streetStep
-        for (let i = -g0; i <= g0; i++) {
-          if (i !== 0) {
-            cityStreets.push({ ox: i * streetStep });
-            cityStreets.push({ oy: i * streetStep });
-          }
-        }
-        // Buildings in blocks between streets; gx2/gy2 index the LEFT/TOP street
-        // of each block, block centre = (gx2+0.5)*streetStep from city centre.
-        for (let gy2 = -g0; gy2 < g0; gy2++) {
-          for (let gx2 = -g0; gx2 < g0; gx2++) {
-            const bCx = gx2 * streetStep + halfStep; // x offset (map coords)
-            const bCy = gy2 * streetStep + halfStep; // y offset (map coords)
-            if (isMainBranch && gx2 === 1 && gy2 === 1) {
-              // the main branch bank hall claims this whole block — always
-              // built, clear of the keep at the centre and of the cross roads
-              buildings.push({ x: x + bCx - 3, y: y + bCy - 3, w: 7, h: 7,
-                stone: true, stoneDoor: true, kind: "mainbank" });
-              continue;
-            }
-            const blockDist = Math.max(Math.abs(bCx), Math.abs(bCy)) / streetStep;
-            const isInner = blockDist < 1;
-            const isMid   = blockDist < 2;
-            const blockDensity = isInner ? 0.95 : isMid ? 0.78 : 0.52;
-            if (rand2(vcx * 31 + gx2, vcy * 37 + gy2, S ^ 0x5777) > blockDensity) continue;
-            const bSize = isInner ? sizeInner : sizeOuter;
-            const bw = bSize + hash2i(vcx + gx2, vcy + gy2, S ^ 0x5888) % 3;
-            const bh = bSize + hash2i(vcx - gx2, vcy - gy2, S ^ 0x5999) % 3;
-            const offX = Math.floor(rand2(gx2, gy2, S ^ (vcx * 131 + vcy)) * 2) - 1;
-            const offY = Math.floor(rand2(gy2, gx2, S ^ (vcy * 131 + vcx)) * 2) - 1;
-            buildings.push({
-              x: x + bCx + offX - (bw >> 1),
-              y: y + bCy + offY - (bh >> 1),
-              w: bw, h: bh,
-              stone: isInner || rand2(vcx + gx2 * 13, vcy + gy2 * 29, S ^ 0x5bbb) < adjStoneBias,
-            });
-          }
-        }
+        if (isMainBranch)
+          buildings.push({ x: x + 5, y: y - 12, w: 7, h: 7,
+            stone: true, stoneDoor: true, kind: "mainbank" });
       } else {
-        layout = hash2i(vcx, vcy, S ^ 0x5f01) % 3;
         well = rand2(vcx, vcy, S ^ 0x5f03) < 0.75;
-        const theta = rand2(vcx, vcy, S ^ 0x5f02) * Math.PI;
-        const n = 3 + (hash2i(vcx, vcy, S ^ 0x5666) % 5);
-        for (let i = 0; i < n; i++) {
-          const bw = 3 + (hash2i(vcx + i, vcy - i, S ^ 0x5999) % 3);
-          const bh = 3 + (hash2i(vcx - i, vcy + i, S ^ 0x5aaa) % 3);
-          let bx2, by2;
-          if (layout === 1) {
-            const tt = (i - (n - 1) / 2) * 8;
-            const side = (i % 2 ? 1 : -1) * (3 + rand2(vcx, vcy * 3 + i, S ^ 0x5f04) * 2);
-            bx2 = x + Math.round(Math.cos(theta) * tt - Math.sin(theta) * side);
-            by2 = y + Math.round(Math.sin(theta) * tt + Math.cos(theta) * side);
-          } else if (layout === 2) {
-            const ang = rand2(vcx * 3 + i, vcy, S ^ 0x5f05) * Math.PI * 2;
-            const dist = 4 + rand2(vcx, vcy * 5 + i, S ^ 0x5f06) * 11;
-            bx2 = x + Math.round(Math.cos(ang) * dist);
-            by2 = y + Math.round(Math.sin(ang) * dist);
-          } else {
-            const ang = (i / n) * Math.PI * 2 + (rand2(vcx * 7 + i, vcy, S ^ 0x5777) - 0.5);
-            const dist = 6 + rand2(vcx, vcy * 7 + i, S ^ 0x5888) * 8;
-            bx2 = x + Math.round(Math.cos(ang) * dist);
-            by2 = y + Math.round(Math.sin(ang) * dist);
-          }
-          buildings.push({ x: bx2 - (bw >> 1), y: by2 - (bh >> 1), w: bw, h: bh,
-            stone: rand2(vcx + i * 13, vcy + i * 29, S ^ 0x5bbb) < adjStoneBias });
-        }
         if (rand2(vcx, vcy, S ^ 0x5f07) < 0.45)
           field = { x: x + 8 + hash2i(vcx, vcy, S ^ 0x5f08) % 5,
                     y: y - 14 + hash2i(vcx, vcy, S ^ 0x5f09) % 6,
                     w: 6 + hash2i(vcx, vcy, S ^ 0x5f0a) % 4,
                     h: 4 + hash2i(vcx, vcy, S ^ 0x5f0b) % 3 };
       }
+      // ---- organic accretion (citygrow.js) in GAME-TILE space --------------
+      // prefabs (keep / main-branch hall) become no-build islands the growth
+      // flows around; the plaza and the four cross roads are "arteries" — the
+      // guaranteed-outside seeds of the engine's accessibility flood-fill.
+      const gx = x * 2, gy = y * 2, gR = (kind === "city" ? R : 17) * 2;
+      const prefabs = buildings.map(b => ({ ...b,
+        x0: b.x * 2, y0: b.y * 2, w: Math.max(7, b.w * 2), h: Math.max(7, b.h * 2) }));
+      const gField = field ? { x0: field.x * 2, y0: field.y * 2, w: field.w * 2, h: field.h * 2 } : null;
+      // water/river sampled at MAP-cell resolution and memoized — growth keeps
+      // a one-cell bank strip clear, so organic houses never span channels
+      const wetCache = new Map();
+      const wetCell = (mx, my) => {
+        const k = mx + "," + my;
+        let wv = wetCache.get(k);
+        if (wv === undefined) {
+          wv = elevation(mx, my) < LAND_E || riverAtPt(mx * 2, my * 2);
+          wetCache.set(k, wv);
+        }
+        return wv;
+      };
+      const tileClass = (tx, ty) => {
+        for (const p of prefabs) {
+          if (tx >= p.x0 - 3 && tx < p.x0 + p.w + 3 && ty >= p.y0 - 3 && ty < p.y0 + p.h + 3)
+            return (tx >= p.x0 && tx < p.x0 + p.w && ty >= p.y0 && ty < p.y0 + p.h) ? 2 : 1;
+        }
+        if (gField && tx >= gField.x0 - 2 && tx < gField.x0 + gField.w + 2 &&
+            ty >= gField.y0 - 2 && ty < gField.y0 + gField.h + 2) return 1;
+        const mx = tx >> 1, my = ty >> 1;
+        if (wetCell(mx, my) || wetCell(mx + 1, my) || wetCell(mx - 1, my) ||
+            wetCell(mx, my + 1) || wetCell(mx, my - 1)) return 2;
+        const dx = tx - gx, dy = ty - gy;
+        if (dx * dx + dy * dy <= 49) return 3;                 // plaza + props ring
+        if (Math.abs(dx) <= 2 || Math.abs(dy) <= 2) return 3;  // cross roads
+        return 0;
+      };
+      const grown = growSettlement({
+        cx: gx, cy: gy, R: gR,
+        seed: hash2i(vcx, vcy, S ^ 0x6001),
+        budget: kind === "city" ? (origin ? 54 : 34 + hash2i(vcx, vcy, S ^ 0x6002) % 13)
+          : 6 + hash2i(vcx, vcy, S ^ 0x6003) % 5,
+        walled: !!wall,
+        maxStoreys: kind === "city" ? 3 : 2,
+        roomCap: kind === "city" ? 6 : 3,
+        blockRooms: kind === "city" ? 9 : 5,
+        maxBlocks: kind === "city" ? 10 : 4,
+        roomMin: 5, roomMax: kind === "city" ? 9 : 8,
+        tileClass,
+      });
       // assign stations & traders to buildings (game-specific, not in Map.html)
       const jobs = [];
       if (kind === "city") {
@@ -1630,11 +1611,25 @@ function createWorldFeatures(ctx) {
           "campfire",
           CITY_ARTISANS[hash2i(vcx, vcy, S ^ 0x5e06) % CITY_ARTISANS.length]);
       }
-      // scale from map coords to game tiles (2x), keeping x0/y0 for stampBuilding
-      const gBuildings = buildings.map((b, i) => ({
-        ...b, x0: b.x * 2, y0: b.y * 2, w: Math.max(7, b.w * 2), h: Math.max(7, b.h * 2),
-        job: jobs[i] || null,
-      }));
+      // merge: prefabs (already game-tile rects) + organically grown houses.
+      // Grown records carry rooms/idoors/door/ladder — the multi-room format
+      // stampBuilding / buildingMeta / render3d all read; jobs walk the merged
+      // list in placement order (prefabs first, then accretion order).
+      const gBuildings = [
+        ...prefabs,
+        ...grown.buildings.map(b => ({
+          x0: b.x0, y0: b.y0, w: b.w, h: b.h,
+          rooms: b.rooms, idoors: b.idoors, door: b.door, ladder: b.ladder,
+          stone: rand2(b.x0, b.y0, S ^ 0x5bbb) < adjStoneBias,
+        })),
+      ].map((b, i) => {
+        const job = jobs[i] || null;
+        // every shop/station building gains an upstairs bedroom — bump the
+        // grown rooms so buildingMeta/geometry agree with the storey promise
+        if (job && b.rooms && !b.rooms.some(r => (r.s || 1) > 1))
+          for (const r of b.rooms) r.s = 2;
+        return { ...b, job };
+      });
       // the main branch hall owns the city's "bank" job — swap whatever the
       // index-based walk dealt it with the roster's bank holder, so the keep
       // (or first block house) that used to hold the chest gets that job back
@@ -1660,10 +1655,7 @@ function createWorldFeatures(ctx) {
         zone: head.zone, // the 15000² zone block this settlement is tied to
         R: (kind === "city" ? R : 17) * 2,
         buildings: gBuildings,
-        streets: cityStreets.length ? cityStreets.map(st => ({
-          ox: st.ox !== undefined ? st.ox * 2 : undefined,
-          oy: st.oy !== undefined ? st.oy * 2 : undefined,
-        })) : null };
+        streets: null };
     }
     villageCache.set(key, v);
     return v;
@@ -1901,7 +1893,8 @@ function createWorldFeatures(ctx) {
         else if (pick < 0.44 && riverNear(x, y) &&
                  (POI_GRASS.has(b) || b === B.FOREST)) type = "watermill";
         else {
-          const tbl = POI_GRASS.has(b) ? POI_TABLES.grass :
+          const tbl = b === B.LABYRINTH ? [["greatlab", 1]] :
+            POI_GRASS.has(b) ? POI_TABLES.grass :
             POI_FOREST.has(b) ? POI_TABLES.forest :
             POI_SWAMP.has(b) ? POI_TABLES.swamp :
             POI_DESERT.has(b) ? POI_TABLES.desert :
@@ -1949,6 +1942,8 @@ function createWorldFeatures(ctx) {
                INN_ADJ[hash2i(pcx, pcy, S ^ 0x9112) % INN_ADJ.length] + " " +
                SHIP_NOUN[hash2i(pcx, pcy, S ^ 0x9113) % SHIP_NOUN.length];
       }
+      else if (type === "greatlab")
+        name = "The Great Labyrinth of " + zonePoiBase(pcx, pcy, seat);
       else if (type === "fairyring")
         name = "Fairy Ring " + "ABCD"[hash2i(pcx, pcy, S ^ 0x910d) % 4] +
                "IJKL"[hash2i(pcx, pcy, S ^ 0x910e) % 4] +
@@ -2182,6 +2177,9 @@ function createWorldFeatures(ctx) {
       const buildings = info.buildings.map(b => ({
         x: b.x0 / 2, y: b.y0 / 2, w: b.w / 2, h: b.h / 2, stone: !!b.stone, job: b.job, job2: b.job2,
         gx0: b.x0, gy0: b.y0,
+        // organic multi-room footprint (map coords) — the map draws the rooms,
+        // not the bounding box, so it mirrors the stamped tiles exactly
+        rooms: b.rooms ? b.rooms.map(r => ({ x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 })) : null,
       }));
       // Trader buildings get their SHOP-TYPE icon, mirroring the exact hash the
       // real shopkeeper spawn uses (chunks.js deriveNpcs) so map & game agree.

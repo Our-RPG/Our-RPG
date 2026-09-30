@@ -36,10 +36,17 @@ function targetsAt(x, y) {
   const bld = world.insideBuilding && world.insideBuilding(x, y);
   if (bld) {
     const bm = world.buildingMeta(bld);
-    if (bm.ladder && bm.ladder.x === x && bm.ladder.y === y) {
-      const lv = player.level | 0;
-      if (lv < bm.storeys - 1) out.push({ kind: "ladder", b: bld, m: bm, dir: 1 });
-      if (lv > 0) out.push({ kind: "ladder", b: bld, m: bm, dir: -1 });
+    // a building may carry several ladders (Great Labyrinth: one per vertical
+    // maze edge, each spanning ONE storey pair ld.s -> ld.s+1); ordinary
+    // houses have a single ladder running the full height
+    const lds = bm.ladders || (bm.ladder ? [bm.ladder] : []);
+    const lv = player.level | 0;
+    for (const ld of lds) {
+      if (ld.x !== x || ld.y !== y) continue;
+      const s0 = ld.s != null ? ld.s : 0;
+      const s1 = ld.s != null ? ld.s + 1 : bm.storeys - 1;
+      if (lv >= s0 && lv < s1) out.push({ kind: "ladder", b: bld, m: bm, ld, dir: 1 });
+      if (lv > s0 && lv <= s1) out.push({ kind: "ladder", b: bld, m: bm, ld, dir: -1 });
     }
   }
   // Sigrid's spare bed (Tūhura Isle finale, gameplay/tutorial.js) — a
@@ -196,7 +203,8 @@ canvas.addEventListener("click", e => {
 //  gameplay/input.js:82,118
 function doTarget(tg) {
   if (tg.kind === "door") setGoal({ type: "door", door: tg.door }, tg.door.x, tg.door.y, 1);
-  else if (tg.kind === "ladder") setGoal({ type: "ladder", b: tg.b, m: tg.m, dir: tg.dir }, tg.m.ladder.x, tg.m.ladder.y, 1);
+  else if (tg.kind === "ladder") setGoal({ type: "ladder", b: tg.b, m: tg.m, dir: tg.dir },
+    (tg.ld || tg.m.ladder).x, (tg.ld || tg.m.ladder).y, 1);
   else if (tg.kind === "sigridBed") setGoal({ type: "sigridSleep" }, tg.x, tg.y, 1);
   else if (tg.kind === "livestock") setGoal({ type: (typeof husbGoalType === "function" ? husbGoalType(tg.mon) : (tg.mon.husbSpent ? "husbFeed" : "husbHarvest")), mon: tg.mon }, tg.mon.x, tg.mon.y, 1);
   else if (tg.kind === "monster") setGoal({ type: "combat", mon: tg.mon }, tg.mon.x, tg.mon.y, styleRange());

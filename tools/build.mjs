@@ -30,6 +30,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const GEN_FILES = [
   "js/world.js", "js/world/terrain.js", "js/world/erosion.js",
   "js/world/chunks.js", "js/world/features.js", "js/gameplay/tutorial.js",
+  "js/world/citygrow.js", "js/world/labgen.js", // settlement accretion + maze plans stamp chunks
   "js/gameplay/dream.js", // Dream Forest interior + glade stamps feed chunk gen
   "js/gameplay/wizard.js", // Wizard.towerPos() decides where chunks stamp the Weaver's tower
   "js/biome-tiles.js", "js/nz-extra-trees.js",

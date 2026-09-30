@@ -62,6 +62,10 @@ js/skills/id-canonical.js
 js/skills/recipe-split.js
 js/biome-tiles.js
 js/world/terrain.js
+# organic settlement accretion + maze plans — called by features.js (growSettlement)
+# and by createWorldChunks/createWorldMap (createLabMaze) when they evaluate
+js/world/citygrow.js
+js/world/labgen.js
 js/world/features.js
 js/world/npc-names.js
 js/world/quest-anchors.js

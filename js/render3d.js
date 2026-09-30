@@ -215,7 +215,10 @@ const R3D = (() => {
   // "Baking the sprite atlas…" stage) while the classic synchronous
   // buildAtlas() drains the same parts as a fallback. One drawing code path.
   const ATLAS_COLS = 62; // 62*33 = 2046 cells <= 2048px row budget
-  function _planAtlas() {
+  // The bake PLAN (which keys land in which cells) — split out of _planAtlas
+  // so _atlasRestore can validate a cached atlas against the CURRENT plan
+  // without allocating the multi-MB canvas.
+  function _planAtlasKeys() {
     // Embedded data URIs should keep the canvas origin-clean. This guard remains
     // for bad or stale asset data and skips at_* keys if taint is detected.
     let atlasOk = false;
@@ -243,6 +246,10 @@ const R3D = (() => {
       }
     }
     const all = [...keys, ...Object.keys(composites), ...RIPPLE_FRAMES, "tilled_soil"];
+    return { all, composites };
+  }
+  function _planAtlas() {
+    const { all, composites } = _planAtlasKeys();
     const rows = Math.ceil(all.length / ATLAS_COLS);
     const canvas = document.createElement("canvas");
     canvas.width = 2048;
@@ -368,6 +375,22 @@ const R3D = (() => {
         r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
       });
       if (!rec || rec.sig !== ATLAS_SIG || !rec.blob || !rec.cells) return false;
+      // Integrity gates — ATLAS_SIG (sheet filenames + this file) can't see
+      // everything the bake depends on, and a bad cached atlas is CATASTROPHIC
+      // but silent: a ground key with no (or a blank) cell drops that tile's
+      // quad from the chunk mesh entirely, so the sea backdrop / far-LOD show
+      // through as flat light-blue / biome-colour patches over whole regions.
+      // (a) plan drift: the key list lives in DATA (SPR/MONSTERS/…) which can
+      // change without touching the sheets or this file — every key the
+      // current plan bakes must exist in the record at the exact cell the
+      // current bake would use.
+      const plan = _planAtlasKeys().all;
+      if (Object.keys(rec.cells).length !== plan.length) return false;
+      for (let i = 0; i < plan.length; i++) {
+        const c = rec.cells[plan[i]];
+        if (!c || c.cx !== (i % ATLAS_COLS) * CELL || c.cy !== Math.floor(i / ATLAS_COLS) * CELL)
+          return false;
+      }
       const bmp = await createImageBitmap(rec.blob);
       const cv = document.createElement("canvas");
       cv.width = bmp.width; cv.height = bmp.height;
@@ -375,6 +398,17 @@ const R3D = (() => {
       c2.imageSmoothingEnabled = false;
       c2.drawImage(bmp, 0, 0);
       if (bmp.close) bmp.close();
+      // (b) blank-pixel probe: 2D canvases can lose their GPU backing under
+      // memory pressure (e.g. an in-browser zone bake) and toBlob then
+      // snapshots transparent — persisting a blank/partial atlas forever.
+      // Terrain tile art is fully opaque, so a transparent centre pixel in
+      // any sampled ground cell means the blob is bad: re-bake.
+      const gk = plan.filter(k => k.startsWith("bg_") || k === "dirt" || k === "tilled_soil" || k === "floor_stone");
+      const gstep = Math.max(1, Math.floor(gk.length / 40));
+      for (let i = 0; i < gk.length; i += gstep) {
+        const c = rec.cells[gk[i]];
+        if (c2.getImageData(c.cx + (CSZ >> 1), c.cy + (CSZ >> 1), 1, 1).data[3] < 8) return false;
+      }
       _finishAtlas({ canvas: cv, cells: rec.cells });
       return true;
     } catch (e) { return false; } // corrupt/private mode — bake as before
@@ -533,7 +567,7 @@ const R3D = (() => {
     const pos = [], uvs = [], idx = [], snw = [];
     let n = 0;
     const AW = atlas.canvas.width, AH = atlas.canvas.height;
-    function quad(x, z, key, y, sn) {
+    function quad(x, z, key, y, sn, must) {
       let cell = atlas.cells[key];
       if (!cell && key.startsWith("at_")) {
         // atlas.png not usable in WebGL (file:// taint); fall back to biomes.png with regional personality
@@ -545,6 +579,10 @@ const R3D = (() => {
         const pers = water ? +parts[2] : world.personalityAt(x, z);
         cell = atlas.cells[`bg_${parts[1]}_${pers}`];
       }
+      // GROUND must never be a hole: an unresolvable key (stale/bad cached
+      // atlas, unknown art) would drop the tile and expose the sea backdrop /
+      // far-LOD beneath as flat colour — same fallback the cliff skirts use.
+      if (!cell && must) cell = atlas.cells.dirt;
       if (!cell) return;
       const { cx: acx, cy: acy } = cell;
       const u0 = (acx + 0.5) / AW, u1 = (acx + CSZ - 0.5) / AW;
@@ -566,7 +604,7 @@ const R3D = (() => {
         gys[z * CS + x] = gy;
         const gk = ch.ground[z * CS + x];
         quad(bx + x, by + z, gk, gy,
-          (typeof gk === "string" && gk.startsWith("floor") && insideB(bx + x, by + z)) ? 0 : 1);
+          (typeof gk === "string" && gk.startsWith("floor") && insideB(bx + x, by + z)) ? 0 : 1, true);
         const d = ch.decor[z * CS + x];
         if (d && FLAT_DECOR.has(d)) quad(bx + x, by + z, d, gy + 0.015);
         // flood margin: the risen river spilling over a low bank tile — a
@@ -3645,9 +3683,279 @@ void main() {
     sbMesh(rb, sharedMat, rec, parent);
   }
 
+  // --- organic multi-room building structure (citygrow.js records) ---
+  // The record itself carries the plan: rooms (wall-inclusive rects sharing
+  // 1-tile wall lines), one/two exterior doors, interior archways, ladder(s).
+  // Walls are per-tile boxes over the plan's wall tiles (faces between two
+  // adjacent wall tiles are skipped), so party walls between rooms and
+  // between row-house neighbours emit once and collide exactly as stamped.
+  // Also used by the Great Labyrinth (labgen.js): many cell-rooms, several
+  // ladders, an entrance and an exit door.
+  function buildOrganicStruct(b) {
+    const m = metaOf(b);
+    const rooms = m.rooms, storeys = m.storeys, stone = m.stone;
+    const frontKey = stone ? "wall_stone" : "wall_wood";
+    const sideKey = stone ? "wall_stone_side" : "wall_wood_side";
+    const floorKey = stone ? "floor_interior" : "floor_wood";
+    const topCol = stone ? 0x767a82 : 0x63482e;
+    const group = new THREE.Group();
+    const rec = { group, geoms: [], storeyGroups: [], slabs: [], roofGroup: null, doors: [], b, m,
+      cx: b.x0 + b.w / 2, cz: b.y0 + b.h / 2 };
+
+    // ---- the plan on a local tile grid over the bbox ----
+    const W = b.w, H = b.h, ox = b.x0, oz = b.y0;
+    const gi = (x, z) => (z - oz) * W + (x - ox);
+    const inBB = (x, z) => x >= ox && z >= oz && x < ox + W && z < oz + H;
+    const wallS = new Int8Array(W * H); // storeys of wall standing on tile
+    const intS = new Int8Array(W * H);  // storeys of the room interior here
+    for (const r of rooms)
+      for (let z = r.y; z < r.y + r.h; z++)
+        for (let x = r.x; x < r.x + r.w; x++) {
+          const edge = x === r.x || x === r.x + r.w - 1 || z === r.y || z === r.y + r.h - 1;
+          const k = gi(x, z);
+          if (edge) wallS[k] = Math.max(wallS[k], r.s || 1);
+          else intS[k] = r.s || 1;
+        }
+    const isWallTile = (x, z) => inBB(x, z) && wallS[gi(x, z)] > 0;
+    const inBld = (x, z) => inBB(x, z) && (wallS[gi(x, z)] > 0 || intS[gi(x, z)] > 0);
+    // openings: per-storey BITMASK of archway/door gaps through wall tiles
+    // (a Great Labyrinth archway exists on exactly ONE floor — d.s)
+    const openLv = new Map(); // gi -> storey bitmask
+    const addOpen = (k, s) => openLv.set(k, (openLv.get(k) || 0) | (1 << s));
+    const flankLv = (x, z) => {
+      // an untagged interior archway spans every storey BOTH rooms share;
+      // a door to the outside opens at ground level only
+      const nzN = inBB(x, z - 1) ? intS[gi(x, z - 1)] : 0;
+      const nzS = inBB(x, z + 1) ? intS[gi(x, z + 1)] : 0;
+      const nxW = inBB(x - 1, z) ? intS[gi(x - 1, z)] : 0;
+      const nxE = inBB(x + 1, z) ? intS[gi(x + 1, z)] : 0;
+      if (nzN && nzS) return Math.min(nzN, nzS);
+      if (nxW && nxE) return Math.min(nxW, nxE);
+      return 1;
+    };
+    for (const d of (m.idoors || [])) if (inBB(d.x, d.y)) {
+      const k = gi(d.x, d.y);
+      if (d.s != null) addOpen(k, d.s);
+      else for (let s = 0; s < flankLv(d.x, d.y); s++) addOpen(k, s);
+    }
+    const doorsArr = [m.door, m.door2].filter(Boolean);
+    for (const d of doorsArr) if (inBB(d.x, d.y)) addOpen(gi(d.x, d.y), 0);
+
+    // ---- plinth: one slab tile per plan tile + skirt on outside edges ----
+    {
+      const ft = newSB(), ff = newSB(), fp = newSB();
+      for (let z = oz; z < oz + H; z++)
+        for (let x = ox; x < ox + W; x++) {
+          if (!inBld(x, z)) continue;
+          if (stone) sbFloor(ft, floorKey, x, z, x + 1, z + 1, FLOOR_T);
+          else sbPlanks(fp, x, z, x + 1, z + 1, FLOOR_T);
+          if (!inBld(x, z - 1)) sbWallFace(ff, frontKey, x, z, x + 1, z, 0, FLOOR_T, SH_N);
+          if (!inBld(x, z + 1)) sbWallFace(ff, frontKey, x, z + 1, x + 1, z + 1, 0, FLOOR_T, SH_S);
+          if (!inBld(x - 1, z)) sbWallFace(ff, frontKey, x, z, x, z + 1, 0, FLOOR_T, SH_W);
+          if (!inBld(x + 1, z)) sbWallFace(ff, frontKey, x + 1, z, x + 1, z + 1, 0, FLOOR_T, SH_E);
+        }
+      // doorstep outside each exterior door (half-tile pad past the wall)
+      for (const d of doorsArr) {
+        const step = d.angle === 3 ? [d.x + 0.08, d.y + 1, d.x + 0.92, d.y + 1.5]
+          : d.angle === 1 ? [d.x + 0.08, d.y - 0.5, d.x + 0.92, d.y]
+          : d.angle === 0 ? [d.x - 0.5, d.y + 0.08, d.x, d.y + 0.92]
+          : [d.x + 1, d.y + 0.08, d.x + 1.5, d.y + 0.92];
+        sbQuad(ft, floorKey, [step[0], 0.03, step[1]], [step[2], 0.03, step[1]],
+          [step[2], 0.03, step[3]], [step[0], 0.03, step[3]]);
+      }
+      sbMesh(ft, sharedMat, rec, group);
+      if (!stone) sbMesh(fp, matFlat(0x9a6b3a), rec, group);
+      sbMesh(ff, matFlat(0x5c5f66), rec, group);
+    }
+
+    const ladders = m.ladders || (m.ladder ? [m.ladder] : []);
+
+    // ---- wall storeys: per-tile boxes with door/arch openings ----
+    for (let s = 0; s < storeys; s++) {
+      const yB = s === 0 ? FLOOR_T : s * STOREY_H, yT = (s + 1) * STOREY_H;
+      const sg = { group: new THREE.Group(), sides: {}, wallMeshes: [], flat: new THREE.Group() };
+      sg.flat.visible = false;
+      sg.group.add(sg.flat);
+      for (const sd of ["n", "s", "e", "w"]) { sg.sides[sd] = new THREE.Group(); sg.group.add(sg.sides[sd]); }
+      const sb = newSB(), fb = newSB(), ob = newSB();
+      const act = (x, z) => isWallTile(x, z) && wallS[gi(x, z)] > s;
+      for (let z = oz; z < oz + H; z++)
+        for (let x = ox; x < ox + W; x++) {
+          if (!act(x, z)) continue;
+          const k = gi(x, z);
+          const open = !!((openLv.get(k) || 0) >> s & 1);
+          // neighbour context: skip faces shared with another active wall tile
+          const aN = act(x, z - 1), aS = act(x, z + 1), aW = act(x - 1, z), aE = act(x + 1, z);
+          const shN = inBld(x, z - 1) ? SH_IN : SH_N, shS = inBld(x, z + 1) ? SH_IN : SH_S;
+          const shW = inBld(x - 1, z) ? SH_IN : SH_W, shE = inBld(x + 1, z) ? SH_IN : SH_E;
+          const yLo = open ? yB + DOOR_H : yB; // opening: only the lintel band
+          if (yLo < yT) {
+            if (!aN) sbWallFace(sb, frontKey, x, z, x + 1, z, yLo, yT, shN);
+            if (!aS) sbWallFace(sb, frontKey, x, z + 1, x + 1, z + 1, yLo, yT, shS);
+            if (!aW) sbWallFace(sb, sideKey, x, z, x, z + 1, yLo, yT, shW);
+            if (!aE) sbWallFace(sb, sideKey, x + 1, z, x + 1, z + 1, yLo, yT, shE);
+          }
+          if (open) {
+            // passage jambs + lintel underside. The walk-through axis is the
+            // one whose BOTH flanking tiles are open floor (not wall): a door
+            // in a south wall is walked N-S, so its jambs are the x-planes
+            const zPass = !isWallTile(x, z - 1) && !isWallTile(x, z + 1);
+            if (zPass) {
+              sbQuad(sb, sideKey, [x, yB, z], [x, yB, z + 1], [x, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z], SH_IN);
+              sbQuad(sb, sideKey, [x + 1, yB, z], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x + 1, yB + DOOR_H, z], SH_IN);
+            } else {
+              sbQuad(sb, frontKey, [x, yB, z], [x + 1, yB, z], [x + 1, yB + DOOR_H, z], [x, yB + DOOR_H, z], SH_IN);
+              sbQuad(sb, frontKey, [x, yB, z + 1], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], SH_IN);
+            }
+            sbQuad(fb, frontKey, [x, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], 0.5);
+          }
+          // wall top cap on this wall's final storey
+          if (wallS[k] === s + 1) sbQuad(fb, frontKey, [x, yT, z], [x + 1, yT, z], [x + 1, yT, z + 1], [x, yT, z + 1], SH_TOP);
+          // collapsed stand-in kerb (jamb posts flank openings)
+          if (!open) sbBlock(ob, x, yB + 0.01, z, x + 1, yB + 0.08, z + 1);
+          else if (!isWallTile(x, z - 1) && !isWallTile(x, z + 1)) {
+            // walked N-S: jamb posts on the west/east edges of the gap
+            sbBlock(ob, x - 0.05, yB + 0.01, z, x + 0.1, yB + DOOR_H, z + 1);
+            sbBlock(ob, x + 0.9, yB + 0.01, z, x + 1.05, yB + DOOR_H, z + 1);
+          } else {
+            sbBlock(ob, x, yB + 0.01, z - 0.05, x + 1, yB + DOOR_H, z + 0.1);
+            sbBlock(ob, x, yB + 0.01, z + 0.9, x + 1, yB + DOOR_H, z + 1.05);
+          }
+        }
+      const m1 = sbMesh(sb, sharedMat, rec, sg.sides.s);
+      const m2 = sbMesh(fb, matFlat(topCol), rec, sg.sides.s);
+      if (m1) sg.wallMeshes.push(m1);
+      if (m2) sg.wallMeshes.push(m2);
+      sbMesh(ob, matFlat(topCol), rec, sg.flat);
+      // ladder segments for every ladder climbing past this storey
+      for (const ld of ladders) {
+        const ldTop = ld.s != null ? ld.s + 1 : storeys - 1; // climbs INTO storey ldTop
+        const ldFrom = ld.s != null ? ld.s : 0;
+        if (s < ldFrom || s >= ldTop) continue;
+        const lb = newSB();
+        const lx = ld.x + 0.5, lz = ld.y + 0.28;
+        const railTop = yT + 0.85, rungTop = yT + 0.55;
+        for (const rx of [-0.26, 0.26])
+          sbBlock(lb, lx + rx - 0.045, yB, lz - 0.045, lx + rx + 0.045, railTop, lz + 0.045);
+        const nR = Math.max(4, Math.round((rungTop - yB) / 0.36));
+        for (let r = 1; r <= nR; r++) {
+          const ry = yB + (rungTop - yB) * r / (nR + 1);
+          sbBlock(lb, lx - 0.26, ry - 0.04, lz - 0.03, lx + 0.26, ry + 0.04, lz + 0.03);
+        }
+        sbMesh(lb, matFlat(0x8a6236), rec, sg.group);
+      }
+      rec.storeyGroups.push(sg);
+      group.add(sg.group);
+    }
+
+    // ---- upper floor slabs: per room interior (interiors never overlap),
+    // plus a plank lid over each archway tile that continues at that level
+    for (let s = 1; s < storeys; s++) {
+      const st = newSB(), su = newSB();
+      let any = false;
+      for (const r of rooms) {
+        if ((r.s || 1) <= s) continue;
+        any = true;
+        sbPlanks(st, r.x + 1, r.y + 1, r.x + r.w - 1, r.y + r.h - 1, s * STOREY_H + 0.02);
+        sbFlatRect(su, r.x + 1, r.y + 1, r.x + r.w - 1, r.y + r.h - 1, s * STOREY_H - 0.09);
+      }
+      for (const [k, mask] of openLv) if (mask >> s & 1) {
+        const x = ox + (k % W), z = oz + ((k / W) | 0);
+        sbPlanks(st, x, z, x + 1, z + 1, s * STOREY_H + 0.02);
+      }
+      const slabGrp = new THREE.Group();
+      if (any) {
+        sbMesh(st, matFlat(0x9a6b3a), rec, slabGrp);
+        sbMesh(su, matFlat(0x3c352c), rec, slabGrp);
+      }
+      group.add(slabGrp);
+      rec.slabs.push(slabGrp);
+    }
+
+    // ---- per-room hip roofs: the jumbled organic roofline ----
+    const roofGroup = new THREE.Group();
+    rec.roofGroup = roofGroup;
+    group.add(roofGroup);
+    const rk = atlas.cells[b.roof] ? b.roof : (stone ? "roof_gray" : "roof_brown");
+    for (const r of rooms)
+      buildHipRoof(rec, roofGroup, r.x, r.y, r.x + r.w, r.y + r.h, (r.s || 1) * STOREY_H, rk, false);
+
+    // ---- interior volumes, shadows, door leaves ----
+    rec.vols = rooms.map(r => ({ x0: r.x, z0: r.y, x1: r.x + r.w, z1: r.y + r.h }));
+    rec.baseTier = rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1));
+    rec.shadowFeet = rooms.map(r => ({ x0: r.x, z0: r.y, x1: r.x + r.w, z1: r.y + r.h,
+      len: (r.s || 1) * STOREY_H + 1.5 }));
+    buildStructShadow(rec);
+    const dKey = (stone && m.door.stone) ? "door_stone" : "door_wood";
+    for (const d2 of doorsArr) {
+      let leaf;
+      if (d2.angle === 3)
+        leaf = makeLeaf(rec, rec.storeyGroups[0].sides.s, dKey,
+          d2.x, FLOOR_T, d2.y + 1 - 0.12, 1, 0, 0, 1, DOOR_H - 0.05, d2.x + "," + d2.y);
+      else if (d2.angle === 1)
+        leaf = makeLeaf(rec, rec.storeyGroups[0].sides.n, dKey,
+          d2.x, FLOOR_T, d2.y + 0.12, 1, 0, 0, -1, DOOR_H - 0.05, d2.x + "," + d2.y);
+      else if (d2.angle === 0)
+        leaf = makeLeaf(rec, rec.storeyGroups[0].sides.w, dKey,
+          d2.x + 0.12, FLOOR_T, d2.y, 0, 1, -1, 0, DOOR_H - 0.05, d2.x + "," + d2.y);
+      else
+        leaf = makeLeaf(rec, rec.storeyGroups[0].sides.e, dKey,
+          d2.x + 1 - 0.12, FLOOR_T, d2.y, 0, 1, 1, 0, DOOR_H - 0.05, d2.x + "," + d2.y);
+      leaf.side = ["w", "n", "e", "s"][d2.angle];
+    }
+
+    // ---- furniture: bedrooms upstairs (or the ground floor of a plain
+    // one-storey house), laid out per ROOM so nothing lands on party walls
+    rec.upperDecor = [];
+    if (b.kind !== "greatlab") {
+      const UP_STONE = ["bed_fourposter", "wardrobe", "bookshelf_small", "dresser_mirror", "candelabra", "desk", "chest_storage", "stool"];
+      const UP_WOOD = ["bed_frame", "dresser", "chest_storage", "cupboard", "stool", "bookshelf_small", "bench_trestle", "bucket"];
+      const HOUSE = stone ? ["bed_fourposter", "chest_storage", "dresser_mirror", "stool", "wardrobe"]
+                          : ["bed_frame", "chest_storage", "dresser", "stool", "cupboard"];
+      const isHouse = storeys === 1 && !b.job;
+      const upList = isHouse ? HOUSE : stone ? UP_STONE : UP_WOOD;
+      for (const r of rooms) {
+        const sFrom = isHouse ? 0 : 1, sTo = isHouse ? 1 : (r.s || 1);
+        for (let s = sFrom; s < sTo; s++) {
+          const slots = [];
+          const push3 = (tx2, tz2) => {
+            if (tx2 <= r.x || tx2 >= r.x + r.w - 1 || tz2 <= r.y || tz2 >= r.y + r.h - 1) return;
+            for (const ld of ladders)
+              if (Math.abs(tx2 - ld.x) <= 1 && Math.abs(tz2 - ld.y) <= 1) return;
+            if (slots.some(s3 => s3[0] === tx2 && s3[1] === tz2)) return;
+            slots.push([tx2, tz2]);
+          };
+          push3(r.x + 1, r.y + 1); push3(r.x + r.w - 2, r.y + 1);
+          push3(r.x + 1, r.y + r.h - 2); push3(r.x + r.w - 2, r.y + r.h - 2);
+          const hh = Math.abs((r.x * 73856093) ^ (r.y * 19349663) ^ (s * 83492791));
+          const count = Math.min(slots.length, 2 + (hh % 2));
+          for (let i = 0; i < count; i++) {
+            // the bedroom floor's first slot (room corner x+1,y+1) is always
+            // the bed — residents' _bed tile points exactly there
+            const bedFloor = isHouse || s === (r.s || 1) - 1;
+            const key = i === 0 && bedFloor ? upList[0] : upList[(hh + i) % upList.length];
+            const ov = objForKey(key);
+            if (!ov) continue;
+            rec.upperDecor.push({
+              wx: slots[i][0] + 0.5, wz: slots[i][1] + 0.5,
+              y: rec.baseTier + s * STOREY_H + FLOOR_T + 0.02,
+              idx: ov.idx, scale: ov.scale, s,
+            });
+          }
+        }
+      }
+    }
+
+    group.position.y = rec.baseTier;
+    rec.baseY = group.position.y;
+    scene.add(group);
+    return rec;
+  }
+
   // --- building structure ---
   function buildBuildingStruct(b) {
     const m = metaOf(b);
+    if (m.rooms) return buildOrganicStruct(b);
     const storeys = m.storeys, stone = m.stone, kind = m.kind;
     const x0 = b.x0, z0 = b.y0, w = b.w, h = b.h;
     const x1 = x0 + w, z1 = z0 + h; // outer bounds (walls sit ON the perimeter tiles)
@@ -5059,15 +5367,27 @@ void main() {
         for (let bIdx = 0; bIdx < vbuild.length; bIdx++) {
           const b = vbuild[bIdx];
           if (b.job === "trader" || b.job === "bank") continue;   // owned by the chunk shopkeeper/banker
-          // skip if an NPC (e.g. a station keeper) already stands inside this footprint
-          if (world.npcs.some(n => n.x >= b.x0 && n.x < b.x0 + b.w && n.y >= b.y0 && n.y < b.y0 + b.h)) continue;
-          const cx = b.x0 + (b.w >> 1), cy = b.y0 + b.h - 2;      // just inside the door
+          // skip if an NPC (e.g. a station keeper) already stands inside this
+          // footprint. Organic row-house BBOXES overlap on shared wall lines —
+          // test the actual ROOMS, or a neighbour's keeper suppresses (and the
+          // reconciliation below evicts) this building's rightful resident.
+          const inFoot = (nx, ny) => b.rooms
+            ? b.rooms.some(r => nx >= r.x && nx < r.x + r.w && ny >= r.y && ny < r.y + r.h)
+            : nx >= b.x0 && nx < b.x0 + b.w && ny >= b.y0 && ny < b.y0 + b.h;
+          if (world.npcs.some(n => inFoot(n.x, n.y))) continue;
+          // just inside the door — organic multi-room records carry the door
+          let cx, cy;
+          if (b.rooms && b.door) {
+            cx = b.door.x + (b.door.angle === 0 ? 1 : b.door.angle === 2 ? -1 : 0);
+            cy = b.door.y + (b.door.angle === 1 ? 1 : b.door.angle === 3 ? -1 : 0);
+          } else { cx = b.x0 + (b.w >> 1); cy = b.y0 + b.h - 2; }
           // per-building deterministic character: blockBase(v)+bIdx, unique within
           // the town and stable forever (the same person always lives here)
           const def = mixDefForBuilding(v, bIdx);
           const npc = placeMixNpc(def, cx, cy, rng, 2, Math.max(3, Math.max(b.w, b.h)), false);
           if (npc) {
             npc._owns = [b.x0, b.y0, b.w, b.h];
+            npc._ownsRooms = b.rooms || null; // exact footprint (bboxes overlap between row-houses)
             npc._bjob = b.job || null;   // the building's trade — drives dialogue role (npc-chat.js)
             // the resident's bed tile (matches buildStruct's furnishing: slots[0]
             // = back-wall centre interior tile). They walk here and stand on it at
@@ -5076,7 +5396,8 @@ void main() {
             // the ladder to reach it (npcClimbToward).
             const bm = world.buildingMeta ? world.buildingMeta(b) : null;
             const storeys = (bm && bm.storeys) || 1;
-            npc._bed = [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
+            npc._bed = b.rooms ? [b.rooms[0].x + 1, b.rooms[0].y + 1]
+              : [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
             npc._bedLevel = storeys > 1 ? storeys - 1 : 0;
             if (storeys > 1 && bm.ladder) npc._ladder = [bm.ladder.x, bm.ladder.y];
             listc.push(npc);
@@ -5096,7 +5417,10 @@ void main() {
       for (let i = listc.length - 1; i >= 0; i--) {
         const n = listc[i]; if (!n._owns) continue;
         const bx = n._owns[0], by = n._owns[1], bw = n._owns[2], bh = n._owns[3];
-        if (world.npcs.some(o => o !== n && o.trader && o.x >= bx && o.x < bx + bw && o.y >= by && o.y < by + bh)) {
+        const inOwned = (ox, oy) => n._ownsRooms
+          ? n._ownsRooms.some(r => ox >= r.x && ox < r.x + r.w && oy >= r.y && oy < r.y + r.h)
+          : ox >= bx && ox < bx + bw && oy >= by && oy < by + bh;
+        if (world.npcs.some(o => o !== n && o.trader && inOwned(o.x, o.y))) {
           const gi = world.npcs.indexOf(n); if (gi >= 0) world.npcs.splice(gi, 1);
           const mm = meshes.get(n._mid); if (mm) { scene.remove(mm); if (mm.userData.shadow) scene.remove(mm.userData.shadow); meshes.delete(n._mid); }
           listc.splice(i, 1);
@@ -7100,7 +7424,6 @@ void main() {
 
   return {
     init, frame, resize, pickTile, buildAtlasAsync, preloadArt, snapshotTile, objArtFor, _diag, _structDetail, _meshLog: meshLog,
-    _dbgScene: () => scene, _dbgFar: () => ({ farMeshes, farCenter, farRivMesh, farRoadMesh }), _dbgCam: () => camera,
     _atmos: () => ({ biome: atmos.biome, dens: atmos.dens, parts: atParts.length, grOn: _grOn,
       fogW: +atmos.fogW.toFixed(3), r: +atmos.r.toFixed(3), sat: +atmos.sat.toFixed(3) }),
     _sunDebug: () => ({ ...sunState, bakeKey: sunBakeKey, mats: _shadowMats.size }),

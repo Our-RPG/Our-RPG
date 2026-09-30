@@ -75,6 +75,29 @@ function genWorld() {
   function buildingMeta(b) {
     let m = metaCache.get(b);
     if (m) return m;
+    // multi-room organic building (citygrow.js): the record itself carries
+    // rooms / exterior door / interior archways / ladder — no derivation, so
+    // the stamper, collision and geometry read the exact same plan
+    if (b.rooms) {
+      let storeys = 1;
+      for (const r of b.rooms) storeys = Math.max(storeys, r.s || 1);
+      if (b.job && storeys < 2) storeys = 2; // owner's bedroom upstairs
+      const door = { x: b.door.x, y: b.door.y, angle: b.door.angle, kind: "door", stone: !!b.stoneDoor };
+      const door2 = b.door2
+        ? { x: b.door2.x, y: b.door2.y, angle: b.door2.angle, kind: "door", stone: !!b.stoneDoor }
+        : null;
+      const ladders = b.ladders || null; // Great Labyrinth: one per vertical maze edge
+      let ladder = b.ladder || (ladders && ladders[0]) || null;
+      if (storeys > 1 && !ladder) {
+        const r0 = b.rooms[0];
+        ladder = { x: r0.x + 1 === door.x ? r0.x + 2 : r0.x + 1, y: r0.y + 1 };
+      }
+      m = { storeys, door, door2, ladder, ladders, stone: !!b.stone,
+        kind: b.kind || null, wings: null, wingDoors: null,
+        rooms: b.rooms, idoors: b.idoors || [] };
+      metaCache.set(b, m);
+      return m;
+    }
     const stone = b.stone != null ? !!b.stone
       : b.roof === "roof_tower" || b.roof === "roof_gray"; // old cached chunks lack .stone
     // kind drives the structural silhouette: "tower" (battlements), "spire"
@@ -249,12 +272,22 @@ function genWorld() {
     let s = structCache.get(key);
     if (s !== undefined) return s;
     s = null;
-    const b = bldAt(x, y);
-    if (b) {
-      const m = buildingMeta(b);
-      if (m.door.x === x && m.door.y === y) s = { door: { ...m.door, building: b } };
-      else if (m.door2 && m.door2.x === x && m.door2.y === y) s = { door: { ...m.door2, building: b } };
-    }
+    // check EVERY building whose bbox holds the tile, not just the first:
+    // organic row-house bboxes overlap on shared wall lines, and an L-shaped
+    // neighbour's bbox can contain another building's door tile
+    outer2: for (let cy = cdiv(y) - 1; cy <= cdiv(y) + 1; cy++)
+      for (let cx = cdiv(x) - 1; cx <= cdiv(x) + 1; cx++)
+        for (const b of getChunk(cx, cy).buildings) {
+          if (x < b.x0 || x >= b.x0 + b.w || y < b.y0 || y >= b.y0 + b.h) {
+            if (b.kind !== "mansion") continue;
+            const wings = buildingMeta(b).wings;
+            if (!wings || !wings.some(w2 =>
+              x >= w2.x0 && x < w2.x0 + w2.w && y >= w2.y0 && y < w2.y0 + w2.h)) continue;
+          }
+          const m = buildingMeta(b);
+          if (m.door.x === x && m.door.y === y) { s = { door: { ...m.door, building: b } }; break outer2; }
+          if (m.door2 && m.door2.x === x && m.door2.y === y) { s = { door: { ...m.door2, building: b } }; break outer2; }
+        }
     if (!s) {
       outer: for (const v of walledVillagesNear(x, y, 40))
         for (const g of gatesForVillage(v)) {

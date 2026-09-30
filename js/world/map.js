@@ -9,6 +9,9 @@ function createWorldMap(ctx) {
     civField, weirdField, farmField, personalityAt, riversNear, roadsNear, getChunk, ROAD_W,
     villagesNearForMap, poisNearForMap, iconsNearForMap, macroPixels,
   } = ctx;
+  // carved labyrinth hedges (labgen.js) — SAME instance parameters as
+  // chunks.js, so the map mirrors the stamped walls tile-for-tile
+  const labMaze = createLabMaze(hash2i, rand2, S);
   // Biome color palette (Map.html COLORS array, 37 biomes)
   const MAP_COLORS = [
     [66,88,134],[100,124,162],[199,183,143],[93,122,62],[72,104,54],[94,106,72],
@@ -169,6 +172,12 @@ function createWorldMap(ctx) {
         ctx.strokeStyle='#4a4030'; ctx.lineWidth=1.5;
         ctx.beginPath(); ctx.arc(ox+7,oy,4.5,0,Math.PI*2); ctx.stroke();
         ctx.beginPath(); ctx.moveTo(ox+2.5,oy); ctx.lineTo(ox+11.5,oy); ctx.moveTo(ox+7,oy-4.5); ctx.lineTo(ox+7,oy+4.5); ctx.stroke(); break;
+      case 'greatlab':
+        // the Great Labyrinth: nested stone squares + the entrance gap south
+        ctx.strokeStyle='#8a8a80'; ctx.lineWidth=2.6;
+        for(const s of [26,17,8]) ctx.strokeRect(ox-s/2,oy-s/2,s,s);
+        ctx.strokeStyle=`rgb(${MAP_PATH.join(',')})`; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(ox,oy+13); ctx.lineTo(ox,oy+8); ctx.stroke(); break;
       case 'maze':
         ctx.strokeStyle='#2a6428'; ctx.lineWidth=2.2;
         for(const s of [24,16,8]) ctx.strokeRect(ox-s/2,oy-s/2,s,s);
@@ -1032,7 +1041,7 @@ function createWorldMap(ctx) {
     const villages=q.villages;
     const nearVillage=(wx,wy)=>villages.some(v=>{ const dx=wx-v.x,dy=wy-v.y; return dx*dx+dy*dy<v.r*v.r; });
     const pois=q.pois;
-    const nearPoi=(wx,wy)=>pois.some(p=>{ const dx=wx-p.x,dy=wy-p.y,r=({shack:4,farmstead:11,windmill:6,manor:11,guild:8,ruins:6,watchtower:4,fishvillage:10,orchard:9,graveyard:7,campsite:4,fairyring:4,standing:3,obelisk:3,wizardtower:5,minecamp:6,lighthouse:5,pond:6,lumbercamp:6,shrine:4,inn:6,watermill:7,maze:9,battlefield:7,arena:6,totem:3,apiary:5,crater:6,hotspring:5,statue:4,portal:4,garden:7,tarpit:6,stonecircle:6,barrow:5,shipwreck:6,geyser:4,beacon:3,hermitage:4,vineyard:8,gallows:3,observatory:6,wishingwell:3}[p.type]||5); return dx*dx+dy*dy<r*r; });
+    const nearPoi=(wx,wy)=>pois.some(p=>{ const dx=wx-p.x,dy=wy-p.y,r=({shack:4,farmstead:11,windmill:6,manor:11,guild:8,ruins:6,watchtower:4,fishvillage:10,orchard:9,graveyard:7,campsite:4,fairyring:4,standing:3,obelisk:3,wizardtower:5,minecamp:6,lighthouse:5,pond:6,lumbercamp:6,shrine:4,inn:6,watermill:7,maze:9,greatlab:15,battlefield:7,arena:6,totem:3,apiary:5,crater:6,hotspring:5,statue:4,portal:4,garden:7,tarpit:6,stonecircle:6,barrow:5,shipwreck:6,geyser:4,beacon:3,hermitage:4,vineyard:8,gallows:3,observatory:6,wishingwell:3}[p.type]||5); return dx*dx+dy*dy<r*r; });
 
     // --- terrain ---
     // Each map tile (wx,wy) in map-coord space covers 2×2 game tiles.
@@ -1097,9 +1106,8 @@ function createWorldMap(ctx) {
             if(road) col=(rvWideM[i]===1||eG[G(tx+1,ty)]<LAND_E||eG[G(tx-1,ty)]<LAND_E||
                           eG[G(tx,ty+1)]<LAND_E||eG[G(tx,ty-1)]<LAND_E)?MAP_BRIDGE:MAP_PATH;
             else if(b===B.LABYRINTH) {
-              // walls at hgx%4==0 → gwx%8==0, matching genChunk's hx%4 wall period
-              const mx2=((hgx%4)+4)%4, my2=((hgy%4)+4)%4, lcx=Math.floor(hgx/4), lcy=Math.floor(hgy/4);
-              if((mx2===0&&rand2(lcx,lcy,S^0xeb1)>0.3)||(my2===0&&rand2(lcx,lcy,S^0xeb2)>0.3)) col=[40,80,38];
+              // carved maze walls (labgen.js) — mirrors genChunk exactly
+              if(labMaze.hedgeWallAt(hgx,hgy)) col=[40,80,38];
             }
             r=col[0]; g=col[1]; bl=col[2];
             let sh=Math.max(-26,Math.min(26,(ge-elevation(hgx+0.5,hgy+0.5))*260));
@@ -1107,9 +1115,7 @@ function createWorldMap(ctx) {
             else if(b===B.BADLANDS) sh+=Math.sin(ge*320)*5;
             r+=sh; g+=sh; bl+=sh;
             const j=(rand2(gwx,gwy,S^0xa5a5)-0.5)*13; r+=j; g+=j; bl+=j;
-            const labWall=b===B.LABYRINTH&&(
-              (((hgx%4)+4)%4===0&&rand2(Math.floor(hgx/4),Math.floor(hgy/4),S^0xeb1)>0.3)||
-              (((hgy%4)+4)%4===0&&rand2(Math.floor(hgx/4),Math.floor(hgy/4),S^0xeb2)>0.3));
+            const labWall=b===B.LABYRINTH&&labMaze.hedgeWallAt(hgx,hgy);
             if(bImg&&bImg.complete&&bImg.naturalWidth>0&&!road&&!labWall) {
               const pers=personalityAt(gwx,gwy);
               ctx.drawImage(bImg,pers*33,b*33,32,32,cpx,cpy,HT,HT);
@@ -1296,29 +1302,37 @@ function createWorldMap(ctx) {
         if(v.field) mDrawWheat(ctx,(v.field.x-baseX)*TILE,(v.field.y-baseY)*TILE,v.field.w*TILE,v.field.h*TILE);
       }
       for(const bd of v.buildings) {
-        const bx=(bd.x-baseX)*TILE, by2=(bd.y-baseY)*TILE;
         // interior CUTAWAY, not a roof slab: the wood-plank floor every house
         // has on the ground storey (same boards as upstairs), framed by the
         // wall run — so shops and homes read as their inside footprint, the
-        // way the game shows them when you step through the door.
-        const ww = TILE*0.55;                    // wall band thickness
-        ctx.fillStyle = bd.stone ? '#8a8a80' : '#5a4632';
-        ctx.fillRect(bx,by2,bd.w*TILE,bd.h*TILE);
-        ctx.fillStyle = '#b0854f';               // floor_wood planks
-        ctx.fillRect(bx+ww,by2+ww,bd.w*TILE-2*ww,bd.h*TILE-2*ww);
-        // faint plank seams so the floor reads as boards, not a flat slab
-        ctx.strokeStyle = 'rgba(90,60,30,0.35)'; ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let px2 = bx+ww+TILE*0.75; px2 < bx+bd.w*TILE-ww; px2 += TILE*0.75) {
-          ctx.moveTo(px2, by2+ww); ctx.lineTo(px2, by2+bd.h*TILE-ww);
-        }
-        ctx.stroke();
-        ctx.strokeStyle='#3a352a'; ctx.lineWidth=1.5;
-        ctx.strokeRect(bx+0.75,by2+0.75,bd.w*TILE-1.5,bd.h*TILE-1.5);
+        // way the game shows them when you step through the door. Organic
+        // multi-room buildings draw one cutaway per ROOM (bd.rooms), so the
+        // map mirrors the stamped footprint, not the bounding box.
+        const drawRoom = (rx,ry,rw,rh) => {
+          const bx=(rx-baseX)*TILE, by2=(ry-baseY)*TILE;
+          const ww = TILE*0.55;                    // wall band thickness
+          ctx.fillStyle = bd.stone ? '#8a8a80' : '#5a4632';
+          ctx.fillRect(bx,by2,rw*TILE,rh*TILE);
+          ctx.fillStyle = '#b0854f';               // floor_wood planks
+          ctx.fillRect(bx+ww,by2+ww,rw*TILE-2*ww,rh*TILE-2*ww);
+          // faint plank seams so the floor reads as boards, not a flat slab
+          ctx.strokeStyle = 'rgba(90,60,30,0.35)'; ctx.lineWidth = 1;
+          ctx.beginPath();
+          for (let px2 = bx+ww+TILE*0.75; px2 < bx+rw*TILE-ww; px2 += TILE*0.75) {
+            ctx.moveTo(px2, by2+ww); ctx.lineTo(px2, by2+rh*TILE-ww);
+          }
+          ctx.stroke();
+          ctx.strokeStyle='#3a352a'; ctx.lineWidth=1.5;
+          ctx.strokeRect(bx+0.75,by2+0.75,rw*TILE-1.5,rh*TILE-1.5);
+        };
+        if(bd.rooms) for(const r of bd.rooms) drawRoom(r.x,r.y,r.w,r.h);
+        else drawRoom(bd.x,bd.y,bd.w,bd.h);
         // station marker: crafting stations get a gold diamond, banks a coin,
         // traders a blue dot — hover on the world map names the trade
         if(bd.job) {
-          const mx2=bx+bd.w*TILE/2, my2=by2+bd.h*TILE/2, r=Math.max(2.2,TILE*0.9);
+          const jr = bd.rooms ? bd.rooms[0] : bd;
+          const bx=(jr.x-baseX)*TILE, by2=(jr.y-baseY)*TILE;
+          const mx2=bx+jr.w*TILE/2, my2=by2+jr.h*TILE/2, r=Math.max(2.2,TILE*0.9);
           if(bd.job==='bank') {
             ctx.fillStyle='#f2c14e'; ctx.strokeStyle='#5a4310'; ctx.lineWidth=1;
             ctx.beginPath(); ctx.arc(mx2,my2,r*0.85,0,Math.PI*2); ctx.fill(); ctx.stroke();

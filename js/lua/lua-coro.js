@@ -83,7 +83,16 @@
     npc._luaRoutine = false;
     lampRelease(npc);
     const w = npc._luaWaits;
-    if (w && w.length) { npc._luaWaits = []; for (const x of w) x.rej && x.rej({ __luaCancel: true }); }
+    if (w && w.length) {
+      npc._luaWaits = [];
+      // an Error whose MESSAGE carries the marker: if the rejection surfaces
+      // inside Lua (the routine was suspended on :await()), the prelude's
+      // __run recognises it by tostring() and stays silent — a despawn is
+      // routine housekeeping, not a script bug
+      const err = new Error("__luaCancel");
+      err.__luaCancel = true;
+      for (const x of w) x.rej && x.rej(err);
+    }
   }
 
   function startRoutine(npc) {
