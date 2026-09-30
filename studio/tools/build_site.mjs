@@ -157,6 +157,7 @@ console.log(`  [workers] ${WORKERS.length} files -> workshop/js/`);
 const WORKER_DEPS = [
   "data.js", "content.js", "biome-tiles.js",
   "world/terrain.js", "world/features.js", "world/erosion.js", "world/chunks.js",
+  "world/citygrow.js", "world/labgen.js", // organic settlements + maze plans (features/chunks call them)
   // zone-bake-worker.js extras (the in-browser "Generate zone" engine):
   "sprites/mix-npc-data.js", "sprites/objects-data.js", "world/quest-anchors.js",
   "skills/market.js",   // fetched at runtime for its SHOP_TYPES slice
