@@ -20,6 +20,17 @@ function findPath(tx, ty, reach) {
   // and a re-click a moment later reaches anything that was still streaming.
   const CS = world.CHUNK || 32;
   const warm = (x, y) => world.chunks.has(Math.floor(x / CS) + "," + Math.floor(y / CS));
+  // per-search passability memo: a flooded search asks about each tile as a
+  // neighbour of up to 8 expansions, and passable() is a real tile query
+  // (buildings, decks, water, structs) — memoising it cut the worst-case
+  // blocked-goal flood by ~4x
+  const passMemo = new Map();
+  const passOk = (x, y) => {
+    const k = x + "," + y;
+    let v = passMemo.get(k);
+    if (v === undefined) { v = warm(x, y) && passable(x, y); passMemo.set(k, v); }
+    return v;
+  };
   const came = new Map(), g = new Map([[start, 0]]);
   const h = (x, y) => Math.max(Math.abs(x - tx), Math.abs(y - ty));
   // binary min-heap on f — the old linear scan was O(n²) over up to 9000
@@ -57,9 +68,8 @@ function findPath(tx, ty, reach) {
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
       if (!dx && !dy) continue;
       const nx = cx + dx, ny = cy + dy;
-      if (!warm(nx, ny)) continue;
-      if (!passable(nx, ny)) continue;
-      if (dx && dy && (!warm(nx, cy) || !warm(cx, ny) || !passable(nx, cy) || !passable(cx, ny))) continue;
+      if (!passOk(nx, ny)) continue;
+      if (dx && dy && (!passOk(nx, cy) || !passOk(cx, ny))) continue;
       if (!stepClimbOK(cx, cy, nx, ny)) continue; // terraces: no climbing >½ step
       const nk = K(nx, ny);
       const ng = g.get(K(cx, cy)) + (dx && dy ? 1.42 : 1);

@@ -1102,6 +1102,42 @@ function createWorldFeatures(ctx) {
       }
     if (tick) tick(1);
   }
+  // WORKER-side full naming pass (roadworker "names" message): compute — and
+  // persist, workers have IndexedDB — the registry for the zone holding MAP
+  // point (mx,my), with coarse progress ticks; returns the plain arrays so
+  // the main thread can adopt them without re-reading IDB. Pure function of
+  // (world, seed): identical to the main-thread pass it replaces on the boot
+  // path, where it used to be ~8s of loading-bar time instead of overlapping
+  // the sheet decode + atlas bake.
+  function genZoneNamesData(mx, my, tick) {
+    const [wx, wy] = zoneOfMap(mx, my);
+    const reg = zoneReg(wx, wy);
+    let i = 0;
+    for (const [row, rows, name] of _settleSteps(wx, wy, reg))
+      if (tick && !(++i & 3)) tick(0.5 * (row / rows), name);
+    for (const [row, rows, name] of _poiSteps(wx, wy, reg))
+      if (tick && !(++i & 3)) tick(0.5 + 0.5 * (row / rows), name);
+    if (tick) tick(1);
+    return { wx, wy, v: [...reg.vNames], vc: reg.vCount, p: [...reg.pNames] };
+  }
+  // MAIN-thread adoption of a worker-computed registry (no-op if a local
+  // pass got there first — identical data either way). Persistence happens
+  // HERE, not in the worker: the boot terminates the worker the moment the
+  // result lands, which killed the worker's own async IDB put mid-flight.
+  function _zoneNamesInject(d) {
+    const reg = zoneReg(d.wx, d.wy);
+    if (reg.pNames) return;
+    reg.vNames = new Map(d.v);
+    reg.vCount = d.vc;
+    reg.pNames = new Map(d.p);
+    _wnPersist(d.wx, d.wy, reg);
+  }
+  // is the zone holding MAP point (mx,my) already fully named (hydrated or
+  // computed)? Decides whether boot needs a naming pass at all.
+  function zoneNamed(mx, my) {
+    const [wx, wy] = zoneOfMap(mx, my);
+    return !!zoneReg(wx, wy).pNames;
+  }
   // ---- registry persistence (IndexedDB) ------------------------------------
   // A freshly computed world registry is written to IDB and restored on
   // later boots (preloadZoneNames below, awaited by main.js init), so the
@@ -2344,7 +2380,7 @@ function createWorldFeatures(ctx) {
     DEEP_E, GRID8, ROAD_W, gridRoute, shapePath, polyBBox, waterBody, riverTrace,
     lakeFill, lakeOutflows, riversNear, roadsNear, roadsNearCached, nearPoly, riverNearPt, riverSourceAt,
     riverAtPt, solidDoorX, riverDoors, riverFlowAt, _roadWarm, _roadCellInject, _roadCacheSize,
-    roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, macroPixels, genName, villageInfo, villagesNear,
+    roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, genZoneNamesData, _zoneNamesInject, zoneNamed, macroPixels, genName, villageInfo, villagesNear,
     poiInfo, wildIcon, atlasVariantAt, personalityAt, biomeGround, BIOME_VEG,
     dreamGateSite, dreamGatesNear, dreamGateClearAt,
     GRASS_LIKE_B, FOREST_LIKE_B, DESERT_LIKE_B, ROCK_LIKE_B, SWAMP_LIKE_B,

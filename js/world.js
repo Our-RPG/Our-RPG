@@ -300,11 +300,35 @@ function genWorld() {
           out.push(...getChunk(cx, cy).nodes);
       return out;
     },
+    // LOADED chunks only — the renderer's per-frame node sweep. nodesNear
+    // force-generates every cold chunk in the view radius in ONE frame (a
+    // teleport/zoom-out paid them all as a single stall); chunks the mesh
+    // pipeline hasn't streamed in yet have no visible ground anyway, so
+    // their nodes can simply wait for it.
+    nodesNearLoaded(x, y, r) {
+      const out = [];
+      for (let cy = cdiv(y - r); cy <= cdiv(y + r); cy++)
+        for (let cx = cdiv(x - r); cx <= cdiv(x + r); cx++) {
+          const ch = chunks.get(cx + "," + cy);
+          if (ch) out.push(...ch.nodes);
+        }
+      return out;
+    },
     buildingsNear(x, y, r) {
       const out = [];
       for (let cy = cdiv(y - r); cy <= cdiv(y + r); cy++)
         for (let cx = cdiv(x - r); cx <= cdiv(x + r); cx++)
           out.push(...getChunk(cx, cy).buildings);
+      return out;
+    },
+    // LOADED chunks only — same deal as nodesNearLoaded (syncStructures)
+    buildingsNearLoaded(x, y, r) {
+      const out = [];
+      for (let cy = cdiv(y - r); cy <= cdiv(y + r); cy++)
+        for (let cx = cdiv(x - r); cx <= cdiv(x + r); cx++) {
+          const ch = chunks.get(cx + "," + cy);
+          if (ch) out.push(...ch.buildings);
+        }
       return out;
     },
     insideBuilding(x, y) { return bldAt(x, y); },
@@ -340,6 +364,9 @@ function genWorld() {
     // async cold-boot naming of the world holding GAME tile (x,y), painting a
     // real progress fraction — the loading bar's "Naming the world…" stage
     genZoneNames: (x, y, tick) => features.genZoneNamesAsync(x / 2, y / 2, tick),
+    // worker-naming support (boot): probe / adopt (GAME coords in, MAP inside)
+    zoneNamed: (x, y) => features.zoneNamed(x / 2, y / 2),
+    _zoneNamesInject: features._zoneNamesInject,
     inPeacefulZone,
     gatesForVillage,
     // the door or gate leaf occupying tile (x,y), or null

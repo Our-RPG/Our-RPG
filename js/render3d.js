@@ -345,6 +345,52 @@ const R3D = (() => {
     P.all.forEach((key, i) => _drawAtlasCell(P, key, i));
     _finishAtlas(P);
   }
+  // ---- baked-atlas IDB cache ----
+  // The bake is a pure function of the sheet art + the bake code, both
+  // captured by ATLAS_SIG (tools/build.mjs) — so the finished canvas caches
+  // as a PNG blob and a warm boot restores it in ~200ms instead of re-baking
+  // for 2-6s. Community art patches apply ON TOP after restore, exactly as
+  // they do after a fresh bake (they arrive at runtime, never cached here).
+  function _atlasDb() {
+    return new Promise((res, rej) => {
+      const r = indexedDB.open("taiao-atlas", 1);
+      r.onupgradeneeded = e => e.target.result.createObjectStore("a");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+  }
+  async function _atlasRestore() {
+    if (typeof ATLAS_SIG === "undefined" || typeof indexedDB === "undefined") return false;
+    try {
+      const db = await _atlasDb();
+      const rec = await new Promise((res, rej) => {
+        const r = db.transaction("a").objectStore("a").get("atlas");
+        r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+      });
+      if (!rec || rec.sig !== ATLAS_SIG || !rec.blob || !rec.cells) return false;
+      const bmp = await createImageBitmap(rec.blob);
+      const cv = document.createElement("canvas");
+      cv.width = bmp.width; cv.height = bmp.height;
+      const c2 = cv.getContext("2d");
+      c2.imageSmoothingEnabled = false;
+      c2.drawImage(bmp, 0, 0);
+      if (bmp.close) bmp.close();
+      _finishAtlas({ canvas: cv, cells: rec.cells });
+      return true;
+    } catch (e) { return false; } // corrupt/private mode — bake as before
+  }
+  function _atlasPersist(P) {
+    if (typeof ATLAS_SIG === "undefined" || typeof indexedDB === "undefined") return;
+    try {
+      P.canvas.toBlob(blob => {
+        if (!blob) return;
+        _atlasDb().then(db => {
+          db.transaction("a", "readwrite").objectStore("a")
+            .put({ sig: ATLAS_SIG, blob, cells: P.cells }, "atlas");
+        }).catch(() => { /* best effort */ });
+      }, "image/png");
+    } catch (e) { /* best effort */ }
+  }
   // boot path: same bake, sliced ~60ms at a time with a paint (and a real
   // completed-cells fraction to `tick`) between slices, so the loading bar
   // moves through the multi-hundred-ms atlas stage instead of freezing.
@@ -352,6 +398,7 @@ const R3D = (() => {
   // drawing — under CPU contention each paint can cost a whole slow frame.)
   async function buildAtlasAsync(tick) {
     if (atlas) { if (tick) tick(1); return true; }
+    if (await _atlasRestore()) { if (tick) tick(1); return true; }
     const P = _planAtlas();
     let last = performance.now();
     for (let i = 0; i < P.all.length; i++) {
@@ -363,6 +410,7 @@ const R3D = (() => {
       }
     }
     _finishAtlas(P);
+    _atlasPersist(P);
     if (tick) tick(1);
     return true;
   }
@@ -3103,7 +3151,7 @@ void main() {
 
   // ---------- per-frame sync ----------
   function syncNodes() {
-    for (const n of world.nodesNear(player.x, player.y, viewRadius())) {
+    for (const n of (world.nodesNearLoaded || world.nodesNear)(player.x, player.y, viewRadius())) {
       const id = "n" + n.id;
       let key = null, scale = 1, flat = false, treeMul = 1;
       if (n.portal) { key = "archway_stone"; scale = 1.7; }
@@ -4283,7 +4331,7 @@ void main() {
     // before the camera reaches them, so spreading the builds out is
     // invisible — stacking a village's worth into one frame was a hitch)
     let buildBudget = 1;
-    for (const b of world.buildingsNear(px, py, 34)) {
+    for (const b of (world.buildingsNearLoaded || world.buildingsNear)(px, py, 34)) {
       const key = "b" + b.x0 + "," + b.y0;
       if (seen.has(key)) continue;
       seen.add(key);

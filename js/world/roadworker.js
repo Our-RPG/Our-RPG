@@ -24,6 +24,15 @@ onmessage = e => {
     features = createWorldFeatures(createWorldTerrain());
     return;
   }
+  // cold-boot world naming (features genZoneNamesData): the ~8s settlements +
+  // POI pass, computed AND persisted (workers share IndexedDB) off the main
+  // thread while the boot's sheet decode + atlas bake proceed. The finished
+  // registry is posted back for the main thread to adopt directly.
+  if (d.type === "names" && features) {
+    const data = features.genZoneNamesData(d.mx, d.my,
+      (f, name) => postMessage({ nameTick: f, name: name || null }));
+    postMessage({ names: data });
+  }
   if (d.type === "warm" && features) {
     // (i, n) = cells done / total for this warm — the boot loading bar's
     // road progress; warmDone tells the boot wait-stage to stop waiting

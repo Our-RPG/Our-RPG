@@ -149,13 +149,52 @@ async function init() {
   if (world.preloadZoneNames) await world.preloadZoneNames();
   if (typeof NpcNames !== "undefined" && NpcNames.preload) await NpcNames.preload(); // zone-unique NPC names (world/npc-names.js)
   M("preloadZoneNames");
-  // cold cache only: run the full world-naming pass NOW, async-sliced with
-  // real progress ticks, instead of letting the first chunk generation drag
-  // it in as one giant synchronous freeze. Warm boots (registry hydrated
-  // above) resolve instantly.
-  if (world.genZoneNames)
-    await world.genZoneNames(player.x, player.y,
-      (f, name) => { if (typeof window !== "undefined" && window.__boot) __boot.sub("nameGen", f, name); });
+  // Kick the sliced atlas bake NOW (it rendezvouses with the sheet decode
+  // first): on a cold boot the main thread otherwise sits idle while the
+  // naming worker below crunches — the old serial order paid decode →
+  // naming → bake back to back. Awaited at the old "atlas" spot.
+  const _atlasEarly = (typeof R3D !== "undefined" && R3D.buildAtlasAsync)
+    ? _assetsReady.then(() => R3D.buildAtlasAsync(
+        f => { if (typeof window !== "undefined" && window.__boot) __boot.sub("atlas", f); })
+      ).catch(e => { console.warn("async atlas bake failed, R3D.init will retry:", e.message); })
+    : Promise.resolve();
+  // cold cache only: the full world-naming pass (~8s). On a WORKER when
+  // possible — computed and persisted off-thread while the sheet decode +
+  // atlas bake run here — adopted below, just before chunk generation needs
+  // the labels. The old async-sliced main-thread pass is the fallback (no
+  // Worker support, worker error, or a 60s watchdog). Warm boots (registry
+  // hydrated above) skip all of it.
+  let _namesWait = null;
+  if (world.genZoneNames && (!world.zoneNamed || !world.zoneNamed(player.x, player.y))) {
+    let viaWorker = null;
+    if (typeof Worker !== "undefined" && world._zoneNamesInject && world._workerInit) {
+      viaWorker = new Promise(res => {
+        let w;
+        try { w = new Worker("js/world/roadworker.js"); } catch (e) { res(false); return; }
+        const bail = setTimeout(() => { try { w.terminate(); } catch (e2) { } res(false); }, 60000);
+        w.onerror = () => { clearTimeout(bail); try { w.terminate(); } catch (e2) { } res(false); };
+        w.onmessage = ev => {
+          const d = ev.data;
+          if (!d) return;
+          if (d.nameTick != null && typeof window !== "undefined" && window.__boot)
+            __boot.sub("nameGen", d.nameTick, d.name);
+          if (d.names) {
+            clearTimeout(bail);
+            world._zoneNamesInject(d.names);
+            try { w.terminate(); } catch (e2) { }
+            res(true);
+          }
+        };
+        w.postMessage({ type: "init", ...world._workerInit });
+        w.postMessage({ type: "names", mx: player.x / 2, my: player.y / 2 });
+      });
+    }
+    _namesWait = (async () => {
+      if (viaWorker && await viaWorker) return;
+      await world.genZoneNames(player.x, player.y,
+        (f, name) => { if (typeof window !== "undefined" && window.__boot) __boot.sub("nameGen", f, name); });
+    })();
+  }
   M("nameGen");
   await world.preloadSeen(bootNear);
   M("preloadSeen");
@@ -207,7 +246,11 @@ async function init() {
       }
     near.sort((a, b) => a[2] - b[2]);
     _farChunks.sort((a, b) => a[2] - b[2]);
-    // roads first: wait for the boot road-warm (crunching on the worker since
+    // names first: every chunk generation below (and the post-boot streams)
+    // stamps settlement/POI labels — the worker naming pass kicked off above
+    // must have landed. Warm boots: _namesWait is null, no wait at all.
+    if (_namesWait) await _namesWait;
+    // roads next: wait for the boot road-warm (crunching on the worker since
     // the top of init, in parallel with the naming pass) so the chunk gens
     // below find every road cell cached instead of freezing on the A*. Real
     // cells-done progress; skipped when nothing needs generating (every warm
@@ -244,13 +287,10 @@ async function init() {
   // the minimap draws icons continuously without ever requiring the world map
   // to be opened, so this can't wait on openWorldMap() (see applyMapIconArt())
   if (typeof applyMapIconArt === "function") applyMapIconArt();
-  // bake the sprite atlas in painted slices with real progress (R3D.init
-  // finds it done and skips its synchronous fallback bake)
-  if (typeof R3D !== "undefined" && R3D.buildAtlasAsync) {
-    try {
-      await R3D.buildAtlasAsync(f => { if (typeof window !== "undefined" && window.__boot) __boot.sub("atlas", f); });
-    } catch (e) { console.warn("async atlas bake failed, R3D.init will retry:", e.message); }
-  }
+  // rendezvous with the atlas bake that has been running since the naming
+  // stage (IDB-cached restore, or the sliced bake with real progress —
+  // R3D.init finds it done and skips its synchronous fallback)
+  await _atlasEarly;
   M("atlas");
   // Prefer the retired prototype engine renderer (voxel world, real 3D models,
   // retired prototype collision + pathfinding); fall back to the three.js billboards.

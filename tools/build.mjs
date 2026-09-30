@@ -41,6 +41,13 @@ const sigOf = files => createHash("sha1")
   .digest("hex").slice(0, 10);
 const WORLDGEN_SIG = "g" + sigOf(GEN_FILES);
 const MAPBAKE_SIG = "m" + sigOf(MAP_FILES);
+// ATLAS_SIG keys the baked-atlas IDB cache (render3d.js): the sheet files are
+// content-hashed in their FILENAMES, so the sorted name list + the bake code
+// captures every art or packing change without reading 50MB of webp.
+const ATLAS_SIG = "a" + createHash("sha1")
+  .update(readdirSync(path.join(ROOT, "assets/sheets")).sort().join("\n"))
+  .update(readFileSync(path.join(ROOT, "js/render3d.js")))
+  .digest("hex").slice(0, 10);
 
 // ---- Lua sources ------------------------------------------------------------
 // Inline the Lua authoring prelude (js/lua/prelude.lua) and every content
@@ -98,7 +105,7 @@ const WORKSHOP_URL = (process.env.TAIAO_WORKSHOP_URL || "").replace(/\/+$/, "");
 // the signature prelude must precede every bundled file (chunks.js, map.js
 // and features.js read the globals when they evaluate)
 let combined = `/* world-cache signatures + server config (tools/build.mjs) */\n` +
-  `var WORLDGEN_SIG = "${WORLDGEN_SIG}", MAPBAKE_SIG = "${MAPBAKE_SIG}";\n` +
+  `var WORLDGEN_SIG = "${WORLDGEN_SIG}", MAPBAKE_SIG = "${MAPBAKE_SIG}", ATLAS_SIG = "${ATLAS_SIG}";\n` +
   `var SERVER_URL = ${JSON.stringify(SERVER_URL)}, TURNSTILE_SITEKEY = ${JSON.stringify(TURNSTILE_SITEKEY)};\n` +
   `var TAIAO_WORKSHOP_URL = ${JSON.stringify(WORKSHOP_URL)};\n;\n`;
 let rawBytes = 0;
