@@ -4,13 +4,15 @@
 // stock (SHOP_STOCK + biome surplus) is the standing floor, BANK_PERMANENTS
 // style, so staples are always buyable and a new player can never starve.
 //
-// market.js consults this module for: player-stocked quantities (shown on
-// the shelf with the maker's name — trading through the world, asynchronously,
-// provenance attached), and the SUPPLY TERM its price formulas gain — a glut
-// of player stock softens both what the town pays and what it charges.
+// The living till (docs/shopkeeper-economy.md): alongside the shelf, each
+// town syncs a finite CASH balance and per-item demand/supply beliefs
+// (lazily-decayed EMAs). market.js prices everything through the shared
+// EconCore engine over this state — the same math the worker runs when it
+// settles a flushed trade, so every player at a stall sees the same market.
 //
 // Trades queue locally and flush async (offline play loses nothing); logged
-// out or in DEV_MODE the module is inert and shops are exactly as before.
+// out or in DEV_MODE the module is inert and EconCore's neutral state makes
+// shops price exactly as the legacy formulas did.
 "use strict";
 
 (function () {
@@ -18,7 +20,7 @@
   const QUEUE_KEY = "taiao_tradequeue_v1";
   const STOCK_TTL = 90e3;
   const noop = { ensureStock: () => null, qty: () => 0, units: () => [], items: () => ({}),
-    buyMult: () => 1, sellMult: () => 1, noteSell: () => {}, noteBuy: () => {},
+    flow: () => null, till: () => null, noteSell: () => {}, noteBuy: () => {},
     status: () => ({ enabled: false }) };
   if (DEV) { window.ShopSync = noop; return; }
 
@@ -28,20 +30,21 @@
   try { queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || "[]") || []; } catch (e) {}
   const persistQueue = () => { try { localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)); } catch (e) {} };
 
-  const stocks = new Map();              // town -> {items, at, fetching}
+  const stocks = new Map();              // town -> {items, flow, till, at, fetching}
 
   // ---------- reads (market.js render + price formulas) ----------
   function ensureStock(town) {
     if (!town || !live()) return null;
     let s = stocks.get(town);
     if (!s || (!s.fetching && Date.now() - s.at > STOCK_TTL)) {
-      s = s || { items: null, at: 0 };
+      s = s || { items: null, flow: null, till: null, at: 0 };
       s.fetching = true;
       stocks.set(town, s);
       Server.call("/api/shop/stock?town=" + encodeURIComponent(town)).then(r => {
         s.fetching = false;
         if (!r || !r.ok) return;
-        s.items = r.items || {}; s.at = Date.now();
+        s.items = r.items || {}; s.flow = r.flow || {}; s.till = r.till || null;
+        s.at = Date.now();
         // repaint an open market so player stock appears without a reopen
         try {
           if (typeof activeMarket !== "undefined" && activeMarket &&
@@ -56,17 +59,19 @@
   const units = (town, id) => (entry(town, id) || {}).units || [];
   const items = town => { const s = stocks.get(town); return (s && s.items) || {}; };
 
-  // The supply term (audit Phase 2): log-damped so the first few player
-  // units barely move prices and a warehouse of them caps out gently.
-  // More supply → the town charges less for it and pays less for more of it.
-  const buyMult = (town, id) => {
-    const q = qty(town, id);
-    return q > 0 ? Math.max(0.65, 1 - 0.06 * Math.log2(1 + q)) : 1;
-  };
-  const sellMult = (town, id) => {
-    const q = qty(town, id);
-    return q > 0 ? Math.max(0.55, 1 - 0.05 * Math.log2(1 + q)) : 1;
-  };
+  // Demand/supply beliefs, decayed to now (EconCore closed-form — the same
+  // decay the worker applies, so both sides read the same number).
+  function flow(town, id) {
+    const s = stocks.get(town);
+    const f = s && s.flow && s.flow[id];
+    if (!f || typeof EconCore === "undefined") return f || null;
+    return { in: EconCore.decay(f.in, s.at, Date.now()),
+             out: EconCore.decay(f.out, s.at, Date.now()) };
+  }
+  // The town's cash. Null until the first sync (EconCore treats null as
+  // neutral, i.e. legacy prices) — never guessed, so prices only bend once
+  // the shared truth has actually arrived.
+  function till(town) { const s = stocks.get(town); return (s && s.till) || null; };
 
   // ---------- writes (choke-point notes from market.js) ----------
   function lineFor(town) {
@@ -74,24 +79,36 @@
     if (!l) { l = { town, sells: [], buys: [] }; queue.push(l); }
     return l;
   }
-  function noteSell(town, id, n, q, maker, skill) {
+  // Optimistic till move so repeated dumps between flushes see the cash
+  // drain (and offers fall) immediately; server truth overwrites on flush.
+  function tillMove(town, delta) {
+    const s = stocks.get(town);
+    if (!s || !s.till || typeof EconCore === "undefined") return;
+    s.till.cash = Math.max(EconCore.reserveOf(s.till.operating),
+      Math.min(EconCore.tillCapOf(s.till.operating), s.till.cash + delta));
+  }
+  function noteSell(town, id, n, q, maker, skill, paid) {
     if (!town || !n || DEV) return;
     const l = lineFor(town);
     const same = l.sells.find(s => s.item === id && s.q === q && s.maker === maker);
-    if (same) same.qty += n;
-    else l.sells.push({ item: id, qty: n, q: q ?? null, maker: maker || null, skill: skill || null });
-    // optimistic: the shelf shows your goods immediately
-    const e = entry(town, id);
-    if (e) e.qty += n;
+    if (same) { same.qty += n; same.paid = (same.paid || 0) + (paid || 0); }
+    else l.sells.push({ item: id, qty: n, q: q ?? null, maker: maker || null,
+                        skill: skill || null, paid: paid || 0 });
+    // optimistic: the shelf shows your goods immediately, the till pays now
+    const s = stocks.get(town);
+    if (s && s.items) (s.items[id] ||= { qty: 0, units: [] }).qty += n;
+    tillMove(town, -(paid || 0));
     persistQueue(); soonFlush();
   }
-  function noteBuy(town, id, n) {
+  function noteBuy(town, id, n, paid) {
     if (!town || !n || DEV) return;
     const l = lineFor(town);
     const same = l.buys.find(b => b.item === id);
-    if (same) same.qty += n; else l.buys.push({ item: id, qty: n });
+    if (same) { same.qty += n; same.paid = (same.paid || 0) + (paid || 0); }
+    else l.buys.push({ item: id, qty: n, paid: paid || 0 });
     const e = entry(town, id);
     if (e) e.qty = Math.max(0, e.qty - n);
+    tillMove(town, paid || 0);
     persistQueue(); soonFlush();
   }
 
@@ -111,6 +128,8 @@
         if (s && s.items && r.stock)
           for (const [id, n] of Object.entries(r.stock))
             (s.items[id] ||= { qty: 0, units: [] }).qty = n;
+        if (s && r.till) s.till = r.till;
+        if (s && r.flow) { s.flow = s.flow || {}; Object.assign(s.flow, r.flow); }
       }
       persistQueue();
     } catch (e) {} finally { flushing = false; }
@@ -119,7 +138,7 @@
   addEventListener("beforeunload", persistQueue);
 
   window.ShopSync = {
-    ensureStock, qty, units, items, buyMult, sellMult, noteSell, noteBuy,
+    ensureStock, qty, units, items, flow, till, noteSell, noteBuy,
     status: () => ({ enabled: true, live: live(), queued: queue.length }),
   };
 })();

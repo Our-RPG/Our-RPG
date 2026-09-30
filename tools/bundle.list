@@ -42,6 +42,9 @@ js/skills/foodbuffs.js
 js/skills/practical-uses.js
 js/skills/one-skill-per-station.js
 js/skills/furniture.js
+# the shared shopkeeper price engine (also imported by the server worker —
+# server/src/econ-core.js shim); must precede market.js, which quotes with it
+shared/econ-core.js
 js/skills/market.js
 js/custom-mobs.js
 js/nz-extra-trees.js

@@ -179,6 +179,34 @@ CREATE TABLE IF NOT EXISTS shop_units (
 );
 CREATE INDEX IF NOT EXISTS idx_units_town_item ON shop_units(town, item, sold_at);
 
+-- The living till (docs/shopkeeper-economy.md): one shared cash balance per
+-- town ('shop' column reserved for a Phase-2 per-shopkeeper split), seeded
+-- deterministically on first trade. Player sells drain it, buys refill it,
+-- the daily cron drifts it back toward operating cash.
+CREATE TABLE IF NOT EXISTS shop_till (
+  town        TEXT NOT NULL,
+  shop        TEXT NOT NULL DEFAULT 'town',
+  cash        INTEGER NOT NULL,
+  operating   INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (town, shop)
+);
+
+-- Lazily-decayed demand/supply beliefs per (town, item) — sparse, created on
+-- first trade of that item there. Prices are never stored, always computed
+-- from these EMAs by shared/econ-core.js (client and worker, same math).
+CREATE TABLE IF NOT EXISTS shop_flow (
+  town        TEXT NOT NULL,
+  item        TEXT NOT NULL,
+  ema_in      REAL NOT NULL DEFAULT 0,   -- units/day players sell to the town
+  ema_out     REAL NOT NULL DEFAULT 0,   -- units/day players buy from it
+  day_in      INTEGER NOT NULL DEFAULT 0, -- today's raw flow (belief caps)
+  day_out     INTEGER NOT NULL DEFAULT 0,
+  day_start   INTEGER NOT NULL DEFAULT 0,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (town, item)
+);
+
 -- §6.1-B: envelope-clamped XP — the only XP ranks and the economy count.
 CREATE TABLE IF NOT EXISTS validated_xp (
   user_id     INTEGER NOT NULL REFERENCES users(id),

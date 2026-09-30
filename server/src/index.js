@@ -175,6 +175,7 @@ export default {
         await envelope.sweep(env);
         await ranks.recomputeAll(env);
         await shops.sweepStale(env);
+        await shops.dailyTick(env);
         return;
       }
       await buildAndPostDigest(env);

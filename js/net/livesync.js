@@ -282,13 +282,13 @@
   }
   if (typeof ShopSync !== "undefined") {
     const oSell = ShopSync.noteSell, oBuy = ShopSync.noteBuy;
-    ShopSync.noteSell = function (town, id, n, q, maker, skill) {
+    ShopSync.noteSell = function (town, id, n, q, maker, skill, paid) {
       try { send({ t: "e", k: "sell", item: id, n: n | 0 }); } catch (e) {}
-      return oSell(town, id, n, q, maker, skill);
+      return oSell(town, id, n, q, maker, skill, paid);
     };
-    ShopSync.noteBuy = function (town, id, n) {
+    ShopSync.noteBuy = function (town, id, n, paid) {
       try { send({ t: "e", k: "buy", item: id, n: n | 0 }); } catch (e) {}
-      return oBuy(town, id, n);
+      return oBuy(town, id, n, paid);
     };
   }
   if (typeof RegionSync !== "undefined" && RegionSync.noteNode) {
