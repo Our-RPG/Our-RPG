@@ -262,6 +262,26 @@ export async function publish(req, env) {
   return json({ ok: true, npcs: man.npcs.length, cities: man.cities.length });
 }
 
+/* Admin repair: overwrite a LIVE zone's map image directly, bypassing the
+ * claim/checkpoint/publish flow — for fixing a corrupted/blank map (e.g. the
+ * 2026-09-30 zone-worker.js token bug) without redoing the already-correct
+ * NPC/city data. The R2 admin API (wrangler CLI) can't write under the
+ * "zones/" prefix on this account, so this goes through the Worker's own
+ * VAULT binding instead:
+ *   curl -H "authorization: Bearer $ADMIN_TOKEN" --data-binary @zone_2_0.png \
+ *     "https://our-rpg.com/api/admin/zonemap?zx=2&zy=0"
+ */
+export async function adminSetZoneMap(req, env, url) {
+  const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
+  if (!env.ADMIN_TOKEN || !m || m[1] !== env.ADMIN_TOKEN) return err("Nope.", 403);
+  const c = coords(url); if (!c) return err("Bad zone coordinates.");
+  const len = Number(req.headers.get("content-length") || 0);
+  if (!len || len > KINDS.map.max) return err("Bad or oversized image.", 413);
+  const body = await req.arrayBuffer();
+  await env.VAULT.put(liveKey(c.zx, c.zy, "map.png"), body, { httpMetadata: { contentType: "image/png" } });
+  return json({ ok: true, bytes: body.byteLength });
+}
+
 /* ---- synthesized page shells -------------------------------------------- */
 /* The same shell template tools/gen_pages.mjs writes (site mode: one prebuilt
  * dist/workshop-bundle.js), so a community zone's pages are byte-equivalent in

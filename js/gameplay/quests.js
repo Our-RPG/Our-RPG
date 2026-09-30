@@ -60,7 +60,44 @@
     if (!q.done) q.done = {};
     if (!q.flags) q.flags = {};
     if (!q.revealed) q.revealed = [];
+    if (!_namesMigrated && migrateQuestNames(q)) _namesMigrated = true;
     return q;
+  }
+
+  // an ACCEPTED quest's name/intro/step text was baked with whatever
+  // settlement/POI names were live when it was offered (js/world/features.js
+  // NAME_A/NAME_B) — if that pool changes later the text goes stale forever
+  // unless repaired. Re-running genQuest() for the same giver+series is
+  // deterministic and reproduces the identical template/steps/reward (every
+  // rng() draw is driven by WORLD POSITIONS, which the name pool never
+  // touches) — only the embedded names differ — so we discard the old text
+  // wholesale and carry the mutable progress (current step, slain counts)
+  // across onto the freshly-generated quest. One attempt per boot: retries
+  // next call if `world` isn't ready yet, otherwise never revisited.
+  let _namesMigrated = false;
+  function migrateQuestNames(q) {
+    if (!(typeof world !== "undefined" && world.villagesNearPt)) return false;
+    let changed = false;
+    for (const qid in q.active) {
+      const old = q.active[qid];
+      const m = /^q:(-?\d+),(-?\d+)(?:#(\d+))?$/.exec(qid);
+      if (!old || !m) continue;
+      try {
+        const proxy = { x: +m[1], y: +m[2], name: old.giver && old.giver.name };
+        const fresh = genQuest(proxy, m[3] ? +m[3] : 0);
+        if (!fresh || fresh.tpl !== old.tpl || fresh.steps.length !== old.steps.length) continue;
+        fresh.step = old.step;
+        for (let i = 0; i < fresh.steps.length; i++) {
+          const os = old.steps[i], ns = fresh.steps[i];
+          if (os.done) ns.done = true;
+          if (typeof os.got === "number") ns.got = os.got;
+        }
+        q.active[qid] = fresh;
+        changed = true;
+      } catch (e) { /* leave this one alone on any mismatch */ }
+    }
+    if (changed && typeof saveGame === "function") saveGame();
+    return true;
   }
 
   // giver identity + quest SERIES: the qid encodes how many quests this giver has

@@ -107,6 +107,7 @@ const ROUTES = {
   "PUT /api/zones/checkpoint":          zones.putCheckpoint,
   "GET /api/zones/checkpoint":          zones.getCheckpoint,
   "POST /api/zones/publish":            zones.publish,
+  "PUT /api/admin/zonemap":             zones.adminSetZoneMap,
 
   "POST /api/telemetry":                telemetry.ingest,
   "GET /api/admin/telemetry":           telemetry.adminBrowse,

@@ -1,29 +1,33 @@
 // ===== Taiao — Lua quest anchors for zone[0,0] (Newhaven) =====
 // Hand-authored quest givers + world objects, anchored at deterministic walkable
-// plaza tiles near the origin. Givers are ROOTED (_r:0) and carry a `_script` id
-// (Lua matches _script before name — js/lua/lua-engine.js npcSubject), so they
+// plaza tiles near the origin. Givers carry a `_script` id (Lua matches _script
+// before name — js/lua/lua-engine.js npcSubject, position-independent), so they
 // are immune to the zone NPC-name churn and never touched by the mix-NPC culler
-// (they're pushed in deriveNpcs, not tracked in render3d's mixKeyed). Quest
-// objects use a UNIQUE decor key aliased into OBJ_MAP to an existing prop sprite,
-// so they render like that prop but their on_loc trigger can't collide with real
-// civic decor. Tiles verified walkable (chunks scan around origin).
+// (they're pushed in deriveNpcs, not tracked in render3d's mixKeyed). They wander
+// their plaza tile and sleep at night like ordinary town NPCs (render3d.js
+// stepMixNpc, gated by _home/_r/_wanderAt same as everyone else); syncMixNpcs
+// additionally hands each one a real `_bed` in the nearest Newhaven building, so
+// they path home and lie down instead of just standing in place after dark.
+// Quest objects use a UNIQUE decor key aliased into OBJ_MAP to an existing prop
+// sprite, so they render like that prop but their on_loc trigger can't collide
+// with real civic decor. Tiles verified walkable (chunks scan around origin).
 "use strict";
 
 const QUEST_GIVERS = [
   { script: "nh_quartermaster", x: 3, y: 2, mix: 20, name: "Quartermaster Yorick", title: "Quartermaster",
-    line: `"Newhaven's walls are only as good as the folk who mind the wilds beyond them."` },
+    line: `Newhaven's walls are only as good as the folk who mind the wilds beyond them.` },
   { script: "nh_herbalist", x: -3, y: 2, mix: 44, name: "Herbalist Maeve", title: "Herbalist",
-    line: `"The meadow gives freely, if you know where to look."` },
+    line: `The meadow gives freely, if you know where to look.` },
   { script: "nh_dockmaster", x: 3, y: -2, mix: 71, name: "Dockmaster Pell", title: "Dockmaster",
-    line: `"Cargo doesn't count itself, and the ledger's gone crooked."` },
+    line: `Cargo doesn't count itself, and the ledger's gone crooked.` },
   { script: "nh_ranger", x: -3, y: -2, mix: 96, name: "Ranger Ash", title: "Ranger",
-    line: `"The road out of Newhaven isn't as safe as the maps pretend."` },
+    line: `The road out of Newhaven isn't as safe as the maps pretend.` },
   { script: "nh_urchin", x: 0, y: 3, mix: 130, name: "Sparrow the Urchin", title: "Street urchin",
-    line: `"Psst. You look like someone who can keep a secret — and find things."` },
+    line: `Psst. You look like someone who can keep a secret — and find things.` },
   { script: "nh_archivist", x: 0, y: -3, mix: 158, name: "Archivist Wren", title: "Archivist",
-    line: `"Every name in this zone is written down somewhere. Most of them, anyway."` },
+    line: `Every name in this zone is written down somewhere. Most of them, anyway.` },
   { script: "nh_cook", x: 2, y: 4, mix: 187, name: "Cook Bess", title: "Cook",
-    line: `"A city marches on its stomach, and mine's near empty."` },
+    line: `A city marches on its stomach, and mine's near empty.` },
 ];
 
 // world objects for on_loc retrieve quests. `alias` = an existing OBJ_MAP prop to
@@ -45,8 +49,13 @@ function deriveQuestGivers(ch, npcs, npcDerived, CHUNK, PX) {
       npcs.push({
         name: g.name, x: g.x, y: g.y, px: PX(g.x), py: PX(g.y), look: -1,
         mix: def.key, mixTitle: g.title || def.title, dir8: "south",
-        _mid: "qg_" + g.script, _home: [g.x, g.y], _r: 0,
-        _wanderAt: (typeof performance !== "undefined" ? performance.now() : 0) + 9e9, _mt: 0,
+        // _r/_wanderAt match the isolated-POI quest-giver convention
+        // (placeMixNpc's maxR 3/radius 3) so they wander their plaza tile and
+        // go through the normal bedtime routine like other town NPCs, instead
+        // of being locked in place — render3d.js's syncMixNpcs assigns each a
+        // real `_bed` in the nearest Newhaven building once it populates.
+        _mid: "qg_" + g.script, _home: [g.x, g.y], _r: 3,
+        _wanderAt: (typeof performance !== "undefined" ? performance.now() : 0) + 800 + Math.random() * 4000, _mt: 0,
         _script: g.script, line: g.line,
       });
     }

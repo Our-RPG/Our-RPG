@@ -62,14 +62,21 @@ const ZoneStore = (function () {
     return [...out];
   }
 
-  // the zone manifest — static file first, then the server copy
+  // the zone manifest — static file first (ONLY if index.json actually lists
+  // it: a zone dropped from the static build can leave a stale, long-cached
+  // (s-maxage=604800) copy of its old zone_<x>_<y>.json sitting on the CDN —
+  // fetching it unconditionally would resurrect that stale file even though
+  // index.json (never observed stale) correctly says it's gone), then the
+  // server copy.
   function manifest(zx, zy) {
     const k = key(zx, zy);
     if (!_manifests.has(k)) {
-      _manifests.set(k, fetch(STUDIO_BASE + "assets/zones/zone_" + zx + "_" + zy + ".json", { cache: "force-cache" })
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null)
-        .then(m => {
+      _manifests.set(k, staticIndex().then(st => {
+        if (!st.has(k)) return null;
+        return fetch(STUDIO_BASE + "assets/zones/zone_" + zx + "_" + zy + ".json", { cache: "force-cache" })
+          .then(r => r.ok ? r.json() : null)
+          .catch(() => null);
+      }).then(m => {
           if (m) { _manifestFrom.set(k, "static"); return m; }
           const base = apiBase();
           if (!base) return null;
