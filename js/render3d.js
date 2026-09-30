@@ -1067,8 +1067,6 @@ void main() {
   ];
   const FARLOD_SINK = 0.45, FARLOD_CELL = 96;
   let farMeshes = [], farMat = null, farJob = null, farCenter = null;
-  // ring-0 record for the live relief-hole reindex (see buildRing0Index)
-  let farRing0 = null, farCovKey = "";
   // far road/river ribbons live apart from the terrain grid so they can be
   // redrawn alone: roads come from the CACHED cells only (roadsNearCached) —
   // cells the road worker hasn't finished yet are skipped, counted here, and
@@ -1313,47 +1311,6 @@ void main() {
     return holes;
   }
 
-  // Ring-0 quad indices, shared by the recentre build and the live reindex.
-  // `cov` (the tile rect of the CURRENTLY loaded chunk field) gates the
-  // RELIEF holes: across a 16-tile quad the interpolated surface bridges
-  // terrace steps the real chunks quantize, so on steep land the chord rides
-  // ABOVE the lower terraces (the 0.45 sink covers less than one 0.5 step)
-  // and pokes through the loaded ground as flat biome-colour wedges — the
-  // land twin of the carved-water failure farHoleCells documents. But the
-  // vista is visible far past the ground-fill radius, so a steep quad is
-  // only holed when real chunk terrain FULLY covers it (cov moves with the
-  // player and grows/shrinks with camZoom — syncFarLod reindexes on every
-  // change); everywhere else the sunken slope stays as backfill. cov=null
-  // (the initial pass at a recentre) skips relief holes entirely.
-  function buildRing0Index(pos, n, holes, cx, cz, cov) {
-    const step = FARLOD_RINGS[0].step, half = FARLOD_RINGS[0].half;
-    const WATER_Y = -STEP_H - 0.08;
-    const idx = [];
-    for (let z = 0; z < n - 1; z++)
-      for (let x = 0; x < n - 1; x++) {
-        const a = z * n + x;
-        const y00 = pos[a * 3 + 1], y10 = pos[(a + 1) * 3 + 1],
-              y01 = pos[(a + n) * 3 + 1], y11 = pos[(a + n + 1) * 3 + 1];
-        // fully-open-water quads are HOLES so the sea backdrop shows through
-        if (y00 <= WATER_Y && y10 <= WATER_Y && y01 <= WATER_Y && y11 <= WATER_Y) continue;
-        // near-field water holes (rivers / water POIs — see farHoleCells)
-        if (holes.has(z * (n - 1) + x)) continue;
-        const wx0 = cx - half + x * step, wz0 = cz - half + z * step;
-        // near-field coast fringe: a mixed land/water quad slopes across
-        // up to 16 tiles of REAL sea tiles — hole it, the backdrop is sea
-        if (Math.max(Math.abs(wx0 + step / 2 - cx), Math.abs(wz0 + step / 2 - cz)) <= FARLOD_HOLE_R &&
-            (y00 <= WATER_Y || y10 <= WATER_Y || y01 <= WATER_Y || y11 <= WATER_Y))
-          continue;
-        // near-field RELIEF holes — only where the loaded chunks own the ground
-        if (cov && wx0 >= cov.x0 && wz0 >= cov.z0 &&
-            wx0 + step <= cov.x1 && wz0 + step <= cov.z1 &&
-            Math.max(y00, y10, y01, y11) - Math.min(y00, y10, y01, y11) > STEP_H * 0.55)
-          continue;
-        idx.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
-      }
-    return idx;
-  }
-
   function startFarBuild(cx, cz) {
     farJob = { cx, cz, ring: 0, row: 0, parts: [], holes: farHoleCells(cx, cz) };
     for (const r of FARLOD_RINGS) {
@@ -1453,12 +1410,6 @@ void main() {
       // quads with mixed corners keep their depth shading)
       const inner = farJob.ring > 0 ? FARLOD_RINGS[farJob.ring - 1].half : -1;
       const WATER_Y = -STEP_H - 0.08;
-      if (farJob.ring === 0) {
-        // ring 0 gets its indices from the shared builder (no relief holes on
-        // the initial pass — syncFarLod reindexes against the live loaded-chunk
-        // field right after the swap)
-        part.idx = buildRing0Index(part.pos, n, farJob.holes, farJob.cx, farJob.cz, null);
-      } else
       for (let z = 0; z < n - 1; z++)
         for (let x = 0; x < n - 1; x++) {
           if (inner > 0) {
@@ -1471,6 +1422,34 @@ void main() {
           if (part.pos[a * 3 + 1] <= WATER_Y && part.pos[(a + 1) * 3 + 1] <= WATER_Y &&
               part.pos[(a + n) * 3 + 1] <= WATER_Y && part.pos[(a + n + 1) * 3 + 1] <= WATER_Y)
             continue;
+          if (farJob.ring === 0) {
+            // near-field water holes (rivers / water POIs — see farHoleCells)
+            if (farJob.holes.has(z * (n - 1) + x)) continue;
+            // near-field coast fringe: a mixed land/water quad slopes across
+            // up to 16 tiles of REAL sea tiles — hole it, the backdrop is sea
+            const wx = farJob.cx - ring.half + x * ring.step + ring.step / 2;
+            const wz = farJob.cz - ring.half + z * ring.step + ring.step / 2;
+            const nearField = Math.max(Math.abs(wx - farJob.cx), Math.abs(wz - farJob.cz)) <= FARLOD_HOLE_R;
+            if (nearField &&
+                (part.pos[a * 3 + 1] <= WATER_Y || part.pos[(a + 1) * 3 + 1] <= WATER_Y ||
+                 part.pos[(a + n) * 3 + 1] <= WATER_Y || part.pos[(a + n + 1) * 3 + 1] <= WATER_Y))
+              continue;
+            // near-field RELIEF holes: same failure mode as the carved water
+            // above, but on steep LAND — across a 16-tile quad the interpolated
+            // surface bridges terrace steps the real chunks quantize, so the
+            // chord rides ABOVE the lower terraces (the 0.45 sink covers less
+            // than one 0.5 step) and pokes through the loaded ground as flat
+            // biome-colour wedges. Any quad spanning terrace-scale relief
+            // inside the loaded-chunk field is a HOLE; the real tiles (or,
+            // past view reach, depth fog) own it. Beyond FARLOD_HOLE_R the
+            // vista keeps its slopes — there's no near mesh to fight.
+            if (nearField) {
+              const y00 = part.pos[a * 3 + 1], y10 = part.pos[(a + 1) * 3 + 1],
+                    y01 = part.pos[(a + n) * 3 + 1], y11 = part.pos[(a + n + 1) * 3 + 1];
+              if (Math.max(y00, y10, y01, y11) - Math.min(y00, y10, y01, y11) > STEP_H * 0.55)
+                continue;
+            }
+          }
           part.idx.push(a, a + n, a + 1, a + 1, a + n, a + n + 1);
         }
       farJob.ring++; farJob.row = 0;
@@ -1494,11 +1473,6 @@ void main() {
       }
       for (const m of farMeshes) { scene.remove(m); m.geometry.dispose(); }
       farMeshes = fresh;
-      // remember ring 0 so syncFarLod can reindex its relief holes against
-      // the live loaded-chunk field (empty key forces one next frame)
-      farRing0 = { mesh: fresh[0], n: farJob.parts[0].n, holes: farJob.holes,
-                   cx: farJob.cx, cz: farJob.cz };
-      farCovKey = "";
       farCenter = { x: farJob.cx, z: farJob.cz };
       farJob = null;
       refreshFarRibbons(farCenter.x, farCenter.z);
@@ -1535,23 +1509,6 @@ void main() {
       _sec("farStart", performance.now() - _t0);
     }
     if (farJob) stepFarBuild();
-    // relief holes track the LIVE loaded-chunk field — it moves with the
-    // player and its radius follows camZoom (chunkRadius) — so ring 0
-    // reindexes whenever either changes. A 2.3k-quad loop over stored
-    // heights: no noise sampling, cheap enough to run on every crossing.
-    if (farRing0) {
-      const CSw = world.CHUNK, Rw = chunkRadius();
-      const pcx = Math.floor(player.x / CSw), pcy = Math.floor(player.y / CSw);
-      const key = pcx + "," + pcy + "," + Rw;
-      if (key !== farCovKey) {
-        farCovKey = key;
-        const cov = { x0: (pcx - Rw) * CSw, z0: (pcy - Rw) * CSw,
-                      x1: (pcx + Rw + 1) * CSw, z1: (pcy + Rw + 1) * CSw };
-        farRing0.mesh.geometry.setIndex(buildRing0Index(
-          farRing0.mesh.geometry.getAttribute("position").array,
-          farRing0.n, farRing0.holes, farRing0.cx, farRing0.cz, cov));
-      }
-    }
     // road cells the worker hadn't finished when the ribbons drew: redraw the
     // ROAD ribbon (rivers don't depend on the road cache) once the worker has
     // injected new cells, at most every couple of seconds, until none are
@@ -5157,20 +5114,7 @@ void main() {
     if (typeof Lua === "undefined" || !Lua.ready) assignLampTasks();
     // 3) fluid wander for EVERY npc that has a home post — ambient townsfolk,
     //    quest-givers AND shopkeepers (who now step out of their shops too).
-    //    DISTANCE-CULLED: an NPC well beyond the view (e.g. the Tūhura Isle
-    //    tutors, ~13000 tiles away once a graduated player's isle chunks have
-    //    been derived into world.npcs) must not step — its wander AI probes
-    //    tile passability (isBlocked/isWater/structAt/groundLevel), and a
-    //    probe into that cold, never-warmed region force-generates the chunk
-    //    synchronously (tens of seconds — the mid-combat freeze). Nobody can
-    //    see an off-screen NPC move anyway; it resumes the moment it's near.
-    //    The margin sits a little past the render cull (5255) so an NPC still
-    //    animates smoothly as it walks into view.
-    const _npcStepR = viewRadius() + 24;
-    for (const npc of world.npcs)
-      if (npc._home &&
-          Math.abs(npc.x - player.x) <= _npcStepR && Math.abs(npc.y - player.y) <= _npcStepR)
-        stepMixNpc(npc);
+    for (const npc of world.npcs) if (npc._home) stepMixNpc(npc);
     tickNpcDoors(performance.now());
   }
 
@@ -6663,12 +6607,7 @@ void main() {
     // floats
     for (const f of floats) {
       const prog = (now - f.t) / 1500;
-      // f.x/f.y are PIXEL coords (addFloat is called with player.px/py, monster
-      // px/py, etc.) — sample the ground through liftPx, which divides by the
-      // tile pixel scale first. Passing the raw pixels to groundY treated them
-      // as TILE coords and force-generated a chunk ~13000 tiles away (cold,
-      // 40-60s) — every combat damage number risked that synchronous freeze.
-      const p = project(f.x, f.y, 1.3 + prog * 0.9 + liftPx(f.x, f.y));
+      const p = project(f.x, f.y, 1.3 + prog * 0.9 + groundY(Math.floor(f.x), Math.floor(f.y)));
       if (p.behind) continue;
       octx.globalAlpha = 1 - prog;
       octx.fillStyle = f.color;
