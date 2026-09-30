@@ -899,11 +899,22 @@ function createWorldChunks(ctx) {
     // floor tiles are walkable (blocked 0/2); we skip walls (blocked 1), the
     // door gap, already-decorated tiles and station nodes. Props never block
     // movement (deco() with no blk flag), so furnishing can't trap the player.
+    // no object may crowd a doorway: reject tiles hugging the exterior
+    // door(s) or any ground-level interior archway of the building
+    const nearDoorway = (b, x, y) => {
+      const dx0 = b.door ? b.door.x : b.x0 + (b.w >> 1);
+      const dy0 = b.door ? b.door.y : b.y0 + b.h - 1;
+      if (Math.abs(x - dx0) <= 1 && Math.abs(y - dy0) <= 1) return true;
+      if (b.door2 && Math.abs(x - b.door2.x) <= 1 && Math.abs(y - b.door2.y) <= 1) return true;
+      return (b.idoors || []).some(d2 => (d2.s == null || d2.s === 0) &&
+        Math.abs(x - d2.x) <= 1 && Math.abs(y - d2.y) <= 1);
+    };
     const furnishInterior = (b, items) => {
       if (!b) return;
       for (const [spr, dx, dy] of items) {
         const fx = b.x0 + dx, fy = b.y0 + dy;
         if (!inCh(fx, fy) || decor[li(fx, fy)] || blocked[li(fx, fy)] === 1) continue;
+        if (nearDoorway(b, fx, fy)) continue;
         if (!String(ground[li(fx, fy)]).startsWith("floor")) continue; // hollow river passage
         if (nodes.some(n => n.x === fx && n.y === fy)) continue;
         deco(fx, fy, spr);
@@ -977,9 +988,9 @@ function createWorldChunks(ctx) {
         const [ox2, oy2] = [[-1, 0], [0, -1], [1, 0], [0, 1]][ang]; // W N E S outward
         const hx = d.x + ox2 * 3 + (ang % 2 ? 0 : 2);               // 3 out, 2 aside
         const hy = d.y + oy2 * 3 + (ang % 2 ? 2 : 0);
-        if (inCh(hx, hy) && blocked[li(hx, hy)] !== 1 && !decor[li(hx, hy)] &&
+        if (inCh(hx, hy) && blocked[li(hx, hy)] === 0 && !decor[li(hx, hy)] &&
             !isWaterKey(ground[li(hx, hy)]) && !String(ground[li(hx, hy)]).startsWith("floor"))
-          deco(hx, hy, hk, true);
+          deco(hx, hy, hk, true); // blocked===0 only: never on a reserved door-front strip
       }
     };
 
@@ -1182,7 +1193,8 @@ function createWorldChunks(ctx) {
       let cx2 = alt ? rx0 + 2 + (WIDE_STATIONS.has(b.job) ? 1 : 0) : rx0 + (r0.w >> 1);
       let cy2 = alt ? ry0 + r0.h - 3 : ry0 + (WIDE_STATIONS.has(b.job) ? 2 : 1);
       if (!inCh(cx2, cy2)) return;
-      if (!inRooms(cx2, cy2) || !String(ground[li(cx2, cy2)]).startsWith("floor") ||
+      if (!inRooms(cx2, cy2) || nearDoorway(b, cx2, cy2) ||
+          !String(ground[li(cx2, cy2)]).startsWith("floor") ||
           blocked[li(cx2, cy2)] === 1 || decor[li(cx2, cy2)]) {
         // the usual spot is over a river building's hollow channel: shift the
         // station (bank chest, anvil, trader…) to the nearest interior floor
@@ -1190,7 +1202,8 @@ function createWorldChunks(ctx) {
         let best = null;
         for (let yy = b.y0 + 1; yy < b.y0 + b.h - 1; yy++)
           for (let xx = b.x0 + 1; xx < b.x0 + b.w - 1; xx++) {
-            if (!inCh(xx, yy) || !inRooms(xx, yy) || !String(ground[li(xx, yy)]).startsWith("floor")) continue;
+            if (!inCh(xx, yy) || !inRooms(xx, yy) || nearDoorway(b, xx, yy) ||
+                !String(ground[li(xx, yy)]).startsWith("floor")) continue;
             if (blocked[li(xx, yy)] === 1 || decor[li(xx, yy)]) continue;
             const dd = Math.abs(xx - cx2) + Math.abs(yy - cy2);
             if (!best || dd < best.d) best = { x: xx, y: yy, d: dd };

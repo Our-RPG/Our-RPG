@@ -3394,6 +3394,18 @@ void main() {
       snowPatchUp(matLightRed, true); snowPatchUp(matLightWhite, true);   // clones drop onBeforeCompile
     }
   }
+  // building door leaves: the door texture multiplied toward blue, so every
+  // doorway reads at a glance (user req 2026-09-30: doorways tinted blue)
+  let _matDoorBlue = null;
+  function matDoorBlue() {
+    if (!_matDoorBlue) {
+      _matDoorBlue = sharedMat.clone();
+      _matDoorBlue.color.set(0x8fc2ff);
+      _matDoorBlue.vertexColors = true;
+      snowPatchUp(_matDoorBlue, true);
+    }
+    return _matDoorBlue;
+  }
   // city walls in weathered grey (the raw wall_stone sprite reads too white
   // across a whole fortification)
   let _matCityWall = null;
@@ -3644,7 +3656,9 @@ void main() {
       return Math.cos(t) * owx - Math.sin(t) * owz;
     };
     const sign = dot(1) > dot(-1) ? 1 : -1;
-    const leaf = new THREE.Mesh(geomFor(key), sharedMat);
+    // building doors get a blue-tinted leaf so doorways pop against masonry;
+    // city gates (village recs, rec.v) keep the plain castle ironwork
+    const leaf = new THREE.Mesh(geomFor(key), rec.b ? matDoorBlue() : sharedMat);
     leaf.position.set(0.49, leafH / 2, 0);
     leaf.scale.set(0.97, leafH, 1);
     grp.add(leaf);
@@ -3842,7 +3856,7 @@ void main() {
           const ry = yB + (rungTop - yB) * r / (nR + 1);
           sbBlock(lb, lx - 0.26, ry - 0.04, lz - 0.03, lx + 0.26, ry + 0.04, lz + 0.03);
         }
-        sbMesh(lb, matFlat(0x8a6236), rec, sg.group);
+        sbMesh(lb, matFlat(0x64a8f0), rec, sg.group); // blue-tinted rails: ladders must pop
       }
       rec.storeyGroups.push(sg);
       group.add(sg.group);
@@ -3922,6 +3936,10 @@ void main() {
             if (tx2 <= r.x || tx2 >= r.x + r.w - 1 || tz2 <= r.y || tz2 >= r.y + r.h - 1) return;
             for (const ld of ladders)
               if (Math.abs(tx2 - ld.x) <= 1 && Math.abs(tz2 - ld.y) <= 1) return;
+            // keep every doorway clear: exterior doors and archways alike
+            for (const dt of doorsArr)
+              if (Math.abs(tx2 - dt.x) <= 1 && Math.abs(tz2 - dt.y) <= 1) return;
+            if ((m.idoors || []).some(d3 => Math.abs(tx2 - d3.x) <= 1 && Math.abs(tz2 - d3.y) <= 1)) return;
             if (slots.some(s3 => s3[0] === tx2 && s3[1] === tz2)) return;
             slots.push([tx2, tz2]);
           };
@@ -4186,7 +4204,7 @@ void main() {
           const ry = yB + (rungTop - yB) * r / (nR + 1);
           sbBlock(lb, lx - 0.26, ry - 0.04, lz - 0.03, lx + 0.26, ry + 0.04, lz + 0.03);
         }
-        sbMesh(lb, matFlat(0x8a6236), rec, sg.group);
+        sbMesh(lb, matFlat(0x64a8f0), rec, sg.group); // blue-tinted rails: ladders must pop
       }
       rec.storeyGroups.push(sg);
       group.add(sg.group);
@@ -4471,6 +4489,8 @@ void main() {
           if (tx2 <= x0 || tx2 >= x1 - 1 || tz2 <= z0 || tz2 >= z1 - 1) return;
           for (const ld of ldList)
             if (Math.abs(tx2 - ld.x) <= 1 && Math.abs(tz2 - ld.y) <= 1) return; // ladder clearance
+          for (const dt of doorsArr)
+            if (Math.abs(tx2 - dt.x) <= 1 && Math.abs(tz2 - dt.y) <= 1) return; // doorway clearance
           if (wings && s === 1 && m.wingDoors &&
               m.wingDoors.some(d3 => d3.x === tx2 && d3.y === tz2)) return;
           if (slots.some(s3 => s3[0] === tx2 && s3[1] === tz2)) return;
@@ -4654,27 +4674,27 @@ void main() {
     return null;
   }
 
-  // roofs lift not only indoors but on thresholds and right beside walls:
-  // true when the player's tile or any 8-neighbour belongs to a building
-  // footprint (room rect incl. its walls/door tiles, or a legacy rect/wing)
-  function nearBuildingTile() {
-    if (!world.insideBuilding) return false;
-    for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const tx = player.x + dx, ty = player.y + dy;
-        const b = world.insideBuilding(tx, ty);
-        if (!b) continue;
-        const m = metaOf(b);
-        if (!m.rooms || m.rooms.some(r => tx >= r.x && tx < r.x + r.w &&
-            ty >= r.y && ty < r.y + r.h)) return true;
-      }
+  // roofs lift well before the walls: true when the player stands within
+  // `range` tiles (Chebyshev) of any building footprint — room rects for
+  // organic buildings, the rect + mansion wings for legacy ones
+  function nearBuildingTile(range) {
+    const list = (world.buildingsNearLoaded || world.buildingsNear)(player.x, player.y, 34);
+    for (const b of list) {
+      const m = metaOf(b);
+      const rects = m.rooms ? m.rooms
+        : [{ x: b.x0, y: b.y0, w: b.w, h: b.h },
+           ...(m.wings || []).map(w2 => ({ x: w2.x0, y: w2.y0, w: w2.w, h: w2.h }))];
+      for (const r of rects)
+        if (player.x >= r.x - range && player.x < r.x + r.w + range &&
+            player.y >= r.y - range && player.y < r.y + r.h + range) return true;
+    }
     return false;
   }
 
   function syncStructures() {
     if (!world.buildingMeta || !world.structAt) return;
     const px = player.x, py = player.y;
-    const roofsOff = !!playerIndoors() || nearBuildingTile();
+    const roofsOff = !!playerIndoors() || nearBuildingTile(5);
     const seen = new Set();
     // new structures build at most one per frame (they enter view range well
     // before the camera reaches them, so spreading the builds out is
@@ -5993,10 +6013,14 @@ void main() {
       if (p.x < -r || p.x > W + r || p.y < -r || p.y > H + r) continue;
       lights.push({ x: p.x, y: p.y, r, s: L.s, col: L.col, gr: (L.gr != null ? L.gr * pxTile : null), gs: L.gs });
     }
-    // indoors, the household lamps are lit: punch a full-strength clear hole
-    // over every room of the building the player is standing in, so the whole
-    // interior reads bright while the streets outside stay night-dark
-    const inb = playerIndoors();
+    // indoors — or standing IN a doorway — the household lamps are lit:
+    // punch a full-strength clear hole over every room of that building, so
+    // the interior reads bright while the streets outside stay night-dark
+    let inb = playerIndoors();
+    if (!inb && world.doorAt) {
+      const dd = world.doorAt(player.x, player.y);
+      if (dd && dd.building) inb = dd.building;
+    }
     if (inb) {
       const bm = world.buildingMeta(inb);
       const rects = bm.rooms
