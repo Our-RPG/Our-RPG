@@ -5466,9 +5466,49 @@ void main() {
           v = near.find(vv => Math.abs(vv.x - site.x) <= 3 && Math.abs(vv.y - site.y) <= 3) || near[0];
         }
         const vbuild = (v && v.buildings) || [];
+        // Hand-authored quest-givers (world/quest-anchors.js — Ranger Ash,
+        // Cook Bess, Archivist Wren, etc.) are rooted extras pushed straight
+        // into world.npcs by chunks.js deriveNpcs, not spawned by the
+        // resident loop below, so they never got a `_bed` and stood frozen
+        // at their plaza spot after dark. Claim each one its OWN nearest
+        // non-trader/bank building in THIS village BEFORE the resident loop
+        // runs (same exclusion as trader/bank, so no ambient resident also
+        // gets spawned there and no bed is shared) — distance-capped so this
+        // only ever matches a building in the giver's own settlement.
+        const giverClaims = new Map(); // building -> giver npc
+        if (typeof QUEST_GIVERS !== "undefined") {
+          const claimedBuildings = new Set();
+          for (const g of QUEST_GIVERS) {
+            const gn = world.npcs.find(n => n._script === g.script);
+            if (!gn || gn._owns) continue;
+            let best = null, bestD = 30;
+            for (const b of vbuild) {
+              if (b.job === "trader" || b.job === "bank" || claimedBuildings.has(b)) continue;
+              const d = Math.hypot((b.x0 + (b.w >> 1)) - gn.x, (b.y0 + (b.h >> 1)) - gn.y);
+              if (d < bestD) { bestD = d; best = b; }
+            }
+            if (best) { claimedBuildings.add(best); giverClaims.set(best, gn); }
+          }
+        }
         for (let bIdx = 0; bIdx < vbuild.length; bIdx++) {
           const b = vbuild[bIdx];
           if (b.job === "trader" || b.job === "bank") continue;   // owned by the chunk shopkeeper/banker
+          // owned by a hand-authored quest-giver (claimed just above) — same
+          // bed/owns assignment as an ambient resident, but no resident is
+          // spawned here; the giver itself moves in.
+          const giver = giverClaims.get(b);
+          if (giver) {
+            giver._owns = [b.x0, b.y0, b.w, b.h];
+            giver._ownsRooms = b.rooms || null;
+            const bmg = world.buildingMeta ? world.buildingMeta(b) : null;
+            const gstoreys = (bmg && bmg.storeys) || 1;
+            giver._bed = b.rooms ? [b.rooms[0].x + 1, b.rooms[0].y + 1]
+              : [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
+            giver._bedLevel = gstoreys > 1 ? gstoreys - 1 : 0;
+            if (gstoreys > 1 && bmg.ladder) giver._ladder = [bmg.ladder.x, bmg.ladder.y];
+            if (gstoreys > 1 && bmg.ladders) giver._ladders = bmg.ladders;
+            continue;
+          }
           // skip if an NPC (e.g. a station keeper) already stands inside this
           // footprint. Organic row-house BBOXES overlap on shared wall lines —
           // test the actual ROOMS, or a neighbour's keeper suppresses (and the
@@ -5504,37 +5544,6 @@ void main() {
             if (storeys > 1 && bm.ladder) npc._ladder = [bm.ladder.x, bm.ladder.y];
             if (storeys > 1 && bm.ladders) npc._ladders = bm.ladders; // per-storey shafts
             listc.push(npc);
-          }
-        }
-        // Hand-authored Newhaven quest-givers (world/quest-anchors.js — Ranger
-        // Ash, Cook Bess, Archivist Wren, etc.) are rooted extras, not part of
-        // this listc (so the culler above never retires them), so they never
-        // went through the resident loop and never got a `_bed`. Give each one
-        // the SAME bed/owns assignment as the nearest non-trader/bank building
-        // in ITS OWN town (matches the formula just above) so they path home
-        // and actually lie down at night instead of freezing at their plaza
-        // spot. Distance-capped so this only ever claims a building in the
-        // giver's own settlement, whichever village happens to populate first.
-        if (typeof QUEST_GIVERS !== "undefined") {
-          for (const g of QUEST_GIVERS) {
-            const gn = world.npcs.find(n => n._script === g.script);
-            if (!gn || gn._bed) continue;
-            let best = null, bestD = 30;
-            for (const b of vbuild) {
-              if (b.job === "trader" || b.job === "bank") continue;
-              const d = Math.hypot((b.x0 + (b.w >> 1)) - gn.x, (b.y0 + (b.h >> 1)) - gn.y);
-              if (d < bestD) { bestD = d; best = b; }
-            }
-            if (!best) continue;
-            gn._owns = [best.x0, best.y0, best.w, best.h];
-            gn._ownsRooms = best.rooms || null;
-            const bm = world.buildingMeta ? world.buildingMeta(best) : null;
-            const storeys = (bm && bm.storeys) || 1;
-            gn._bed = best.rooms ? [best.rooms[0].x + 1, best.rooms[0].y + 1]
-              : [best.x0 + (best.w >> 1) - 1, best.y0 + 1];
-            gn._bedLevel = storeys > 1 ? storeys - 1 : 0;
-            if (storeys > 1 && bm.ladder) gn._ladder = [bm.ladder.x, bm.ladder.y];
-            if (storeys > 1 && bm.ladders) gn._ladders = bm.ladders;
           }
         }
       } else {
