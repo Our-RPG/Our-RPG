@@ -434,18 +434,30 @@ function growSettlement(opts) {
       : (opts.maxStoreys >= 2 && sRoll < 0.62 ? 2 : 1);
     for (const r of b.rooms) r.s = s;
 
-    // ladder: an interior tile of the root room, against its north wall, off
-    // the exterior-door column and clear of interior archways
-    let ladder = null;
+    // ladders: one dedicated SHAFT per storey pair, each at its own tile
+    // (never a single ladder serving both up and down on a middle floor).
+    // Interior corner candidates, root room first; skip tiles hugging the
+    // exterior door so the entrance stays clear.
+    let ladders = null, ladder = null;
     if (s > 1) {
-      const rr = b.rooms[rootRoom];
-      for (let x = rr.x + 1; x < rr.x + rr.w - 1 && !ladder; x++) {
-        const y = rr.y + 1;
-        if (x === door.x) continue;
-        if (idoors.some(d2 => (d2.x === x || d2.x === x + 1 || d2.x === x - 1) && Math.abs(d2.y - y) <= 1)) continue;
-        ladder = { x, y };
+      const cands = [];
+      const order = [rootRoom, ...b.rooms.map((_, ri) => ri).filter(ri => ri !== rootRoom)];
+      for (const ri of order) {
+        const rr = b.rooms[ri];
+        for (const c of [
+          [rr.x + rr.w - 2, rr.y + 1], [rr.x + 1, rr.y + 1],
+          [rr.x + rr.w - 2, rr.y + rr.h - 2], [rr.x + 1, rr.y + rr.h - 2],
+        ]) {
+          if (Math.abs(c[0] - door.x) <= 1 && Math.abs(c[1] - door.y) <= 1) continue;
+          if (!cands.some(o => o[0] === c[0] && o[1] === c[1])) cands.push(c);
+        }
       }
-      if (!ladder) ladder = { x: rr.x + 1, y: rr.y + 1 };
+      ladders = [];
+      for (let ls = 0; ls < s - 1; ls++) {
+        const c = cands[ls % cands.length] || [b.rooms[rootRoom].x + 1, b.rooms[rootRoom].y + 1];
+        ladders.push({ x: c[0], y: c[1], s: ls });
+      }
+      ladder = ladders[0];
     }
 
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -453,7 +465,7 @@ function growSettlement(opts) {
       x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y);
       x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h);
     }
-    out.push({ rooms: b.rooms, door, idoors, ladder,
+    out.push({ rooms: b.rooms, door, idoors, ladder, ladders,
       x0, y0, w: x1 - x0, h: y1 - y0, block: b.block });
   }
 

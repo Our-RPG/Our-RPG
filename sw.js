@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v19"; // v19: indoor roofs/lighting, no indoor boats, bank-web fix
+const CACHE_VERSION = "taiao-v20"; // v20: doorway/adjacent roof lift, dedicated ladder shafts
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

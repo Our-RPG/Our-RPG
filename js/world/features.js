@@ -1640,7 +1640,8 @@ function createWorldFeatures(ctx) {
         ...prefabs,
         ...grown.buildings.map(b => ({
           x0: b.x0, y0: b.y0, w: b.w, h: b.h,
-          rooms: b.rooms, idoors: b.idoors, door: b.door, ladder: b.ladder,
+          rooms: b.rooms, idoors: b.idoors, door: b.door,
+          ladder: b.ladder, ladders: b.ladders || undefined,
           stone: rand2(b.x0, b.y0, S ^ 0x5bbb) < adjStoneBias,
         })),
       ].map((b, i) => {

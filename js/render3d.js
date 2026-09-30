@@ -4168,12 +4168,16 @@ void main() {
           sbMesh(ob, matFlat(topCol), rec, sg.flat);
         }
       }
-      // ladder segment for this storey: two rails + rungs, leaning slightly
+      // ladder segments for this storey: two rails + rungs, leaning slightly
       // against the tile's north edge. The rails continue well above the floor
-      // it climbs to (RS "laddertop") so the way down is obvious upstairs.
-      if (m.ladder && s < storeys - 1) {
+      // each climbs to (RS "laddertop") so the way down is obvious upstairs.
+      // Per-pair shafts (ld.s) draw only on their own storey; a legacy
+      // untagged ladder spans the full height.
+      for (const ld of (m.ladders || (m.ladder ? [m.ladder] : []))) {
+        const from = ld.s != null ? ld.s : 0, to = ld.s != null ? ld.s + 1 : storeys - 1;
+        if (s < from || s >= to) continue;
         const lb = newSB();
-        const lx = m.ladder.x + 0.5, lz = m.ladder.y + 0.28;
+        const lx = ld.x + 0.5, lz = ld.y + 0.28;
         const railTop = yT + 0.85, rungTop = yT + 0.55;
         for (const rx of [-0.26, 0.26])
           sbBlock(lb, lx + rx - 0.045, yB, lz - 0.045, lx + rx + 0.045, railTop, lz + 0.045);
@@ -4458,14 +4462,15 @@ void main() {
         : kind === "mainbank" ? UP_BANK
         : (kind === "tower" || kind === "spire" || kind === "observatory" || kind === "keep")
         ? UP_TOWER : stone ? UP_STONE : UP_WOOD;
-      const lx = m.ladder ? m.ladder.x : -1e9, lz = m.ladder ? m.ladder.y : -1e9;
+      const ldList = m.ladders || (m.ladder ? [m.ladder] : []);
       const sFrom = isHouse ? 0 : 1, sTo = isHouse ? 1 : storeys;
       for (let s = sFrom; s < sTo; s++) {
         const cx3 = x0 + (w >> 1);
         const slots = [];
         const push3 = (tx2, tz2) => {
           if (tx2 <= x0 || tx2 >= x1 - 1 || tz2 <= z0 || tz2 >= z1 - 1) return;
-          if (Math.abs(tx2 - lx) <= 1 && Math.abs(tz2 - lz) <= 1) return; // ladder clearance
+          for (const ld of ldList)
+            if (Math.abs(tx2 - ld.x) <= 1 && Math.abs(tz2 - ld.y) <= 1) return; // ladder clearance
           if (wings && s === 1 && m.wingDoors &&
               m.wingDoors.some(d3 => d3.x === tx2 && d3.y === tz2)) return;
           if (slots.some(s3 => s3[0] === tx2 && s3[1] === tz2)) return;
@@ -4649,10 +4654,27 @@ void main() {
     return null;
   }
 
+  // roofs lift not only indoors but on thresholds and right beside walls:
+  // true when the player's tile or any 8-neighbour belongs to a building
+  // footprint (room rect incl. its walls/door tiles, or a legacy rect/wing)
+  function nearBuildingTile() {
+    if (!world.insideBuilding) return false;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const tx = player.x + dx, ty = player.y + dy;
+        const b = world.insideBuilding(tx, ty);
+        if (!b) continue;
+        const m = metaOf(b);
+        if (!m.rooms || m.rooms.some(r => tx >= r.x && tx < r.x + r.w &&
+            ty >= r.y && ty < r.y + r.h)) return true;
+      }
+    return false;
+  }
+
   function syncStructures() {
     if (!world.buildingMeta || !world.structAt) return;
     const px = player.x, py = player.y;
-    const indoors = !!playerIndoors();
+    const roofsOff = !!playerIndoors() || nearBuildingTile();
     const seen = new Set();
     // new structures build at most one per frame (they enter view range well
     // before the camera reaches them, so spreading the builds out is
@@ -4678,10 +4700,10 @@ void main() {
       // furniture stay up; the walls still collide exactly as before.
       const inside = rec.vols.some(vv => px >= vv.x0 && px < vv.x1 && py >= vv.z0 && py < vv.z1);
       const lv = inside ? Math.min(player.level | 0, rec.m.storeys - 1) : -1;
-      // stepping INSIDE any building lifts EVERY roof in view — neighbouring
-      // rooflines can't curtain the room you're standing in from any camera
-      // angle (outdoors, all roofs stand)
-      rec.roofGroup.visible = !indoors && !inside;
+      // stepping inside any building — or onto a doorway/threshold, or
+      // within one tile of a wall — lifts EVERY roof in view, so rooflines
+      // never curtain the player from any camera angle
+      rec.roofGroup.visible = !roofsOff && !inside;
       rec.storeyGroups.forEach((sg, s) => {
         sg.group.visible = !inside || s <= lv;
         const flat = inside && s === lv;
@@ -5058,9 +5080,16 @@ void main() {
   // still busy climbing/walking to the ladder, so the caller skips its own move.
   function npcClimbToward(npc, targetLevel, T) {
     const cur = npc.level | 0;
-    if (cur === targetLevel || !npc._ladder) return false;
-    const lx = npc._ladder[0], ly = npc._ladder[1];
-    if (npc.x === lx && npc.y === ly) {                 // on the ladder — step a storey
+    if (cur === targetLevel) return false;
+    // per-storey ladder shafts: the leg being climbed is (cur, cur+1) going
+    // up or (cur-1, cur) going down — walk to THAT shaft's tile. A legacy
+    // single ladder (no .s) serves every leg at one tile.
+    const lds = npc._ladders && npc._ladders.length ? npc._ladders
+      : npc._ladder ? [{ x: npc._ladder[0], y: npc._ladder[1] }] : [];
+    if (!lds.length) return false;
+    const pair = targetLevel > cur ? cur : cur - 1;
+    const ld = lds.find(l => l.s == null || l.s === pair) || lds[0];
+    if (npc.x === ld.x && npc.y === ld.y) {             // on the ladder — step a storey
       if (T < npc._wanderAt) return true;
       npc.level = cur + (targetLevel > cur ? 1 : -1);
       npc.px = PX(npc.x); npc.py = PX(npc.y);
@@ -5069,7 +5098,7 @@ void main() {
     }
     if (T < npc._wanderAt) return true;
     npc._wanderAt = T + 230 + Math.random() * 150;
-    stuckStepToward(npc, "_climbStuck", lx, ly, T);
+    stuckStepToward(npc, "_climbStuck", ld.x, ld.y, T);
     return true;
   }
   function stepMixNpc(npc) {
@@ -5422,6 +5451,7 @@ void main() {
               : [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
             npc._bedLevel = storeys > 1 ? storeys - 1 : 0;
             if (storeys > 1 && bm.ladder) npc._ladder = [bm.ladder.x, bm.ladder.y];
+            if (storeys > 1 && bm.ladders) npc._ladders = bm.ladders; // per-storey shafts
             listc.push(npc);
           }
         }

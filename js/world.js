@@ -138,11 +138,19 @@ function genWorld() {
       door = { x: b.x0 + (b.w >> 1), y: b.y0 + b.h - 1, angle: 3, kind: "door", stone: !!b.stoneDoor };
     }
     const doorX = door.x;
-    let ladder = null;
+    let ladder = null, ladders = null;
     if (storeys > 1) {
       let lx = b.x0 + 1;
       if (lx === doorX) lx = b.x0 + b.w - 2;
       ladder = { x: lx, y: b.y0 + b.h - 2 };
+      // one dedicated shaft per storey pair, alternating between the two
+      // front corners — a middle floor of a tower/keep/hall gets a separate
+      // up-ladder and down-ladder instead of one ladder serving both
+      let ax = lx === b.x0 + 1 ? b.x0 + b.w - 2 : b.x0 + 1;
+      if (ax === doorX) ax = lx; // degenerate tiny footprint: fall back to one shaft
+      ladders = [];
+      for (let ls = 0; ls < storeys - 1; ls++)
+        ladders.push({ x: ls % 2 ? ax : lx, y: b.y0 + b.h - 2, s: ls });
     }
     // mansion: three attached 2-storey wings sharing a wall with the 3-storey
     // hall; wingDoors are the 1-tile archways cut through the shared wall on
@@ -161,7 +169,7 @@ function genWorld() {
         { x: xc, y: b.y0 },      // through the hall's north wall
       ];
     }
-    m = { storeys, door, door2, ladder, stone, kind, wings, wingDoors };
+    m = { storeys, door, door2, ladder, ladders, stone, kind, wings, wingDoors };
     metaCache.set(b, m);
     return m;
   }
