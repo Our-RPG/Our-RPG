@@ -4659,7 +4659,12 @@ void main() {
       // furniture stay up; the walls still collide exactly as before.
       const inside = rec.vols.some(vv => px >= vv.x0 && px < vv.x1 && py >= vv.z0 && py < vv.z1);
       const lv = inside ? Math.min(player.level | 0, rec.m.storeys - 1) : -1;
-      rec.roofGroup.visible = !inside;
+      // under the eaves but not indoors (narrow alleys, doorsteps): the
+      // overhanging roof would hide the player — drop it so the lane ahead
+      // stays readable; it pops back two tiles out
+      const underEaves = !inside && rec.vols.some(vv =>
+        px >= vv.x0 - 1.4 && px < vv.x1 + 1.4 && py >= vv.z0 - 1.4 && py < vv.z1 + 1.4);
+      rec.roofGroup.visible = !inside && !underEaves;
       rec.storeyGroups.forEach((sg, s) => {
         sg.group.visible = !inside || s <= lv;
         const flat = inside && s === lv;

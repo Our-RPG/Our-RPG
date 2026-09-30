@@ -41,6 +41,7 @@ copydir css
 copydir fonts
 copy dist/bundle.js
 copy libs/three.min.js
+copy libs/lua/wasmoon.js   # Lua runtime (quests/dialogue/routines) — index.html loads it as a vendor tag
 copydir assets/sheets
 copy assets/bifrost.webm
 copy assets/birdsong/CREDITS.txt

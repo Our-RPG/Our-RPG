@@ -1044,15 +1044,17 @@ function createWorldChunks(ctx) {
           if (inCh(fx, fy) && !blocked[li(fx, fy)]) blocked[li(fx, fy)] = 2;
         }
       }
-      // vegetation margin: the ring just outside each room's walls (skip other
-      // buildings' floors and anything already blocked/reserved)
+      // vegetation sentinel: every room tile PLUS a one-tile ring outside the
+      // walls goes to blocked=2 (cleared to 0 after the vegetation pass, same
+      // as the rect stamper) — without the interior sweep, trees seed on the
+      // blocked=0 room floors before anyone walks in
       for (const r of b.rooms)
         for (let y = r.y - 1; y <= r.y + r.h; y++)
           for (let x = r.x - 1; x <= r.x + r.w; x++) {
+            if (!inCh(x, y) || blocked[li(x, y)]) continue;
             const ring = x === r.x - 1 || x === r.x + r.w || y === r.y - 1 || y === r.y + r.h;
-            if (!ring || !inCh(x, y) || isBld(x, y)) continue;
-            if (!blocked[li(x, y)] && !String(ground[li(x, y)]).startsWith("floor"))
-              blocked[li(x, y)] = 2;
+            if (ring && String(ground[li(x, y)]).startsWith("floor")) continue; // another building's floor
+            blocked[li(x, y)] = 2;
           }
       return true;
     };

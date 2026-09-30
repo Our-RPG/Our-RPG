@@ -1268,6 +1268,22 @@ function createWorldMap(ctx) {
     const pathCss=`rgb(${MAP_PATH.join(',')})`;
     for(const v of villages) {
       const ox=(v.x-baseX)*TILE, oy=(v.y-baseY)*TILE;
+      // walled city: the whole interior is stone flags in the world (chunks.js
+      // paves Chebyshev < R), so the map shows the same — otherwise the empty
+      // quarters read as a bare hillshaded-grass gradient instead of city ground
+      if(v.kind==='city'&&v.wall) {
+        const x0=Math.max(0,(v.x-v.R-baseX)), x1=Math.min(CS,(v.x+v.R-baseX));
+        const y0=Math.max(0,(v.y-v.R-baseY)), y1=Math.min(CS,(v.y+v.R-baseY));
+        for(let ty=Math.floor(y0); ty<y1; ty++)
+          for(let tx=Math.floor(x0); tx<x1; tx++) {
+            const i=G(tx,ty);
+            if(waterAt(i)) continue;             // ponds/rivers stay visible
+            const wx=baseX+tx, wy=baseY+ty;
+            const j=(rand2(wx,wy,S^0xf1a6)-0.5)*14;
+            ctx.fillStyle=`rgb(${(150+j)|0},${(148+j)|0},${(140+j)|0})`;
+            ctx.fillRect(tx*TILE,ty*TILE,TILE,TILE);
+          }
+      }
       if(v.kind==='city') {
         const Rpx=v.R*TILE;
         ctx.fillStyle=pathCss;

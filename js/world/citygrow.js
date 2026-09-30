@@ -305,7 +305,7 @@ function growSettlement(opts) {
   // starter blocks around the plaza (three for a walled city, one for a
   // village), each retried around the dial — rivers can void whole sectors
   let totalRooms = 0;
-  const nSeeds = opts.walled ? 3 : 1;
+  const nSeeds = opts.walled ? 4 : 1; // one starter block per city quarter
   const aBase = rng() * Math.PI * 2;
   for (let sI = 0; sI < nSeeds; sI++) {
     for (let att = 0; att < 12; att++) {
@@ -317,7 +317,7 @@ function growSettlement(opts) {
   }
 
   let failStreak = 0;
-  while (totalRooms < budget && failStreak < 30 && buildings.length) {
+  while (totalRooms < budget && failStreak < 45 && buildings.length) {
     const act = rng();
     let placed = false;
     if (act >= NEWBLD_P) {
@@ -347,15 +347,14 @@ function growSettlement(opts) {
           buildings.pop(); blocks[blockId].buildings.pop();
         }
       }
-      // …or, when everything is full, break ground across an alley
+      // …or, when everything is full, break ground for a NEW block anywhere
+      // on the disc — quadrants the accretion hasn't reached fill in instead
+      // of a single lobe crawling outward and leaving half the city bare
       if (!placed && blocks.length < MAX_BLOCKS) {
-        const src = buildings[Math.floor(rng() * buildings.length)];
-        const rr = src.rooms[Math.floor(rng() * src.rooms.length)];
         const ang = rng() * Math.PI * 2;
-        const gap = ALLEY + 1 + (rng() < 0.3 ? 2 : 0); // some gaps are streets
-        const px = Math.round(rr.x + rr.w / 2 + Math.cos(ang) * (rr.w / 2 + gap + 3));
-        const py = Math.round(rr.y + rr.h / 2 + Math.sin(ang) * (rr.h / 2 + gap + 3));
-        if (seedBlockAt(px, py) >= 0) placed = true;
+        const rr2 = (0.25 + rng() * 0.62) * (R - 6);
+        if (seedBlockAt(Math.round(cx + Math.cos(ang) * rr2),
+                        Math.round(cy + Math.sin(ang) * rr2)) >= 0) placed = true;
       }
     }
     if (placed) { totalRooms++; failStreak = 0; }
@@ -425,9 +424,13 @@ function growSettlement(opts) {
 
     // storeys: one count per BUILDING (collision is 2-D; mixed heights inside
     // one house would let an upstairs walk cross into a roofless room), with
-    // variety coming from the footprint + between-building differences
+    // variety coming from the footprint + between-building differences.
+    // Capitals (maxStoreys 4) skew tall — proper city terraces.
     const sRoll = rng();
-    const s = opts.maxStoreys >= 3 && sRoll < 0.18 ? 3
+    const s = opts.maxStoreys >= 4
+      ? (sRoll < 0.12 ? 4 : sRoll < 0.36 ? 3 : sRoll < 0.76 ? 2 : 1)
+      : opts.maxStoreys >= 3
+      ? (sRoll < 0.24 ? 3 : sRoll < 0.68 ? 2 : 1)
       : (opts.maxStoreys >= 2 && sRoll < 0.62 ? 2 : 1);
     for (const r of b.rooms) r.s = s;
 
@@ -453,5 +456,52 @@ function growSettlement(opts) {
     out.push({ rooms: b.rooms, door, idoors, ladder,
       x0, y0, w: x1 - x0, h: y1 - y0, block: b.block });
   }
+
+  // ---- upper-storey links between NEIGHBOURING buildings --------------------
+  // Where two different buildings share a party wall and both flanking rooms
+  // are >= 2 storeys, sometimes cut an archway through the FIRST floor (and
+  // the second, for tall pairs): whole terraces connect upstairs. The tile is
+  // recorded in BOTH records (each building's geometry carves its own side,
+  // and passable() may resolve the tile to either bbox); at ground level it
+  // stays a solid wall (idoor.s >= 1 never stamps a gap).
+  const sharedRunTiles = (ra, rb) => {
+    const tiles = [];
+    if (rb.x === ra.x + ra.w - 1 || ra.x === rb.x + rb.w - 1) {
+      const wx = rb.x === ra.x + ra.w - 1 ? rb.x : ra.x;
+      const y0 = Math.max(ra.y + 1, rb.y + 1), y1 = Math.min(ra.y + ra.h - 2, rb.y + rb.h - 2);
+      for (let y = y0; y <= y1; y++) tiles.push({ x: wx, y });
+    } else if (rb.y === ra.y + ra.h - 1 || ra.y === rb.y + rb.h - 1) {
+      const wy = rb.y === ra.y + ra.h - 1 ? rb.y : ra.y;
+      const x0 = Math.max(ra.x + 1, rb.x + 1), x1 = Math.min(ra.x + ra.w - 2, rb.x + rb.w - 2);
+      for (let x = x0; x <= x1; x++) tiles.push({ x, y: wy });
+    }
+    return tiles;
+  };
+  for (let i = 0; i < out.length; i++)
+    for (let j = i + 1; j < out.length; j++) {
+      const A = out[i], B2 = out[j];
+      if (A.block !== B2.block) continue;
+      if (A.x0 + A.w < B2.x0 || B2.x0 + B2.w < A.x0 ||
+          A.y0 + A.h < B2.y0 || B2.y0 + B2.h < A.y0) continue;
+      let linked = false;
+      for (const ra of A.rooms) {
+        if (linked) break;
+        if ((ra.s || 1) < 2) continue;
+        for (const rb of B2.rooms) {
+          if ((rb.s || 1) < 2) continue;
+          const tiles = sharedRunTiles(ra, rb);
+          if (!tiles.length || rng() >= 0.35) continue;
+          const t = tiles[tiles.length >> 1];
+          A.idoors.push({ x: t.x, y: t.y, s: 1 });
+          B2.idoors.push({ x: t.x, y: t.y, s: 1 });
+          if (Math.min(ra.s, rb.s) >= 3 && rng() < 0.5) {
+            A.idoors.push({ x: t.x, y: t.y, s: 2 });
+            B2.idoors.push({ x: t.x, y: t.y, s: 2 });
+          }
+          linked = true;
+          break;
+        }
+      }
+    }
   return { buildings: out };
 }

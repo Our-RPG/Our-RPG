@@ -896,7 +896,7 @@ function createWorldFeatures(ctx) {
     if (seatCache.has(key)) return seatCache.get(key);
     let seat = null;
     if (vcx === 0 && vcy === 0) {
-      seat = { x: 0, y: 0, kind: "city", R: 34 };
+      seat = { x: 0, y: 0, kind: "city", R: 42 }; // Newhaven: capital-sized
     } else {
       const x = vcx * VCELL + 34 + Math.floor(rand2(vcx, vcy, S ^ 0x5222) * (VCELL - 68));
       const y = vcy * VCELL + 34 + Math.floor(rand2(vcx, vcy, S ^ 0x5333) * (VCELL - 68));
@@ -908,7 +908,7 @@ function createWorldFeatures(ctx) {
         const r0 = rand2(vcx, vcy, S ^ 0x5111);
         if (r0 < civ * 0.7) kind = "city";
         else if (r0 < civ * 2.0) kind = "village";
-        if (kind === "city") R = 19 + hash2i(vcx, vcy, S ^ 0x5666) % 6;
+        if (kind === "city") R = 24 + hash2i(vcx, vcy, S ^ 0x5666) % 7;
       }
       if (kind) seat = { x, y, kind, R };
     }
@@ -1520,6 +1520,7 @@ function createWorldFeatures(ctx) {
       // building placement is organic (citygrow.js) instead of pattern-stamped
       const layout = 0;
       let wall = false, keep = false, well = true, field = null;
+      let isCapital = false; // origin or a road web's main branch: shire-capital scale
       const cityStreets = null; // secondary street grid retired — alleys emerge
       if (kind === "city") {
         // is this city its ROAD network's MAIN BRANCH? Then it hosts the grand
@@ -1528,6 +1529,7 @@ function createWorldFeatures(ctx) {
         // planner only — they never re-enter villageInfo, so no recursion.
         const mb = mainBranchFor(roadNetId(vcx, vcy));
         const isMainBranch = !!mb && mb.vcx === vcx && mb.vcy === vcy;
+        isCapital = origin || isMainBranch;
         wall = origin ? true : rand2(vcx, vcy, S ^ 0x5eee) < 0.62;
         keep = !origin && rand2(vcx, vcy, S ^ 0x5abc) < 0.32;
         well = !keep;
@@ -1584,14 +1586,18 @@ function createWorldFeatures(ctx) {
       const grown = growSettlement({
         cx: gx, cy: gy, R: gR,
         seed: hash2i(vcx, vcy, S ^ 0x6001),
-        budget: kind === "city" ? (origin ? 54 : 34 + hash2i(vcx, vcy, S ^ 0x6002) % 13)
+        // capitals (Newhaven + every road web's main branch) build out to
+        // shire-capital scale; ordinary cities also grew with the walls
+        budget: kind === "city"
+          ? (isCapital ? 74 + hash2i(vcx, vcy, S ^ 0x6002) % 18
+                       : 46 + hash2i(vcx, vcy, S ^ 0x6002) % 14)
           : 6 + hash2i(vcx, vcy, S ^ 0x6003) % 5,
         walled: !!wall,
-        maxStoreys: kind === "city" ? 3 : 2,
-        roomCap: kind === "city" ? 6 : 3,
-        blockRooms: kind === "city" ? 9 : 5,
-        maxBlocks: kind === "city" ? 10 : 4,
-        roomMin: 5, roomMax: kind === "city" ? 9 : 8,
+        maxStoreys: isCapital ? 4 : kind === "city" ? 3 : 2,
+        roomCap: kind === "city" ? (isCapital ? 7 : 6) : 3,
+        blockRooms: kind === "city" ? (isCapital ? 11 : 9) : 5,
+        maxBlocks: kind === "city" ? (isCapital ? 14 : 11) : 4,
+        roomMin: kind === "city" ? 6 : 5, roomMax: kind === "city" ? 9 : 8,
         tileClass,
       });
       // assign stations & traders to buildings (game-specific, not in Map.html)
