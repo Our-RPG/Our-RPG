@@ -439,11 +439,25 @@ function render(rangeDays) {
   cards.append(c2);
   cards.append(card("XP by skill", "which skills players actually train",
     xpRows.length ? table(["Skill", "XP"], xpRows) : empty("No XP recorded.")));
-  const buyRows = topOf(DATA.trades, days, 8, k => k).filter(([k]) => k.startsWith("buy|")).map(([k, n]) => [k.slice(4), n]);
-  const sellRows = topOf(DATA.trades, days, 8, k => k).filter(([k]) => k.startsWith("sell|")).map(([k, n]) => [k.slice(5), n]);
-  const c3 = card("Shops", "what players buy and sell", null);
-  if (buyRows.length) c3.append(el("div", { class: "note" }, "Bought"), table(["Item", "Qty"], buyRows));
-  if (sellRows.length) c3.append(el("div", { class: "note", style: "margin-top:10px" }, "Sold"), table(["Item", "Qty"], sellRows));
+  // living-till lens: avg unit price alongside volume — watch the economy
+  // move (a falling sell price = that item is glutting the shelves)
+  const tradeAgg = side => {
+    const agg = {};
+    for (const [day, kv] of Object.entries(DATA.trades || {})) {
+      if (!days.has(day)) continue;
+      for (const [k, v] of Object.entries(kv)) {
+        if (!k.startsWith(side + "|")) continue;
+        const a = agg[k.slice(side.length + 1)] || (agg[k.slice(side.length + 1)] = { n: 0, coins: 0 });
+        a.n += v.n; a.coins += v.coins;
+      }
+    }
+    return Object.entries(agg).sort((a, b) => b[1].n - a[1].n).slice(0, 8)
+      .map(([id, a]) => [id, a.n, a.n ? (a.coins / a.n).toFixed(1) : "—"]);
+  };
+  const buyRows = tradeAgg("buy"), sellRows = tradeAgg("sell");
+  const c3 = card("Shops", "what players buy and sell — avg unit price tracks the living till", null);
+  if (buyRows.length) c3.append(el("div", { class: "note" }, "Bought"), table(["Item", "Qty", "Avg price"], buyRows));
+  if (sellRows.length) c3.append(el("div", { class: "note", style: "margin-top:10px" }, "Sold"), table(["Item", "Qty", "Avg price"], sellRows));
   if (!buyRows.length && !sellRows.length) c3.append(empty("No shop trades recorded."));
   cards.append(c3);
 }

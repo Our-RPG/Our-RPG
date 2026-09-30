@@ -84,7 +84,8 @@
   function tillMove(town, delta) {
     const s = stocks.get(town);
     if (!s || !s.till || typeof EconCore === "undefined") return;
-    s.till.cash = Math.max(EconCore.reserveOf(s.till.operating),
+    const res = EconCore.reserveOf(s.till.operating, EconCore.shopParams(town).reserveRatio);
+    s.till.cash = Math.max(res,
       Math.min(EconCore.tillCapOf(s.till.operating), s.till.cash + delta));
   }
   function noteSell(town, id, n, q, maker, skill, paid) {

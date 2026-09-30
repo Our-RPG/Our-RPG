@@ -47,12 +47,12 @@ const coins = v => Math.max(0, Math.min(MAX_LINE_COINS, Math.round(Number(v) || 
 
 // ---- the till -------------------------------------------------------------
 
-async function getTill(env, town, t) {
+async function getTill(env, town, t, pp) {
   const row = await env.DB.prepare(
     "SELECT cash, operating FROM shop_till WHERE town = ? AND shop = 'town'"
   ).bind(town).first();
   if (row) return row;
-  const operating = Econ.operatingCash(town);
+  const operating = Econ.operatingCash(town, pp);
   await env.DB.prepare(
     `INSERT INTO shop_till (town, shop, cash, operating, updated_at)
      VALUES (?, 'town', ?, ?, ?) ON CONFLICT(town, shop) DO NOTHING`
@@ -63,11 +63,11 @@ async function getTill(env, town, t) {
 /* Race-safe till move: bounds live in the statement, so two concurrent
  * flushes can never take the cash below reserve or above the cap — at worst
  * one player's payout briefly isn't till-covered, which the bounds absorb. */
-async function moveTill(env, town, delta, operating, t) {
+async function moveTill(env, town, delta, operating, reserve, t) {
   await env.DB.prepare(
     `UPDATE shop_till SET cash = MAX(?, MIN(?, cash + ?)), updated_at = ?
      WHERE town = ? AND shop = 'town'`
-  ).bind(Econ.reserveOf(operating), Econ.tillCapOf(operating), Math.round(delta), t, town).run();
+  ).bind(reserve, Econ.tillCapOf(operating), Math.round(delta), t, town).run();
 }
 
 /* Coin-amount budget window on the shared rate_limits table (count = coins).
@@ -158,7 +158,7 @@ export async function stock(req, env, url) {
   const tillRow = await env.DB.prepare(
     "SELECT cash, operating FROM shop_till WHERE town = ? AND shop = 'town'"
   ).bind(town).first();
-  const operating = tillRow ? tillRow.operating : Econ.operatingCash(town);
+  const operating = tillRow ? tillRow.operating : Econ.operatingCash(town, Econ.shopParams(town));
   const till = { cash: tillRow ? tillRow.cash : operating, operating };
   return json({ ok: true, town, items, flow, till, now: t }, 200, CACHE);
 }
@@ -180,8 +180,9 @@ export async function trade(req, env) {
   if (!b || !TOWN_KEY.test(String(b.town || ""))) return err("Bad town key.");
   const town = b.town, t = now();
   const sold = {}, bought = {}, paidOut = {};
-  const till = await getTill(env, town, t);
-  const reserve = Econ.reserveOf(till.operating);
+  const pp = Econ.shopParams(town);          // the town trader's temperament
+  const till = await getTill(env, town, t, pp);
+  const reserve = Econ.reserveOf(till.operating, pp.reserveRatio);
   let cashAvail = till.cash;            // in-memory during this request
   let tillDelta = 0;
   const flows = new Map();              // item -> flow (loaded once, saved once)
@@ -200,16 +201,19 @@ export async function trade(req, env) {
     const flow = await flowFor(item);
     // refusal backstop (the client enforces the real curve incl. its floor):
     // the shelf already holds several times what this town believes it moves
-    const target = Econ.targetStock(0, flow.out, Econ.baselineDemand(town, item));
-    const refuse = (have?.n || 0) >= Math.max(24, Econ.P.refuseAt * target);
+    const target = Econ.targetStock(0, flow.out, Econ.baselineDemand(town, item), pp.daysOfSupply);
+    const refuse = (have?.n || 0) >= Math.max(24, pp.refuseAt * target);
     const room = refuse ? 0 : Math.max(0, MAX_TOWN_ITEM_QTY - (have?.n || 0));
     let add = Math.min(qty, room);
     // the till only funds what it can afford AND what this account may still
-    // draw today — goods beyond that stay with the player (client reconciles)
+    // draw today — goods beyond that stay with the player (client reconciles).
+    // Big-ticket backstop: one line draws at most the trader's appetite for
+    // a single kind of stock (the client walk enforces the same rule).
     const unit = add > 0 ? coins(line.paid) / qty : 0;
     let pay = 0;
     if (unit > 0 && add > 0) {
-      add = Math.min(add, Math.floor((cashAvail - reserve) / unit));
+      const lineCap = Math.max(25, Math.round(pp.bigTicketFrac * (cashAvail - reserve)));
+      add = Math.min(add, Math.floor((cashAvail - reserve) / unit), Math.floor(lineCap / unit));
       pay = Math.round(add * unit);
       if (pay > 0) {
         const allowed = await takeBudget(env, `draw:${town}:${user.id}`,
@@ -263,7 +267,7 @@ export async function trade(req, env) {
     bought[item] = got;
   }
 
-  if (tillDelta !== 0) await moveTill(env, town, tillDelta, till.operating, t);
+  if (tillDelta !== 0) await moveTill(env, town, tillDelta, till.operating, reserve, t);
   for (const [item, flow] of flows) await putFlow(env, town, item, flow, t);
 
   // Refreshed counts for every item the trade touched.
@@ -277,7 +281,7 @@ export async function trade(req, env) {
     const f = flows.get(item);
     if (f) flowNow[item] = { in: f.in, out: f.out };
   }
-  const cashNow = Math.max(Econ.reserveOf(till.operating),
+  const cashNow = Math.max(reserve,
     Math.min(Econ.tillCapOf(till.operating), till.cash + tillDelta));
   return json({ ok: true, town, sold, bought, paid: paidOut, stock: stockNow,
                 flow: flowNow, till: { cash: cashNow, operating: till.operating }, now: t });

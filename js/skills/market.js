@@ -169,6 +169,12 @@ function econViewFor(profile, id, stocked) {
 function econTill() {
   return (typeof ShopSync !== "undefined" && activeMarket) ? ShopSync.till(activeMarket.townKey) : null;
 }
+// the town trader's hash-derived temperament (Phase 2) — bends only the
+// dynamic parameters, so neutral prices stay exactly legacy
+function econParams() {
+  if (!activeMarket) return null;
+  return activeMarket.params || (activeMarket.params = EconCore.shopParams(activeMarket.townKey));
+}
 // what the town pays you (per-player quality/rep/specialist factors ride on
 // the shared quote; `lot` walks the bulk curve — the shelf fills and the
 // till drains every 5 units, so dumping taper is priced before you commit).
@@ -177,7 +183,8 @@ function marketSellQuote(profile, id, q, premium) {
   const mult = (q != null ? 0.6 + 0.8 * (q / 100) : 1) * (premium || 1) * repMult();
   const view = econViewFor(profile, id);
   const till = econTill();   // null until the town has synced (or offline/DEV)
-  const first = EconCore.quote(view, till);
+  const params = econParams();
+  const first = EconCore.quote(view, till, params);
   const maxUnit = q == null ? Math.max(1, Math.round(first.charges * 0.9)) : Infinity;
   const unit = Math.min(maxUnit, Math.max(1, Math.round(first.pays * mult)));
   return {
@@ -187,19 +194,49 @@ function marketSellQuote(profile, id, q, premium) {
     refused: till ? first.refused || (first.pays < 1 && first.liquidity > 0.2) : false,
     broke: till ? !first.refused && first.pays < 1 && first.liquidity <= 0.2 : false,
     liquidity: first.liquidity,
+    need: first.stockNeed,
     tapered: !!till,
     unit,
     lot: n => till
-      ? EconCore.quoteSellLot(view, till, n, mult, maxUnit)
+      ? EconCore.quoteSellLot(view, till, n, mult, maxUnit, params)
       : { accepted: n, paid: unit * n, unitFirst: unit, refused: false, tillShort: false },
   };
 }
 function marketSellPrice(profile, id, q) { return marketSellQuote(profile, id, q).unit; }
+// One market-mood line per visit, once the shared state has arrived: the
+// keeper names their hottest shortage, or their till state — the economy
+// explaining itself in character (docs/shopkeeper-economy.md §11).
+function marketMoodLine(profile, shopkeeper) {
+  if (!activeMarket || activeMarket.moodDone) return;
+  const till = econTill();
+  if (!till) return;
+  activeMarket.moodDone = true;
+  const params = econParams();
+  const res = EconCore.reserveOf(till.operating, params.reserveRatio);
+  const liq = EconCore.clamp((till.cash - res) / Math.max(1, till.operating - res), 0.15, 1.25);
+  let best = null;
+  for (const id of activeMarket.stockSet) {
+    const q = EconCore.quote(econViewFor(profile, id, true), till, params);
+    if (q.stockNeed >= 1.3 && (!best || q.stockNeed > best.need)) best = { id, need: q.stockNeed };
+  }
+  if (best) log(`${shopkeeper}: Bring me ${ITEMS[best.id].name.toLowerCase()} if you find any — I can shift those.`, "sys");
+  else if (liq <= 0.25) log(`${shopkeeper}: Coin's tight this week — I'll be paying low until the shelves move.`, "sys");
+  else if (liq >= 1.1) log(`${shopkeeper}: Business is good — I'm buying, if you're selling.`, "sys");
+}
 // what the town charges you to buy one unit (cheaper if it's a local
 // surplus, dearer as the shelf runs dry or demand runs hot)
 function marketBuyPrice(profile, id, stocked) {
-  const sq = EconCore.quote(econViewFor(profile, id, stocked), econTill());
+  const sq = EconCore.quote(econViewFor(profile, id, stocked), econTill(), econParams());
   return Math.max(1, Math.round(sq.charges * (1 - repTier().buyDisc)));
+}
+// trend glyph vs the neutral anchor — only meaningful on a live market
+function priceTrend(profile, id, price) {
+  if (!econTill()) return null;
+  const surplus = profile.surplusTags.includes(itemTag(id)) || (profile.stock || []).includes(id);
+  const neutral = Math.max(1, Math.round((ITEMS[id].value || 1) * (surplus ? 0.9 : 1.15) * (1 - repTier().buyDisc)));
+  if (price > neutral * 1.04) return { glyph: "▲", note: "prices up — shelves short or demand hot" };
+  if (price < neutral * 0.96) return { glyph: "▼", note: "prices down — well stocked" };
+  return null;
 }
 // Merchants only stock the early seed tiers; higher-level seeds must be found
 // or grown up to, not bought outright.
@@ -255,6 +292,35 @@ function townContracts(townKey, profile) {
     const key = townKey + ":" + i;
     if (player.contractsDone && player.contractsDone.includes(key)) continue;
     out.push({ key, itemId: item.id, qty, reward: Math.max(qty, Math.round(item.value * qty * premium)), rep: 3 + Math.round(item.value * qty / 60) });
+  }
+  // Phase 2, contracts-from-shortage: when the live market genuinely wants
+  // something (believed demand well past the shelf), the store posts an
+  // URGENT notice for it. Needs are shared state, so every player sees the
+  // same notice — and filling it removes the shortage that created it.
+  if (typeof EconCore !== "undefined" && activeMarket && econTill()) {
+    const till = econTill(), params = econParams();
+    const wantedTags = Object.keys(profile.demand).sort((a, b) => profile.demand[b] - profile.demand[a]);
+    // candidates: the store's own shelf plus the town's wanted-tag pools
+    const ids = new Set(activeMarket.stockSet || []);
+    for (const tag of wantedTags.slice(0, 3))
+      for (const it of tagItems(tag).slice(0, 20)) ids.add(it.id);
+    const cands = [];
+    for (const id of ids) {
+      if (!ITEMS[id]) continue;
+      const q = EconCore.quote(econViewFor(profile, id,
+        activeMarket.stockSet ? activeMarket.stockSet.has(id) : false), till, params);
+      if (q.stockNeed >= 1.3) cands.push({ id, need: q.stockNeed, value: ITEMS[id].value || 1 });
+    }
+    cands.sort((a, b) => b.need - a.need);
+    for (const c of cands.slice(0, 2)) {
+      const key = townKey + ":sh:" + c.id;
+      if (player.contractsDone && player.contractsDone.includes(key)) continue;
+      const qty = 4 + Math.min(16, Math.round(c.need * 4));
+      const premium = 1.5 + Math.min(1, c.need - 1);
+      out.push({ key, itemId: c.id, qty, urgent: true,
+        reward: Math.max(qty, Math.round(c.value * qty * premium)),
+        rep: 4 + Math.round(c.value * qty / 50) });
+    }
   }
   return out;
 }
@@ -455,6 +521,8 @@ function renderMarket() {
   };
   const baseIds = general ? marketStock(profile) : shopStockFor(typeKey);
   activeMarket.stockSet = new Set(baseIds);   // standing-floor flag for quotes
+  const shopkeeper = (activeMarket.npc && activeMarket.npc.name) || type.name;
+  marketMoodLine(profile, shopkeeper);
   for (const id of baseIds) {
     const def = ITEMS[id], price = marketBuyPrice(profile, id, true);
     const reqNote = def.wieldReq ? ` (Melee ${def.wieldReq})`
@@ -463,8 +531,9 @@ function renderMarket() {
     // player-stocked units of a staple ride on top of the standing floor
     const ps = typeof ShopSync !== "undefined" ? ShopSync.qty(townKey, id) : 0;
     const psNote = ps ? ` — ${ps} restocked by players` : "";
-    const d = slotEl(def.icon, undefined, `${def.name}${reqNote} — ${price} coins${psNote}`);
-    const pr = document.createElement("span"); pr.className = "price"; pr.textContent = price; d.appendChild(pr);
+    const tr = priceTrend(profile, id, price);
+    const d = slotEl(def.icon, undefined, `${def.name}${reqNote} — ${price} coins${tr ? ` (${tr.note})` : ""}${psNote}`);
+    const pr = document.createElement("span"); pr.className = "price"; pr.textContent = (tr ? tr.glyph : "") + price; d.appendChild(pr);
     d.onclick = e => { buyNote(id, tradeBuy(id, price, e.shiftKey ? 5 : 1), price); renderMarket(); };
     d.oncontextmenu = e => amountMenu(e, "Buy", "max", n => { buyNote(id, tradeBuy(id, price, n), price); renderMarket(); });
     grid.appendChild(d);
@@ -480,8 +549,9 @@ function renderMarket() {
       const price = marketBuyPrice(profile, id, false);
       const makers = (info.units || []).map(u => u.maker).filter(Boolean);
       const by = makers.length ? `stocked by ${makers[0]}${makers.length > 1 ? " and others" : ""}` : "player-stocked";
-      const d = slotEl(def.icon, info.qty, `${def.name} — ${price} coins — ${by}, ${info.qty} left`);
-      const pr = document.createElement("span"); pr.className = "price demand"; pr.textContent = price; d.appendChild(pr);
+      const tr = priceTrend(profile, id, price);
+      const d = slotEl(def.icon, info.qty, `${def.name} — ${price} coins${tr ? ` (${tr.note})` : ""} — ${by}, ${info.qty} left`);
+      const pr = document.createElement("span"); pr.className = "price demand"; pr.textContent = (tr ? tr.glyph : "") + price; d.appendChild(pr);
       const buyLtd = n => { buyNote(id, tradeBuy(id, price, Math.min(n, info.qty)), price); renderMarket(); };
       d.onclick = e => buyLtd(e.shiftKey ? 5 : 1);
       d.oncontextmenu = e => amountMenu(e, "Buy", "max", buyLtd);
@@ -500,7 +570,7 @@ function renderMarket() {
         const have = countItem(c.itemId), ready = have >= c.qty;
         const row = document.createElement("div");
         row.className = "contract" + (ready ? " ready" : "");
-        row.innerHTML = `<span>${c.qty}× <b>${ITEMS[c.itemId].name}</b> — ${c.reward}c (+${c.rep} rep) <i>(have ${have})</i></span>`;
+        row.innerHTML = `<span>${c.urgent ? "⚡ " : ""}${c.qty}× <b>${ITEMS[c.itemId].name}</b> — ${c.reward}c (+${c.rep} rep) <i>(have ${have})</i></span>`;
         const btn = document.createElement("button"); btn.textContent = ready ? "Fulfil" : "Need more";
         btn.disabled = !ready; btn.onclick = () => { if (fulfilContract(c)) renderMarket(); };
         row.appendChild(btn); cbox.appendChild(row);
@@ -534,7 +604,6 @@ function renderMarket() {
   // says so instead of paying (docs/shopkeeper-economy.md).
   const sell = document.getElementById("sellgrid");
   sell.innerHTML = "";
-  const shopkeeper = (activeMarket.npc && activeMarket.npc.name) || type.name;
   let any = 0, tillLight = false;
   player.inv.forEach(s => {
     if (!s || s.id === "coins") return;
@@ -544,17 +613,18 @@ function renderMarket() {
     const premium = general ? 1 : 1.2;
     const sq = marketSellQuote(profile, s.id, s.q, premium);
     if (sq.liquidity <= 0.3) tillLight = true;
-    const demanded = general && demandMult(profile, s.id) > 1;
+    const wanted = sq.tapered && sq.need >= 1.25;   // a real, live shortage
+    const demanded = (general && demandMult(profile, s.id) > 1) || wanted;
     const qNote = s.q != null ? ` [${qualityLabel(s.q)}]` : "";
     const noBuy = sq.refused || sq.broke;
     const d = noBuy
       ? slotEl(def.icon, s.qty, `${def.name}${qNote} — ${sq.broke
           ? shopkeeper + "'s till is empty; try again tomorrow"
           : shopkeeper + " has plenty already and isn't buying more"}`)
-      : slotEl(def.icon, s.qty, `Sell ${def.name}${demanded ? " (in demand here!)" : ""}${qNote} — ${sq.unit} coins each${sq.tapered ? " (big lots taper)" : ""}`);
+      : slotEl(def.icon, s.qty, `Sell ${def.name}${wanted ? " (they're short of these — good coin!)" : demanded ? " (in demand here!)" : ""}${qNote} — ${sq.unit} coins each${sq.tapered ? " (big lots taper)" : ""}`);
     const pr = document.createElement("span");
     pr.className = noBuy ? "price" : "price" + (demanded || !general ? " demand" : "");
-    pr.textContent = noBuy ? "✕" : sq.unit;
+    pr.textContent = noBuy ? "✕" : (wanted ? "▲" : "") + sq.unit;
     d.appendChild(pr);
     const doSell = n => {
       n = Math.min(n, s.qty);
@@ -563,7 +633,9 @@ function renderMarket() {
       if (sq.refused) { log(`${shopkeeper}: I've got plenty of those gathering dust already.`, "warn"); return; }
       const lot = sq.lot(n);
       if (lot.accepted <= 0) {
-        log(`${shopkeeper}: Coin's short until I shift some stock — come back in a day or two.`, "warn");
+        log(`${shopkeeper}: ${lot.bigTicket
+          ? "I couldn't tie up that much coin in one line of stock."
+          : "Coin's short until I shift some stock — come back in a day or two."}`, "warn");
         return;
       }
       removeItem(s.id, lot.accepted); addItem("coins", lot.paid);
@@ -579,7 +651,8 @@ function renderMarket() {
       if (typeof Tele !== "undefined") Tele.ev("sell", s.id, Math.round(lot.paid / lot.accepted), lot.accepted);
       log(`You sell ${lot.accepted} × ${def.name} for ${lot.paid} coins.`);
       if (lot.accepted < n)
-        log(`${shopkeeper}: ${lot.tillShort ? "That's all the coin I can spare for now."
+        log(`${shopkeeper}: ${lot.bigTicket ? "I can't tie up more coin in one line of stock — that's my limit on these today."
+          : lot.tillShort ? "That's all the coin I can spare for now."
           : "That's as many as I can shelve."}`, "sys");
       uiDirty = true;
       renderMarket();

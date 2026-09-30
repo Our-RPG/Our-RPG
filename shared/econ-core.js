@@ -45,10 +45,46 @@ function fnv(str) {
 // ---- deterministic per-town facts (both sides derive, neither stores) ----
 
 // The town till's operating cash — seeded into shop_till on first trade.
-function operatingCash(townKey) { return 900 + (fnv("till:" + townKey) % 1200); }
-function reserveOf(operating) { return Math.round(operating * P.reserveRatio); }
+// (params scales NEW seeds only; existing tills keep their stored operating.)
+function operatingCash(townKey, params) {
+  return Math.round((900 + (fnv("till:" + townKey) % 1200)) * (params ? params.opMult : 1));
+}
+function reserveOf(operating, ratio) { return Math.round(operating * (ratio || P.reserveRatio)); }
 function tillCapOf(operating) { return operating * P.tillCapMult; }
 function dailyDrawCap(operating) { return Math.round(operating * P.dailyDrawFrac); }
+
+// ---- personality (Phase 2) ----------------------------------------------
+// Every town's head trader has a hash-derived temperament. CRITICAL
+// INVARIANT: personality bends only the DYNAMIC parameters (stock horizon,
+// reserve, refusal, big-ticket appetite, pressure exponent, till size) —
+// never the neutral anchors (payBase, surplusMult, spreadMin) — so an
+// untouched or offline town still prices byte-identically to the legacy
+// formulas. Personality only shows once the market is alive.
+const ARCHETYPES = [
+  // steady: deep reserves, long horizon, hates single big buys
+  { name: "steady",     daysOfSupply: 9,  reserveRatio: 0.38, refuseAt: 2.4, opMult: 1.25, bigTicketFrac: 0.15, expStock: 0.40 },
+  // keen: thin reserves, quick repricing, chases opportunity
+  { name: "keen",       daysOfSupply: 4,  reserveRatio: 0.15, refuseAt: 3.5, opMult: 0.85, bigTicketFrac: 0.40, expStock: 0.55 },
+  // particular: big purse, slow turnover, will splash on one fine piece
+  { name: "particular", daysOfSupply: 12, reserveRatio: 0.30, refuseAt: 2.0, opMult: 1.50, bigTicketFrac: 0.55, expStock: 0.45 },
+  // brisk: small float, fast stock, everything must move
+  { name: "brisk",      daysOfSupply: 3,  reserveRatio: 0.20, refuseAt: 4.0, opMult: 0.70, bigTicketFrac: 0.20, expStock: 0.50 },
+];
+function shopParams(townKey) {
+  const h = fnv("pers:" + townKey);
+  const a = ARCHETYPES[h % ARCHETYPES.length];
+  // ±20% per-field jitter so no two steady towns are quite the same
+  const j = k => 1 + ((((h >>> (k * 4)) & 31) % 21) - 10) / 50;
+  return {
+    archetype: a.name,
+    daysOfSupply: a.daysOfSupply * j(1),
+    reserveRatio: clamp(a.reserveRatio * j(2), 0.10, 0.45),
+    refuseAt: clamp(a.refuseAt * j(3), 1.8, 4.5),
+    opMult: a.opMult * j(4),
+    bigTicketFrac: clamp(a.bigTicketFrac * j(5), 0.08, 0.60),
+    expStock: clamp(a.expStock * j(6), 0.30, 0.65),
+  };
+}
 
 // What the shopkeeper believes this item sells at with NO observations —
 // units/day, hash-wobbled so identical neighbours differ a little.
@@ -70,8 +106,8 @@ function bump(v, qty) { return v + qty / P.tauDays; }
 function dayCap(townKey, item) { return Math.max(20, Math.round(4 * baselineDemand(townKey, item))); }
 
 // Target stock from believed demand; serverTarget uses ledger-only floor 0.
-function targetStock(floorQty, emaOut, base) {
-  return Math.max(1, floorQty + Math.max(emaOut, base) * P.daysOfSupply);
+function targetStock(floorQty, emaOut, base, days) {
+  return Math.max(1, floorQty + Math.max(emaOut, base) * (days || P.daysOfSupply));
 }
 
 // ---- the shared quote --------------------------------------------------
@@ -79,8 +115,13 @@ function targetStock(floorQty, emaOut, base) {
 //         base }        (base = baselineDemand(town,item); stocked = standing
 //                        floor item → nominal floorDepth shelf presence)
 // till: { cash, operating } or null (offline / logged out → neutral).
+// params: shopParams(townKey), or omitted for the fixed defaults.
 // Returns integer coin prices plus the factors, for UI legibility.
-function quote(view, till) {
+function quote(view, till, params) {
+  const days = params ? params.daysOfSupply : P.daysOfSupply;
+  const resRatio = params ? params.reserveRatio : P.reserveRatio;
+  const expStock = params ? params.expStock : P.expStock;
+  const refuseAt = params ? params.refuseAt : P.refuseAt;
   const value = Math.max(1, view.value || 1);
   const floorQty = view.stocked ? P.floorDepth : 0;
   const invEff = Math.max(0, floorQty + (view.playerQty || 0));
@@ -88,25 +129,26 @@ function quote(view, till) {
   const emaOut = Math.max(0, view.emaOut || 0);
 
   // Pressure ratio built to be EXACTLY 1 in the neutral state, so offline
-  // and untouched towns price precisely like the legacy formulas.
-  const live = targetStock(floorQty, emaOut, base) / Math.max(invEff, 1);
-  const neutral = targetStock(floorQty, 0, base) / Math.max(floorQty, 1);
+  // and untouched towns price precisely like the legacy formulas —
+  // personality included (days scales live and neutral targets alike).
+  const live = targetStock(floorQty, emaOut, base, days) / Math.max(invEff, 1);
+  const neutral = targetStock(floorQty, 0, base, days) / Math.max(floorQty, 1);
   const ratio = live / neutral;
 
-  const stockPressure = clamp(Math.pow(ratio, P.expStock), 0.55, 1.9);
+  const stockPressure = clamp(Math.pow(ratio, expStock), 0.55, 1.9);
   // Demand only ever RAISES charges above the anchor (staples stay stable
   // for new players); slack demand already lowers pays through stockNeed.
   const demandPressure = clamp(Math.pow(Math.max(emaOut, base) / base, P.expDemand), 1, 1.5);
   const stockNeed = clamp(ratio, 0.10, 1.5);
   const liquidity = till
-    ? clamp((till.cash - reserveOf(till.operating)) /
-            Math.max(1, till.operating - reserveOf(till.operating)), 0.15, 1.25)
+    ? clamp((till.cash - reserveOf(till.operating, resRatio)) /
+            Math.max(1, till.operating - reserveOf(till.operating, resRatio)), 0.15, 1.25)
     : 1;
 
   const anchor = value * (view.surplusMult || 1);
   const charges = Math.max(1, Math.round(
     Math.min(anchor * P.chargesMax, anchor * stockPressure * demandPressure)));
-  const refused = invEff >= P.refuseAt * targetStock(floorQty, emaOut, base);
+  const refused = invEff >= refuseAt * targetStock(floorQty, emaOut, base, days);
   const pays = refused ? 0 : Math.max(0, Math.round(Math.min(
     charges * (1 - P.spreadMin),
     value * (view.demandMult || 1) * P.payBase * stockNeed * liquidity)));
@@ -122,15 +164,22 @@ function quote(view, till) {
 // `maxUnit` caps every chunk's unit (the buy-back-loop guard for goods with
 // no quality of their own). Returns { accepted, paid, unitFirst, refused,
 // tillShort }.
-function quoteSellLot(view, till, qty, mult, maxUnit) {
+// The big-ticket rule (params.bigTicketFrac) caps one lot's total draw at a
+// personality-sized share of the spendable till, so a single expensive line
+// can't eat the coin faster staples need (25-coin floor keeps small trades
+// alive at tiny tills).
+function quoteSellLot(view, till, qty, mult, maxUnit, params) {
   mult = mult > 0 ? mult : 1;
   if (!(maxUnit > 0)) maxUnit = Infinity;
   let cash = till ? till.cash : Infinity;
-  const floor = till ? reserveOf(till.operating) : 0;
+  const floor = till ? reserveOf(till.operating, params && params.reserveRatio) : 0;
+  const lineCap = till
+    ? Math.max(25, Math.round((params ? params.bigTicketFrac : 1) * (till.cash - floor)))
+    : Infinity;
   let pq = view.playerQty || 0, accepted = 0, paid = 0, unitFirst = 0;
-  let refused = false, tillShort = false;
+  let refused = false, tillShort = false, bigTicket = false;
   while (accepted < qty) {
-    const q = quote({ ...view, playerQty: pq }, till ? { cash, operating: till.operating } : null);
+    const q = quote({ ...view, playerQty: pq }, till ? { cash, operating: till.operating } : null, params);
     if (q.refused) { refused = true; break; }
     // pays rounding to zero is the shelf saturating — unless the till is
     // scraping its reserve, in which case it's the coin that ran out
@@ -138,15 +187,17 @@ function quoteSellLot(view, till, qty, mult, maxUnit) {
     const unit = Math.min(maxUnit, Math.max(1, Math.round(q.pays * mult)));
     if (!unitFirst) unitFirst = unit;
     let take = Math.min(P.chunk, qty - accepted);
+    if (paid + unit * take > lineCap) take = Math.floor((lineCap - paid) / unit);
+    if (take <= 0) { bigTicket = true; break; }
     if (cash - floor < unit * take) take = Math.floor((cash - floor) / unit);
     if (take <= 0) { tillShort = true; break; }
     paid += unit * take; accepted += take; pq += take; cash -= unit * take;
   }
-  return { accepted, paid, unitFirst, refused, tillShort };
+  return { accepted, paid, unitFirst, refused, tillShort, bigTicket };
 }
 
 root.EconCore = {
-  P, fnv, clamp,
+  P, fnv, clamp, shopParams,
   operatingCash, reserveOf, tillCapOf, dailyDrawCap,
   baselineDemand, decay, bump, dayCap, targetStock,
   quote, quoteSellLot,

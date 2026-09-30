@@ -6,8 +6,8 @@ This document adapts the general "realistic shopkeeper" plan to Our RPG's
 actual architecture — many players share every shopkeeper, the game is
 client-authoritative with an envelope, and trades sync asynchronously.
 
-Status: **Phase 1 BUILT** (2026-09-30, deploy pending — see §17 for the
-as-built deltas and the deploy checklist). Phases 2–3 remain design.
+Status: **Phases 1–2 BUILT** (2026-09-30; Phase 1 deployed and live, Phase 2
+deploy pending — see §17/§18 for the as-built deltas). Phase 3 remains design.
 
 ---
 
@@ -560,3 +560,49 @@ Deploy checklist (user-run):
    Order matters little: old client + new server = legacy free-shelving;
    new client + old server = quotes fall back to neutral (no flow/till in
    stock reads) — both degrade to today's behaviour.
+
+Deployed 2026-09-30: migration 0010 applied, worker b95593f6, Pages f9457413.
+
+## 18. Phase 2 as built (2026-09-30)
+
+Personalities, legible economics, the big-ticket rule, shortage contracts,
+and the dashboard lens. No schema change — Phase 2 is pure parameters + UI.
+
+* **Personality = `EconCore.shopParams(townKey)`** — one hash-derived
+  temperament per town (the till is per-town, so the "head trader" carries
+  it): four archetypes (*steady, keen, particular, brisk* ≈ the design's
+  conservative/opportunist/luxury/market-trader) with ±20% per-field jitter
+  over daysOfSupply, reserveRatio, refuseAt, opMult (till size),
+  bigTicketFrac, expStock. **Invariant preserved by construction:**
+  personality bends only dynamic parameters, never the neutral anchors
+  (payBase / surplusMult / spreadMin), and the pressure ratio normalises
+  days out of the neutral state — tested across 120 towns × 4 items that
+  every personality prices neutral byte-identically to legacy. Existing
+  deployed tills keep their stored operating cash; opMult shapes new seeds
+  only.
+* **Big-ticket rule** — one sell line draws at most
+  `bigTicketFrac × spendable` (25-coin floor so tiny tills still trade).
+  Enforced in the client walk (with a `bigTicket` flag → "I couldn't tie up
+  that much coin in one line of stock") AND as a server backstop clamp.
+* **Legibility** — ▲/▼ trend glyphs on buy slots vs the neutral anchor with
+  a plain-words tooltip; "they're short of these — good coin!" markers on
+  sell slots at stockNeed ≥ 1.25; one mood line per market visit (the
+  keeper names their hottest shortage, or their till state). All gated on a
+  live-synced market; offline shows none of it.
+* **Contracts-from-shortage** — the general store posts up to two ⚡ URGENT
+  notices for items whose live stockNeed ≥ 1.3 (candidates: its own shelf +
+  the top wanted-tag pools). Keys are `town:sh:item` so completion persists
+  in player.contractsDone; needs are shared state, so every player sees the
+  same notice, and filling it removes the shortage that created it.
+  Self-limiting as an exploit: pumping demand costs real buys (spread +
+  belief day-caps), the reward key completes once, and fulfilment consumes
+  real goods.
+* **Dashboard** — the Shops card (tools/telemetry_dash_template.html) now
+  shows average unit price beside volume for buys and sells, from the
+  existing trades aggregation; falling sell averages = glutting shelves.
+
+Files: shared/econ-core.js, server/src/shops.js, js/skills/market.js,
+js/net/shopsync.js, tools/telemetry_dash_template.html. Verified: engine
+suite (31 checks incl. the personality-parity sweep), server integration
+(20 checks incl. the big-ticket backstop), headless offline parity (12),
+and a simulated-live headless pass over glyphs/mood/urgent/taper (7).
