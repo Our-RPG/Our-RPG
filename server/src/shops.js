@@ -43,7 +43,39 @@ const cleanItem = s => {
   const id = String(s || "").slice(0, 60);
   return /^[a-z0-9_]+$/.test(id) ? id : null;
 };
+const cleanTag = s => {
+  const t = String(s || "").slice(0, 20);
+  return /^[a-z]+$/.test(t) ? t : null;
+};
 const coins = v => Math.max(0, Math.min(MAX_LINE_COINS, Math.round(Number(v) || 0)));
+
+// ---- supply shocks (Phase 3) ---------------------------------------------
+// Active mods for a town, {tag: {kind, floor, demand, until}}. FAIL-SOFT:
+// while migration 0011 is unapplied this returns {} instead of 500ing the
+// whole shop API, so deploy order doesn't matter.
+async function getMods(env, town, t) {
+  try {
+    const rows = await env.DB.prepare(
+      "SELECT tag, kind, floor_mult, demand_mult, expires_at FROM town_mods WHERE town = ? AND expires_at > ?"
+    ).bind(town, t).all();
+    const mods = {};
+    for (const r of rows.results)
+      mods[r.tag] = { kind: r.kind, floor: r.floor_mult, demand: r.demand_mult, until: r.expires_at };
+    return mods;
+  } catch (e) { return {}; }
+}
+
+// The daily event roller's repertoire. floor scales the standing SHELF,
+// demand scales believed need — econ-core turns the pair into scarcity (or
+// glut) pricing; nothing here touches a price.
+const SHOCK_EVENTS = [
+  { kind: "caravan_cut",   tags: ["metal", "textile", "tool", "potion"], floor: [0.15, 0.45], demand: [1.2, 1.7] },
+  { kind: "mine_trouble",  tags: ["metal", "stone"],                     floor: [0.15, 0.40], demand: [1.3, 1.8] },
+  { kind: "blight",        tags: ["food", "raw"],                        floor: [0.20, 0.50], demand: [1.2, 1.6] },
+  { kind: "bumper",        tags: ["food", "raw"],                        floor: [2.0, 3.0],   demand: [0.7, 0.9] },
+  { kind: "surplus_barge", tags: ["wood", "fuel", "stone"],              floor: [2.0, 3.0],   demand: [0.7, 0.9] },
+];
+const between = ([lo, hi]) => lo + Math.random() * (hi - lo);
 
 // ---- the till -------------------------------------------------------------
 
@@ -160,7 +192,8 @@ export async function stock(req, env, url) {
   ).bind(town).first();
   const operating = tillRow ? tillRow.operating : Econ.operatingCash(town, Econ.shopParams(town));
   const till = { cash: tillRow ? tillRow.cash : operating, operating };
-  return json({ ok: true, town, items, flow, till, now: t }, 200, CACHE);
+  const mods = await getMods(env, town, t);
+  return json({ ok: true, town, items, flow, till, mods, now: t }, 200, CACHE);
 }
 
 /* POST /api/shop/trade
@@ -183,6 +216,7 @@ export async function trade(req, env) {
   const pp = Econ.shopParams(town);          // the town trader's temperament
   const till = await getTill(env, town, t, pp);
   const reserve = Econ.reserveOf(till.operating, pp.reserveRatio);
+  const mods = await getMods(env, town, t);  // active supply shocks by tag
   let cashAvail = till.cash;            // in-memory during this request
   let tillDelta = 0;
   const flows = new Map();              // item -> flow (loaded once, saved once)
@@ -200,8 +234,13 @@ export async function trade(req, env) {
     ).bind(town, item).first();
     const flow = await flowFor(item);
     // refusal backstop (the client enforces the real curve incl. its floor):
-    // the shelf already holds several times what this town believes it moves
-    const target = Econ.targetStock(0, flow.out, Econ.baselineDemand(town, item), pp.daysOfSupply);
+    // the shelf already holds several times what this town believes it
+    // moves. The line's client-supplied tag picks up any active shock's
+    // demand mult so imports stay welcome for a shortage's whole life —
+    // clamped-trust: at worst it raises the qty ceiling, never the price.
+    const shock = mods[cleanTag(line.tag)] || null;
+    const target = Econ.targetStock(0, flow.out,
+      Econ.baselineDemand(town, item) * (shock ? shock.demand : 1), pp.daysOfSupply);
     const refuse = (have?.n || 0) >= Math.max(24, pp.refuseAt * target);
     const room = refuse ? 0 : Math.max(0, MAX_TOWN_ITEM_QTY - (have?.n || 0));
     let add = Math.min(qty, room);
@@ -319,4 +358,63 @@ export async function dailyTick(env) {
   await env.DB.prepare(
     "DELETE FROM shop_flow WHERE updated_at < ? AND ema_in < 0.05 AND ema_out < 0.05"
   ).bind(t - 30 * 864e5).run();
+  await rollShocks(env, t);
+}
+
+/* The daily event roller: expire finished shocks, then — on towns that
+ * actually trade (they have a till row) and aren't already shocked — roll a
+ * small chance of a new one. Bounded: at most ~15% of trading towns carry a
+ * shock at once. Fail-soft while migration 0011 is unapplied. */
+export async function rollShocks(env, t) {
+  try {
+    await env.DB.prepare("DELETE FROM town_mods WHERE expires_at <= ?").bind(t).run();
+    const towns = (await env.DB.prepare("SELECT town FROM shop_till LIMIT 500").all())
+      .results.map(r => r.town);
+    if (!towns.length) return;
+    const active = (await env.DB.prepare(
+      "SELECT town, COUNT(*) AS n FROM town_mods GROUP BY town").all()).results;
+    const shocked = new Set(active.map(r => r.town));
+    let total = active.reduce((s, r) => s + r.n, 0);
+    const cap = Math.max(2, Math.ceil(towns.length * 0.15));
+    for (const town of towns) {
+      if (total >= cap) break;
+      if (shocked.has(town) || Math.random() > 0.08) continue;
+      const ev = SHOCK_EVENTS[Math.floor(Math.random() * SHOCK_EVENTS.length)];
+      const tag = ev.tags[Math.floor(Math.random() * ev.tags.length)];
+      const days = 3 + Math.floor(Math.random() * 5);       // 3–7 days
+      await env.DB.prepare(
+        `INSERT INTO town_mods (town, tag, kind, floor_mult, demand_mult, started_at, expires_at)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(town, tag) DO NOTHING`
+      ).bind(town, tag, ev.kind, +between(ev.floor).toFixed(2), +between(ev.demand).toFixed(2),
+             t, t + days * 864e5).run();
+      total++;
+    }
+  } catch (e) {}
+}
+
+/* Story events by hand (or future server-authoritative quest hooks):
+ * POST /api/admin/shopevent {town, tag, kind, floor_mult, demand_mult, days}
+ * — floor_mult/demand_mult clamped sane; days ≤ 30; {clear: true} removes.
+ * Admin-gated in index.js routing (admin.setShopEvent wraps this). */
+export async function setShockEvent(env, b) {
+  const town = String(b.town || "");
+  const tag = cleanTag(b.tag);
+  if (!TOWN_KEY.test(town) || !tag) return { error: "Need {town: 'cx,cy', tag}." };
+  const t = now();
+  if (b.clear) {
+    await env.DB.prepare("DELETE FROM town_mods WHERE town = ? AND tag = ?").bind(town, tag).run();
+    return { ok: true, cleared: true };
+  }
+  const kind = String(b.kind || "caravan_cut").slice(0, 32);
+  const floor = Math.min(4, Math.max(0.05, Number(b.floor_mult) || 1));
+  const demand = Math.min(3, Math.max(0.3, Number(b.demand_mult) || 1));
+  const days = Math.min(30, Math.max(1, Number(b.days) || 5));
+  await env.DB.prepare(
+    `INSERT INTO town_mods (town, tag, kind, floor_mult, demand_mult, started_at, expires_at)
+     VALUES (?,?,?,?,?,?,?)
+     ON CONFLICT(town, tag) DO UPDATE SET kind = ?, floor_mult = ?, demand_mult = ?, expires_at = ?`
+  ).bind(town, tag, kind, floor, demand, t, t + days * 864e5,
+         kind, floor, demand, t + days * 864e5).run();
+  return { ok: true, town, tag, kind, floor_mult: floor, demand_mult: demand, days };
 }

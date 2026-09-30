@@ -115,6 +115,7 @@ const ROUTES = {
   "GET /api/admin/flagged":             admin.flaggedQueue,
   "POST /api/admin/proposal":           admin.setProposalStatus,
   "POST /api/admin/gaps":               admin.setGaps,
+  "POST /api/admin/shopevent":          admin.setShopEvent,
 };
 
 function corsHeaders(req, env) {

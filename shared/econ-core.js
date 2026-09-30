@@ -124,14 +124,21 @@ function quote(view, till, params) {
   const refuseAt = params ? params.refuseAt : P.refuseAt;
   const value = Math.max(1, view.value || 1);
   const floorQty = view.stocked ? P.floorDepth : 0;
-  const invEff = Math.max(0, floorQty + (view.playerQty || 0));
+  // Supply shocks (Phase 3): floorMult shrinks (or gluts) what's actually
+  // ON the shelf, baseMult heats (or cools) what the town believes it
+  // needs — while the NEUTRAL reference below stays unmodified, so the
+  // pressure ratio moves and scarcity pricing EMERGES. Player imports
+  // refill invEff and walk the ratio back down: the arbitrage self-closes.
+  const floorMult = view.floorMult > 0 ? view.floorMult : 1;
+  const baseMult = view.baseMult > 0 ? view.baseMult : 1;
+  const invEff = Math.max(0, floorQty * floorMult + (view.playerQty || 0));
   const base = Math.max(0.1, view.base || 0.5);
   const emaOut = Math.max(0, view.emaOut || 0);
 
-  // Pressure ratio built to be EXACTLY 1 in the neutral state, so offline
-  // and untouched towns price precisely like the legacy formulas —
-  // personality included (days scales live and neutral targets alike).
-  const live = targetStock(floorQty, emaOut, base, days) / Math.max(invEff, 1);
+  // Pressure ratio built to be EXACTLY 1 in the neutral state (mults = 1),
+  // so offline and untouched towns price precisely like the legacy
+  // formulas — personality included (days scales both targets alike).
+  const live = targetStock(floorQty, emaOut, base * baseMult, days) / Math.max(invEff, 1);
   const neutral = targetStock(floorQty, 0, base, days) / Math.max(floorQty, 1);
   const ratio = live / neutral;
 
@@ -148,7 +155,7 @@ function quote(view, till, params) {
   const anchor = value * (view.surplusMult || 1);
   const charges = Math.max(1, Math.round(
     Math.min(anchor * P.chargesMax, anchor * stockPressure * demandPressure)));
-  const refused = invEff >= refuseAt * targetStock(floorQty, emaOut, base, days);
+  const refused = invEff >= refuseAt * targetStock(floorQty, emaOut, base * baseMult, days);
   const pays = refused ? 0 : Math.max(0, Math.round(Math.min(
     charges * (1 - P.spreadMin),
     value * (view.demandMult || 1) * P.payBase * stockNeed * liquidity)));

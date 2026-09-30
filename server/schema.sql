@@ -192,6 +192,21 @@ CREATE TABLE IF NOT EXISTS shop_till (
   PRIMARY KEY (town, shop)
 );
 
+-- Supply shocks (Phase 3): one active shock per (town, tag), rolled by the
+-- daily cron on trading towns or written by /api/admin/shopevent. Price
+-- effects emerge in econ-core (floor_mult shrinks the shelf, demand_mult
+-- heats beliefs) — nothing scripts a price directly.
+CREATE TABLE IF NOT EXISTS town_mods (
+  town        TEXT NOT NULL,
+  tag         TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  floor_mult  REAL NOT NULL DEFAULT 1,
+  demand_mult REAL NOT NULL DEFAULT 1,
+  started_at  INTEGER NOT NULL,
+  expires_at  INTEGER NOT NULL,
+  PRIMARY KEY (town, tag)
+);
+
 -- Lazily-decayed demand/supply beliefs per (town, item) — sparse, created on
 -- first trade of that item there. Prices are never stored, always computed
 -- from these EMAs by shared/econ-core.js (client and worker, same math).

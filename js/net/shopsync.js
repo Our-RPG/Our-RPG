@@ -20,7 +20,7 @@
   const QUEUE_KEY = "taiao_tradequeue_v1";
   const STOCK_TTL = 90e3;
   const noop = { ensureStock: () => null, qty: () => 0, units: () => [], items: () => ({}),
-    flow: () => null, till: () => null, noteSell: () => {}, noteBuy: () => {},
+    flow: () => null, till: () => null, mods: () => ({}), noteSell: () => {}, noteBuy: () => {},
     status: () => ({ enabled: false }) };
   if (DEV) { window.ShopSync = noop; return; }
 
@@ -37,13 +37,14 @@
     if (!town || !live()) return null;
     let s = stocks.get(town);
     if (!s || (!s.fetching && Date.now() - s.at > STOCK_TTL)) {
-      s = s || { items: null, flow: null, till: null, at: 0 };
+      s = s || { items: null, flow: null, till: null, mods: null, at: 0 };
       s.fetching = true;
       stocks.set(town, s);
       Server.call("/api/shop/stock?town=" + encodeURIComponent(town)).then(r => {
         s.fetching = false;
         if (!r || !r.ok) return;
         s.items = r.items || {}; s.flow = r.flow || {}; s.till = r.till || null;
+        s.mods = r.mods || {};
         s.at = Date.now();
         // repaint an open market so player stock appears without a reopen
         try {
@@ -72,6 +73,16 @@
   // neutral, i.e. legacy prices) — never guessed, so prices only bend once
   // the shared truth has actually arrived.
   function till(town) { const s = stocks.get(town); return (s && s.till) || null; };
+  // Active supply shocks by item tag ({tag: {kind, floor, demand, until}}),
+  // expired ones filtered out client-side between syncs.
+  function mods(town) {
+    const s = stocks.get(town);
+    if (!s || !s.mods) return {};
+    const out = {};
+    for (const [tag, m] of Object.entries(s.mods))
+      if (!m.until || m.until > Date.now()) out[tag] = m;
+    return out;
+  }
 
   // ---------- writes (choke-point notes from market.js) ----------
   function lineFor(town) {
@@ -88,13 +99,13 @@
     s.till.cash = Math.max(res,
       Math.min(EconCore.tillCapOf(s.till.operating), s.till.cash + delta));
   }
-  function noteSell(town, id, n, q, maker, skill, paid) {
+  function noteSell(town, id, n, q, maker, skill, paid, tag) {
     if (!town || !n || DEV) return;
     const l = lineFor(town);
     const same = l.sells.find(s => s.item === id && s.q === q && s.maker === maker);
     if (same) { same.qty += n; same.paid = (same.paid || 0) + (paid || 0); }
     else l.sells.push({ item: id, qty: n, q: q ?? null, maker: maker || null,
-                        skill: skill || null, paid: paid || 0 });
+                        skill: skill || null, paid: paid || 0, tag: tag || null });
     // optimistic: the shelf shows your goods immediately, the till pays now
     const s = stocks.get(town);
     if (s && s.items) (s.items[id] ||= { qty: 0, units: [] }).qty += n;
@@ -139,7 +150,7 @@
   addEventListener("beforeunload", persistQueue);
 
   window.ShopSync = {
-    ensureStock, qty, units, items, flow, till, noteSell, noteBuy,
+    ensureStock, qty, units, items, flow, till, mods, noteSell, noteBuy,
     status: () => ({ enabled: true, live: live(), queued: queue.length }),
   };
 })();

@@ -5,10 +5,23 @@
  */
 
 import { json, err, readJson } from "./util.js";
+import { setShockEvent } from "./shops.js";
 
 function isAdmin(req, env) {
   const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
   return !!(env.ADMIN_TOKEN && m && m[1] === env.ADMIN_TOKEN);
+}
+
+/* Supply-shock story events (docs/shopkeeper-economy.md §19):
+ *   curl -H "authorization: Bearer $ADMIN_TOKEN" \
+ *     -d '{"town":"12,-7","tag":"metal","kind":"mine_trouble","floor_mult":0.2,"demand_mult":1.5,"days":7}' \
+ *     .../api/admin/shopevent          ({"clear":true} with town+tag removes) */
+export async function setShopEvent(req, env) {
+  if (!isAdmin(req, env)) return err("Nope.", 403);
+  const b = await readJson(req);
+  if (!b) return err("Bad JSON.");
+  const r = await setShockEvent(env, b);
+  return r.error ? err(r.error) : json(r);
 }
 
 export async function setCost(req, env) {

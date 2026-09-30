@@ -6,8 +6,9 @@ This document adapts the general "realistic shopkeeper" plan to Our RPG's
 actual architecture — many players share every shopkeeper, the game is
 client-authoritative with an envelope, and trades sync asynchronously.
 
-Status: **Phases 1–2 BUILT** (2026-09-30; Phase 1 deployed and live, Phase 2
-deploy pending — see §17/§18 for the as-built deltas). Phase 3 remains design.
+Status: **Phases 1–3 BUILT** (2026-09-30; see §17–§19 for the as-built
+deltas). The two telemetry-gated Phase-3 extras (inertia column, elasticity
+search) stay parked until live data asks for them.
 
 ---
 
@@ -606,3 +607,42 @@ js/net/shopsync.js, tools/telemetry_dash_template.html. Verified: engine
 suite (31 checks incl. the personality-parity sweep), server integration
 (20 checks incl. the big-ticket backstop), headless offline parity (12),
 and a simulated-live headless pass over glyphs/mood/urgent/taper (7).
+
+## 19. Phase 3 as built (2026-09-30) — supply shocks
+
+Migration `0011_town_mods.sql`: one active shock per (town, tag) —
+`{kind, floor_mult, demand_mult, expires_at}`. **Every worker read of the
+table fails soft** (absent table = calm world), so deploy order never
+matters. Nothing ever scripts a price:
+
+* **The engine models a shock as "the shelf shrank, the need didn't":**
+  `view.floorMult` scales the standing-floor inventory, `view.baseMult`
+  scales believed live demand — while the neutral reference stays
+  UNMODIFIED, so the pressure ratio moves and scarcity pricing emerges.
+  Measured: a 0.2/1.5 mine shock takes a 10-value good from 9→17 charges
+  with pays 6→9 (import premium, spread intact); ~10 imported units walk it
+  monotonically back to calm; a 2.5/0.8 glut crashes charges 9→6. Mults of
+  1 are bit-exact calm, so the parity invariant is untouched.
+* **Authorship is server-only** (client Lua can't write shared world
+  state): the daily cron's `rollShocks` expires finished shocks and rolls
+  new ones on towns that actually trade (have a till row) — 8%/town/day
+  from a 5-event repertoire (caravan_cut, mine_trouble, blight, bumper,
+  surplus_barge), 3–7-day lifetimes, capped at ~15% of trading towns.
+  Story events go through `POST /api/admin/shopevent` (ADMIN_TOKEN;
+  `{town, tag, kind, floor_mult, demand_mult, days}`, `clear:true`
+  removes) — the hook a future server-authoritative quest channel can use.
+* **Clamped-trust tag on sell lines:** the server's refusal backstop can't
+  map item→tag (client-side recipes), so sell lines carry `tag` and an
+  active shock's demand_mult loosens only the QTY ceiling for that tag —
+  imports stay welcome for a shortage's whole life; a false tag can never
+  move a price.
+* **The client speaks it:** stock reads carry `mods`; econViewFor applies
+  them by itemTag; the keeper's mood line announces the shock first
+  ("Trouble at the diggings — metalwork is dear while it lasts."), and the
+  existing ▲ glyphs + urgent contracts light up on their own.
+
+Verified: engine suite grows to 43 (shock/glut/import-closure curves),
+server integration to 30 (fail-soft, admin write/clear/clamps, tag-loosened
+refusal, roller seed/expire/cap), plus a headless shock pass (5 checks:
+63-coin shocked shield vs 33 calm, glyph, keeper line, import premium) and
+the standing offline-parity pass.

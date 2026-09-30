@@ -155,6 +155,9 @@ function econViewFor(profile, id, stocked) {
   const town = activeMarket ? activeMarket.townKey : null;
   const synced = typeof ShopSync !== "undefined" && town;
   const f = synced ? ShopSync.flow(town, id) : null;
+  // active supply shock for this item's tag (Phase 3): shrinks/gluts the
+  // standing shelf and heats/cools believed demand — pricing emerges
+  const mod = synced ? ShopSync.mods(town)[itemTag(id)] : null;
   return {
     value: ITEMS[id].value || 1,
     demandMult: demandMult(profile, id),
@@ -164,6 +167,8 @@ function econViewFor(profile, id, stocked) {
     playerQty: synced ? ShopSync.qty(town, id) : 0,
     emaOut: f ? f.out : 0,
     base: town ? EconCore.baselineDemand(town, id) : 1,
+    floorMult: mod ? mod.floor : 1,
+    baseMult: mod ? mod.demand : 1,
   };
 }
 function econTill() {
@@ -206,12 +211,27 @@ function marketSellPrice(profile, id, q) { return marketSellQuote(profile, id, q
 // One market-mood line per visit, once the shared state has arrived: the
 // keeper names their hottest shortage, or their till state — the economy
 // explaining itself in character (docs/shopkeeper-economy.md §11).
+const SHOCK_TAG_WORDS = { metal: "metalwork", stone: "stone", food: "food", raw: "raw goods",
+  wood: "timber", fuel: "fuel", textile: "cloth", tool: "tools", potion: "draughts" };
+const SHOCK_LINES = {
+  caravan_cut: w => `The caravans aren't getting through — ${w} is scarce until the roads clear.`,
+  mine_trouble: w => `Trouble at the diggings — ${w} is dear while it lasts.`,
+  blight: w => `A blight's been through the fields — ${w} is short everywhere.`,
+  bumper: w => `A bumper season! ${w.charAt(0).toUpperCase() + w.slice(1)} is piled high and going cheap.`,
+  surplus_barge: w => `A surplus barge came in — ${w} is going for a song.`,
+};
 function marketMoodLine(profile, shopkeeper) {
   if (!activeMarket || activeMarket.moodDone) return;
   const till = econTill();
   if (!till) return;
   activeMarket.moodDone = true;
   const params = econParams();
+  // an active supply shock is the biggest news in town — speak it first
+  const mods = typeof ShopSync !== "undefined" ? ShopSync.mods(activeMarket.townKey) : {};
+  for (const [tag, m] of Object.entries(mods)) {
+    const line = SHOCK_LINES[m.kind];
+    if (line) { log(`${shopkeeper}: ${line(SHOCK_TAG_WORDS[tag] || tag)}`, "sys"); return; }
+  }
   const res = EconCore.reserveOf(till.operating, params.reserveRatio);
   const liq = EconCore.clamp((till.cash - res) / Math.max(1, till.operating - res), 0.15, 1.25);
   let best = null;
@@ -645,7 +665,7 @@ function renderMarket() {
       if (typeof ShopSync !== "undefined") {
         const ev = s.prov && typeof provRegistry !== "undefined" ? provRegistry[s.prov] : null;
         ShopSync.noteSell(townKey, s.id, lot.accepted, s.q != null ? s.q : null,
-          ev && ev.producer || null, ev && ev.skill || null, lot.paid);
+          ev && ev.producer || null, ev && ev.skill || null, lot.paid, itemTag(s.id));
       }
       sfx("coins", 0.7);
       if (typeof Tele !== "undefined") Tele.ev("sell", s.id, Math.round(lot.paid / lot.accepted), lot.accepted);
