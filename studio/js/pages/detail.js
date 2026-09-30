@@ -588,10 +588,11 @@ async function openCreateStateDialog(voteCtx, parentNode) {
     const pixellabKind = single ? "image" : (type === "object" ? "object8" : "character");
     const subject = Taiao.subjectFor(type, folder);
     bg.remove();
+    const gt = toastLoading("Generating “" + name + "”…");
     GenJobs.execute(
       { spriteType: type, spriteId: folder, label: name, subject, prompt: desc, pixellabKind, reference }
-    ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
-    toast("Generating “" + name + "” — watch it in the card above the state tree.", "ok");
+    ).then(() => gt.done("“" + name + "” is ready.", 6000))
+     .catch(e => gt.fail("Generation failed: " + (e && e.message || e)));
   } });
   m.appendChild(status);
   m.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [go, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() })]));
@@ -1612,10 +1613,11 @@ function renderItemPreview(page, provider, entry, ctx) {
       if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); return; }
       const desc = promptIn.value.trim() || (name + ", a single game item icon");
       bg.remove();
+      const gt = toastLoading("Generating an icon for “" + name + "”…");
       GenJobs.execute(
         { spriteType: "ui", spriteId: id, label: name, subject: Taiao.subjectFor("ui", key), prompt: desc, pixellabKind: "image", size: 64, view: "high top-down" }
-      ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
-      toast("Generating an icon — watch it in the card above.", "ok");
+      ).then(() => gt.done("Icon for “" + name + "” is ready.", 6000))
+       .catch(e => gt.fail("Generation failed: " + (e && e.message || e)));
     };
     bg.appendChild(m); document.body.appendChild(bg);
   }

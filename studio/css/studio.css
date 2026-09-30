@@ -385,6 +385,8 @@ tr.tf-controls input, tr.tf-controls select { font-size: .76rem; padding: .22rem
 .toast.ok { border-left-color: var(--good); }
 .toast.warn { border-left-color: var(--warn); }
 .toast.err { border-left-color: var(--bad); }
+.toast.loading { display: flex; align-items: center; gap: .55rem; }
+.toast-spinner { width: 15px; height: 15px; flex: none; border-radius: 50%; border: 2px solid var(--line-2); border-top-color: var(--accent); animation: spin 1s linear infinite; }
 
 /* ---- vote glyph + popover ---- */
 .vote-sym { background: none; border: 0; cursor: pointer; font-size: .82rem; line-height: 1; padding: 0 .15rem; opacity: .5; filter: grayscale(.3); transition: opacity .15s, transform .15s; }

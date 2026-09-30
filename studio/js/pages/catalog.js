@@ -2105,7 +2105,7 @@ function openUnifiedGenerateDialog() {
     .then(b => { balance = { gen: (b && b.subscription && b.subscription.generations) || 0, usd: (b && b.credits && b.credits.usd) || 0 }; updateCost(); })
     .catch(() => { balLine.textContent = ""; });
 
-  m.appendChild(el("p.tagline", { style: "margin-top:.6rem", text: "Generate closes this dialog — the sprite appears as a card up top while PixelLab works, and stays there (even across a refresh) once it's done." }));
+  m.appendChild(el("p.tagline", { style: "margin-top:.6rem", text: "Generate closes this dialog — a progress toast tracks it while PixelLab works, and the finished sprite lands in your profile gallery once it's done (even across a refresh)." }));
   const genBtn = el("button.btn.primary", { text: "Generate" });
   m.appendChild(el("div.btn-row", { style: "margin-top:.4rem" }, [genBtn, el("button.btn.ghost", { text: "Cancel", onclick: () => bg.remove() })]));
 
@@ -2121,10 +2121,11 @@ function openUnifiedGenerateDialog() {
     const pixellabKind = (gtype === "character" || (gtype === "monster" && monsterBody === "humanoid")) ? "character" : isItem ? "object1" : "object8";
     const view = "high top-down", size = isItem ? 32 : 128;
     bg.remove();
+    const gt = toastLoading("Generating “" + spriteId + "”…");
     GenJobs.execute(
       { spriteType: saveType, spriteId, label: spriteId, prompt: desc, bodyType: gtype === "monster" ? monsterBody : undefined, seed: seed || undefined, pixellabKind, view, size, template: pixellabKind === "character" ? "mannequin" : undefined }
-    ).catch(e => toast("Generation failed: " + (e && e.message || e), "err", 7000));
-    toast("Generating “" + spriteId + "” — watch it in the card up top.", "ok");
+    ).then(() => gt.done("“" + spriteId + "” is ready.", 6000))
+     .catch(e => gt.fail("Generation failed: " + (e && e.message || e)));
   };
   bg.appendChild(m); document.body.appendChild(bg);
 }

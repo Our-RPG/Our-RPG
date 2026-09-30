@@ -53,6 +53,37 @@ function toast(msg, type, ms) {
   setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, ms || 3600);
 }
 
+// A toast that stays put with a spinner until the caller settles it — for a
+// long op (e.g. a PixelLab generation) that shouldn't be a fire-and-forget
+// message. Returns a handle: update(text) to change the label, then done(text)
+// / fail(text) to swap the spinner for a final state that auto-dismisses, or
+// close() to just dismiss. Idempotent once settled.
+function toastLoading(msg) {
+  let host = qs("#toasts");
+  if (!host) { host = el("div#toasts"); document.body.appendChild(host); }
+  const spin = el("span.toast-spinner");
+  const label = el("span", { text: msg });
+  const t = el("div.toast.loading", null, [spin, label]);
+  host.appendChild(t);
+  requestAnimationFrame(() => t.classList.add("show"));
+  let settled = false;
+  const dismiss = () => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); };
+  function settle(cls, text, ms) {
+    if (settled) return;
+    settled = true;
+    spin.remove();
+    t.className = "toast" + (cls ? " " + cls : "") + " show";
+    if (text != null) label.textContent = text;
+    setTimeout(dismiss, ms || 3600);
+  }
+  return {
+    update: text => { if (!settled) label.textContent = text; },
+    done: (text, ms) => settle("ok", text, ms),
+    fail: (text, ms) => settle("err", text, ms || 7000),
+    close: () => { if (!settled) { settled = true; dismiss(); } },
+  };
+}
+
 // Base64Image (PixelLab's {type,base64,format}) → data URL, and back.
 const b64ToDataUrl = img => img && img.base64 ? `data:image/${img.format || "png"};base64,${img.base64}` : "";
 function dataUrlToB64(dataUrl) {
