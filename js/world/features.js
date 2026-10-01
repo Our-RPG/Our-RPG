@@ -1564,6 +1564,26 @@ function createWorldFeatures(ctx) {
       const prefabs = buildings.map(b => ({ ...b,
         x0: b.x * 2, y0: b.y * 2, w: Math.max(7, b.w * 2), h: Math.max(7, b.h * 2) }));
       const gField = field ? { x0: field.x * 2, y0: field.y * 2, w: field.w * 2, h: field.h * 2 } : null;
+      // ancient portal: one guaranteed per CITY (never villages), named
+      // identically to the city (poisNearForMap below injects it using
+      // v.name verbatim — see gameplay/portals.js portalName()). Picked
+      // once per city on the plaza ring, inside the wall but clear of the
+      // keep/mainbank prefabs and the central fountain; reserved as a
+      // no-build island in tileClass so organic growth never covers it.
+      // Harbour cities can have real water well inside their wall radius,
+      // so try a few angles at the same radius and keep the first one that
+      // actually lands on dry ground (map-unit elevation, same test the
+      // wild portal lattice uses) — falling back to the plaza centre
+      // itself (always land, it's the settlement's own seed point).
+      const portal = kind === "city" ? (() => {
+        const pr = Math.max(6, R - 6);
+        for (let i = 0; i < 8; i++) {
+          const ang = rand2(vcx, vcy, S ^ (0x5c10 + i)) * Math.PI * 2;
+          const mx = x + Math.round(Math.cos(ang) * pr), my = y + Math.round(Math.sin(ang) * pr);
+          if (elevation(mx, my) >= LAND_E) return { x: mx * 2, y: my * 2 };
+        }
+        return { x: gx, y: gy };
+      })() : null;
       // water/river sampled at MAP-cell resolution and memoized — growth keeps
       // a one-cell bank strip clear, so organic houses never span channels
       const wetCache = new Map();
@@ -1583,6 +1603,8 @@ function createWorldFeatures(ctx) {
         }
         if (gField && tx >= gField.x0 - 2 && tx < gField.x0 + gField.w + 2 &&
             ty >= gField.y0 - 2 && ty < gField.y0 + gField.h + 2) return 1;
+        if (portal && tx >= portal.x - 3 && tx < portal.x + 4 && ty >= portal.y - 3 && ty < portal.y + 4)
+          return (tx === portal.x && ty === portal.y) ? 2 : 1;
         const mx = tx >> 1, my = ty >> 1;
         if (wetCell(mx, my) || wetCell(mx + 1, my) || wetCell(mx - 1, my) ||
             wetCell(mx, my + 1) || wetCell(mx, my - 1)) return 2;
@@ -1669,7 +1691,7 @@ function createWorldFeatures(ctx) {
           if (b.w * b.h >= 49 && jobs[next]) b.job2 = jobs[next++];
         }
       }
-      v = { x: x * 2, y: y * 2, name, kind, wall, keep, layout, well, field, origin,
+      v = { x: x * 2, y: y * 2, name, kind, wall, keep, layout, well, field, origin, portal,
         zone: head.zone, // the 15000² zone block this settlement is tied to
         R: (kind === "city" ? R : 17) * 2,
         // rectangular wall: Ry = the Y half-extent (game tiles). Newhaven's
@@ -2227,6 +2249,7 @@ function createWorldFeatures(ctx) {
       icons.push({ x: x - 3, y: y + 3, type: "water" });
       v = { x, y, name: info.name, kind: info.kind, buildings, icons,
             layout: info.layout, wall: info.wall, keep: info.keep, well: info.well, field: info.field,
+            portal: info.portal ? { x: info.portal.x / 2, y: info.portal.y / 2 } : null,
             R: info.R / 2, Ry: (info.Ry != null ? info.Ry : info.R) / 2,
             r: info.kind === 'city' ? info.R / 2 + 7 : 17 };
     }
@@ -2316,6 +2339,13 @@ function createWorldFeatures(ctx) {
     const c0y=Math.floor((ty0-pad)/PCELL), c1y=Math.floor((ty1+pad)/PCELL);
     for (let cy2=c0y; cy2<=c1y; cy2++)
       for (let cx2=c0x; cx2<=c1x; cx2++) { const p=poiInfo(cx2,cy2); if(p) out.push(p); }
+    // every city's guaranteed portal (villageInfo's v.portal) is a POI too,
+    // named identically to its city — inject it here so portalName()
+    // (gameplay/portals.js) and the world-map labels pick it up like any
+    // other portal, without it ever competing for a spot in the wild lattice.
+    for (const v of villagesNearForMap(tx0, ty0, tx1, ty1, pad))
+      if (v.kind === "city" && v.portal)
+        out.push({ x: v.portal.x, y: v.portal.y, type: "portal", name: v.name, dir: null });
     return out;
   }
   function iconsNearForMap(tx0, ty0, tx1, ty1) {

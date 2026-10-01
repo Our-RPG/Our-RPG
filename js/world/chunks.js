@@ -1337,6 +1337,31 @@ function createWorldChunks(ctx) {
           [0, -6, "aqueduct", true], [0, 6, "planter_box", false]])
           if (openTile(v.x + dx, v.y + dy)) deco(v.x + dx, v.y + dy, k, solid);
       }
+      // ancient portal: every city gets exactly one, named after the city
+      // itself (features.js villageInfo computes v.portal once per city;
+      // poisNearForMap injects the matching {x,y,name} POI so the UI/map
+      // label agrees with what's actually stamped here)
+      if (v.kind === "city" && v.portal) {
+        const { x: px, y: py } = v.portal;
+        // clear a small plaza patch first — same idiom as the settlement's
+        // own plaza/cross-road clear above — so this is a GUARANTEED portal,
+        // not an openTile-gated maybe: a walled city's whole interior is
+        // marked blocked=2 as a vegetation sentinel a few lines up, and an
+        // unwalled city can still have a stray tree sitting on the point,
+        // either of which would otherwise silently swallow the stamp.
+        for (let dy = -2; dy <= 2; dy++)
+          for (let dx = -2; dx <= 2; dx++) {
+            const x = px + dx, y = py + dy;
+            if (!inCh(x, y) || isW(x, y)) continue;
+            decor[li(x, y)] = null;
+            blocked[li(x, y)] = 0;
+          }
+        if (openTile(px, py)) addNode("portal", px, py, true, { portal: true });
+        for (const [dx, dy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]])
+          if (openTile(px + dx, py + dy)) deco(px + dx, py + dy, "crystal_cluster_purple", true);
+        for (const [dx, dy] of [[-2, 0], [2, 0]])
+          if (openTile(px + dx, py + dy)) deco(px + dx, py + dy, "pillar_stone", true);
+      }
       for (const b of v.buildings) {
         if (b.x0 + b.w < bx - 2 || b.x0 > bx + CHUNK + 2 || b.y0 + b.h < by - 2 || b.y0 > by + CHUNK + 2) {
           // still stamp partial overlaps
