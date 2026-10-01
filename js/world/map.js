@@ -1376,6 +1376,14 @@ function createWorldMap(ctx) {
     // --- POIs ---
     for(const p of pois) mDrawPoi(ctx, p, baseX, baseY, TILE);
 
+    // The biome-tile atlas ('b') decodes asynchronously; a chunk baked before
+    // it's ready falls back to flat fills + hillshade — a smooth colour
+    // gradient instead of tiles. NEVER cache or persist such a bake (it used
+    // to be frozen into IDB forever for whichever chunks baked first each
+    // sig — the recurring "gradient rectangle over Newhaven north"): return
+    // it uncached so the next frame re-renders, properly tiled, once the
+    // image has decoded.
+    if (bImg && !(bImg.complete && bImg.naturalWidth > 0)) return canvas;
     _mapCacheSet(key, canvas);
     persistMapImage(key, canvas);
     return canvas;

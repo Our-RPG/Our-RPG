@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v24"; // v24: road pace 1.5x, quest-givers move into houses
+const CACHE_VERSION = "taiao-v25"; // v25: never cache map bakes made before the biome art decodes
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),
