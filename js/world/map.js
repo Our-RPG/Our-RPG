@@ -742,8 +742,19 @@ function createWorldMap(ctx) {
           try { _mapCacheSet(key, await createImageBitmap(blob)); _prewarmInFlight.delete(key); return; }
           catch (err) { /* fall through to a fresh render */ }
         }
-        _prewarmRenderQ.push(key);   // miss: full render, paced below
-        _scheduleFrame();
+        // no persisted image: this is a REAL bake, and on cold caches its
+        // region query runs river tracing / road A* — hand it to the
+        // gameplay layer's amortized scheduler (gameplay/world.js
+        // wmQueueBake), which waits for the road worker's region cells and
+        // spreads bakes one-per-frame with cost payback, instead of this
+        // pump stacking 2 unbudgeted renders into every frame (the old
+        // "scrolling the map janks the whole game" path). The scheduler's
+        // own queue set dedupes from here on (prewarmMapChunk checks it).
+        if (typeof wmQueueBake === "function") {
+          _prewarmInFlight.delete(key);
+          const ci = key.indexOf(",");
+          wmQueueBake(+key.slice(0, ci), +key.slice(ci + 1));
+        } else { _prewarmRenderQ.push(key); _scheduleFrame(); }   // headless/fallback
       } });
     }
     if (started) _hydSchedule();
@@ -759,6 +770,9 @@ function createWorldMap(ctx) {
   function prewarmMapChunk(gcx, gcy) {
     const key = `${gcx},${gcy}`;
     if (mapChunkCache.has(key) || _prewarmInFlight.has(key) || _prewarmQ.includes(key)) return;
+    // already waiting on the gameplay layer's background bake scheduler —
+    // re-queueing would just re-run the (certain-to-miss) IDB hydration
+    if (typeof wmBakeQueued === "function" && wmBakeQueued(key)) return;
     _prewarmQ.push(key);
     _scheduleFrame();
   }

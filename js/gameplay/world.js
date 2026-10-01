@@ -654,33 +654,37 @@ const _wmRegCells = new Map();      // "cx,cy" → {rivs, roads, villages, pois}
 const _wmRegPending = new Set();
 const WM_REG_CELL = 768;            // map units per cell
 let _wmRegWorker = null;            // null = not started, false = unavailable
-function _wmRegCellFinish(id, rivs, roads) {
-  const c = id.indexOf(",");
-  const cx = +id.slice(0, c), cy = +id.slice(c + 1);
-  const x0 = cx * WM_REG_CELL, y0 = cy * WM_REG_CELL;
+function _wmRegCellFinish(id, rivs, roads, villages, pois, icons) {
+  // villages/POIs/icons are computed in the WORKER too (its features
+  // instance, same seed = identical data): a cold cell's settlement layout
+  // (citygrow accretion) or zone-naming pass can cost SECONDS, and running
+  // it here on cell arrival froze the frame just as badly as the old
+  // synchronous label queries did
   if (_wmRegCells.size > 300) _wmRegCells.clear();
-  _wmRegCells.set(id, {
-    rivs, roads,
-    villages: world.villagesNearForMap(x0, y0, x0 + WM_REG_CELL, y0 + WM_REG_CELL, 42),
-    pois: world.poisNearForMap(x0, y0, x0 + WM_REG_CELL, y0 + WM_REG_CELL, 26),
-  });
+  _wmRegCells.set(id, { rivs, roads, villages: villages || [], pois: pois || [], icons: icons || [] });
   _wmRegPending.delete(id);
 }
 function _wmRegWorkerEnsure() {
   if (_wmRegWorker !== null) return _wmRegWorker;
-  if (typeof Worker === "undefined" || !world._workerInit) return (_wmRegWorker = false);
+  if (typeof Worker === "undefined") return (_wmRegWorker = false);
+  if (!world._workerInit) return false;   // too early in boot — retry later, don't latch off
   try {
     _wmRegWorker = new Worker("js/world/roadworker.js");
-    _wmRegWorker.postMessage({ type: "init", ...world._workerInit });
-    _wmRegWorker.onmessage = e => { const d = e.data; if (d && d.region) _wmRegCellFinish(d.region, d.rivs, d.roads); };
+    _wmRegWorker.postMessage({ type: "init", ...world._workerInit,
+      // villageForMap's icon derivation reads these gameplay-layer tables —
+      // ship them so worker-computed cells carry identical icons
+      shopIcon: typeof SHOP_ICON !== "undefined" ? SHOP_ICON : null,
+      stationIcon: typeof STATION_ICON !== "undefined" ? STATION_ICON : null,
+      shopTypeKeys: typeof SHOP_TYPE_KEYS !== "undefined" ? SHOP_TYPE_KEYS : null });
+    _wmRegWorker.onmessage = e => { const d = e.data; if (d && d.region) _wmRegCellFinish(d.region, d.rivs, d.roads, d.villages, d.pois, d.icons); };
     _wmRegWorker.onerror = () => { try { _wmRegWorker.terminate(); } catch (e2) { /* dead */ } _wmRegWorker = false; };
   } catch (e) { _wmRegWorker = false; }
   return _wmRegWorker;
 }
 function wmRegionProgressive(x0, y0, x1, y1) {
   const t0 = performance.now();
-  const rivs = [], roads = [], villages = [], pois = [];
-  const sRv = new Set(), sRd = new Set(), sV = new Set(), sP = new Set();
+  const rivs = [], roads = [], villages = [], pois = [], icons = [];
+  const sRv = new Set(), sRd = new Set(), sV = new Set(), sP = new Set(), sI = new Set();
   const missing = [];
   for (let cy = Math.floor(y0 / WM_REG_CELL); cy <= Math.floor(y1 / WM_REG_CELL); cy++)
     for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++) {
@@ -699,6 +703,8 @@ function wmRegionProgressive(x0, y0, x1, y1) {
         if (performance.now() - t0 > 120) continue;       // no worker: budgeted sync
         cell = world.mapRegionQuery(cx * WM_REG_CELL, cy * WM_REG_CELL,
           (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
+        cell.icons = world.iconsNearForMap(cx * WM_REG_CELL, cy * WM_REG_CELL,
+          (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
         if (_wmRegCells.size > 300) _wmRegCells.clear();
         _wmRegCells.set(k, cell);
       }
@@ -706,9 +712,24 @@ function wmRegionProgressive(x0, y0, x1, y1) {
       for (const r of cell.roads) if (!sRd.has(r.key)) { sRd.add(r.key); roads.push(r); }
       for (const v of cell.villages) { const vk = v.x + "," + v.y; if (!sV.has(vk)) { sV.add(vk); villages.push(v); } }
       for (const p of cell.pois) { const pk = p.x + "," + p.y; if (!sP.has(pk)) { sP.add(pk); pois.push(p); } }
+      for (const ic of cell.icons || []) { const ik = ic.x + "," + ic.y + ":" + ic.type; if (!sI.has(ik)) { sI.add(ik); icons.push(ic); } }
     }
   if (missing.length && _wmRegWorker) _wmRegWorker.postMessage({ type: "region", cells: missing });
-  return { rivs, roads, villages, pois };
+  return { rivs, roads, villages, pois, icons };
+}
+
+// read-only lookup over the cells ALREADY streamed in (never computes):
+// the hover tooltip reads villages/icons through this, so moving the mouse
+// across not-yet-generated territory can never trigger settlement layout /
+// naming generation on this thread — labels appear once the cell arrives
+function wmCellsNear(x0, y0, x1, y1, kind) {
+  const out = [];
+  for (let cy = Math.floor(y0 / WM_REG_CELL); cy <= Math.floor(y1 / WM_REG_CELL); cy++)
+    for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++) {
+      const c = _wmRegCells.get(cx + "," + cy);
+      if (c && c[kind]) out.push(...c[kind]);
+    }
+  return out;
 }
 
 // Coalesce interactive redraws: wheel/drag events fire far faster than frames
@@ -722,16 +743,546 @@ function wmScheduleDraw() {
   requestAnimationFrame(() => { wmRafPending = false; if (wm.open) wmDraw(); });
 }
 
+// true once every WM_REG_CELL cell covering the map-coord rect has arrived —
+// i.e. wmRegionProgressive's merged result is COMPLETE for that rect, nothing
+// still pending in the road worker
+function wmRegionReady(x0, y0, x1, y1) {
+  for (let cy = Math.floor(y0 / WM_REG_CELL); cy <= Math.floor(y1 / WM_REG_CELL); cy++)
+    for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++)
+      if (!_wmRegCells.has(cx + "," + cy)) return false;
+  return true;
+}
+
+// A draw that had to show stand-ins (bakes/mips/macros/region cells still
+// streaming in) nudges another redraw shortly after, so the map sharpens over
+// a few frames instead of waiting for the slow 900ms refresh tick.
+let wmNeedsRefine = false;   // set during wmDraw wherever a stand-in was drawn
+let wmRefineTimer = 0;
+function wmRefineSoon() {
+  if (wmRefineTimer) return;
+  wmRefineTimer = setTimeout(() => { wmRefineTimer = 0; if (wm.open) wmScheduleDraw(); }, 140);
+}
+
 // Cached day/night + weather overlay composite (see wmDraw): the rendered
 // fields plus the view (cx/cy/z/size/toggles) they were rendered at, and when.
 let wmOvCache = null;
 const WM_OV_TTL = 4000;           // idle refresh cadence — the fields drift slowly
 let wmWheelT = 0;                 // last wheel-zoom timestamp (performance.now)
 let wmOvSettleTimer = 0;
+// The composite costs ~30-100ms+ to render at map size — far too long to run
+// inside a draw (it froze every overlay toggle, every pan-settle and the 4s
+// drift refresh). It now builds as a cooperative JOB: wmOvPump advances the
+// wmOvBuild generator ≤8ms per frame into a PRIVATE staging canvas, and the
+// finished composite swaps into wmOvCache atomically. The map keeps blitting
+// the previous composite (shifted/scaled) while the new one builds, so the
+// crisp chart lands a few frames later with zero blocked frames. The pixel /
+// linework math inside wmOvBuild is UNCHANGED from the old synchronous
+// version — identical output, different scheduling.
+let wmOvJob = null, wmOvPumpQueued = false;
+function wmOvSchedulePump() {
+  if (!wmOvPumpQueued) { wmOvPumpQueued = true; requestAnimationFrame(wmOvPump); }
+}
+function wmOvStartJob(W, H, dpr, z, wantDn, wantWx) {
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  const g = cv.getContext("2d");
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  wmOvJob = { cv, g, W, H, dpr, z, cx: wm.cx, cy: wm.cy, dn: wantDn, wx: wantWx,
+    it: wmOvBuild(g, W, H, z, wm.cx, wm.cy, wantDn, wantWx) };
+  wmOvSchedulePump();
+}
+function wmOvPump() {
+  wmOvPumpQueued = false;
+  const job = wmOvJob;
+  if (!job) return;
+  if (!wm.open) { wmOvJob = null; return; }
+  const t0 = performance.now();
+  try {
+    while (performance.now() - t0 < 8) {
+      if (job.it.next().done) {
+        wmOvCache = { cv: job.cv, g: job.g, W: job.W, H: job.H, dpr: job.dpr,
+          dn: job.dn, wx: job.wx, cx: job.cx, cy: job.cy, z: job.z, t: Date.now() };
+        wmOvJob = null;
+        wmScheduleDraw();
+        return;
+      }
+    }
+  } catch (e) { console.warn("wm overlay job:", e); wmOvJob = null; return; }
+  if (wmOvJob) wmOvSchedulePump();
+}
+// Renders the day/night + weather overlays into `g` — the body is the old
+// synchronous wmDraw code verbatim, with the view FROZEN at job start
+// (jcx/jcy/z/W/H) and `yield` statements at the heavy loop boundaries so
+// wmOvPump can slice it across frames. Drawing into a private staging ctx
+// makes yielding mid-path safe — nothing else ever touches this context.
+function* wmOvBuild(g, W, H, z, jcx, jcy, wantDn, wantWx) {
+  // ---- day/night overlay (toggled by the #wm-dn checkbox) ----
+  // Tint every part of the map by its DAYLIGHT right now: daylight varies with
+  // LATITUDE (dayFraction triangle wave) and LONGITUDE (continuous sunPhase),
+  // so the terminator runs as a smooth CURVE through the timezones rather than
+  // stepping band by band. Sampled per pixel on a quarter-resolution buffer
+  // (colours blended night → dusk → day on the daylight value) and scaled up
+  // with smoothing. Endless-day/night poles read fully lit / fully dark.
+  if (wantDn) {
+    g.save();
+    const DS = 4;                                       // screen px per sample
+    const bw2 = Math.max(1, Math.ceil(W / DS)), bh2 = Math.max(1, Math.ceil(H / DS));
+    if (!wmDnBuf || wmDnBuf.cv.width !== bw2 || wmDnBuf.cv.height !== bh2) {
+      const cv = document.createElement("canvas"); cv.width = bw2; cv.height = bh2;
+      const bctx = cv.getContext("2d");
+      wmDnBuf = { cv, ctx: bctx, img: bctx.createImageData(bw2, bh2) };
+    }
+    // band colours (alpha pre-scaled to 0..255), blended smoothly on L
+    const CN = [12, 22, 66, 158], CT = [255, 120, 45, 87], CD = [255, 235, 150, 26];
+    // the sun term only depends on the COLUMN and the latitude terms only on
+    // the ROW, so precompute each once and combine per pixel (daylightAt math
+    // inlined: L = smoothstep(thr−tw, thr+tw, sun)).
+    const tw = 0.14;
+    const sunC = new Float64Array(bw2);
+    for (let c = 0; c < bw2; c++) {
+      const wx = jcx + ((c + 0.5) * DS - W / 2) / z;
+      sunC[c] = Math.cos(2 * Math.PI * (sunPhase(wx) - 0.5));
+    }
+    const data = wmDnBuf.img.data;
+    for (let r = 0; r < bh2; r++) {
+      const wy = jcy + ((r + 0.5) * DS - H / 2) / z;
+      const D = dayFraction(wy);
+      const thr = Math.cos(Math.PI * D);
+      for (let c = 0; c < bw2; c++) {
+        let L;
+        if (D >= 0.999) L = 1;
+        else if (D <= 0.001) L = 0;
+        else {
+          const t = Math.max(0, Math.min(1, (sunC[c] - thr + tw) / (2 * tw)));
+          L = t * t * (3 - 2 * t);
+        }
+        // unrolled two-band lerp (a .map() here allocates two arrays per
+        // pixel — ~180k throwaway objects per redraw, pure GC churn)
+        let R2, G2, B2, A2;
+        if (L < 0.5) {
+          const t2 = L * 2;
+          R2 = CN[0] + (CT[0] - CN[0]) * t2; G2 = CN[1] + (CT[1] - CN[1]) * t2;
+          B2 = CN[2] + (CT[2] - CN[2]) * t2; A2 = CN[3] + (CT[3] - CN[3]) * t2;
+        } else {
+          const t2 = (L - 0.5) * 2;
+          R2 = CT[0] + (CD[0] - CT[0]) * t2; G2 = CT[1] + (CD[1] - CT[1]) * t2;
+          B2 = CT[2] + (CD[2] - CT[2]) * t2; A2 = CT[3] + (CD[3] - CT[3]) * t2;
+        }
+        const i4 = (r * bw2 + c) * 4;
+        data[i4] = R2; data[i4 + 1] = G2; data[i4 + 2] = B2; data[i4 + 3] = A2;
+      }
+      if ((r & 31) === 31) yield;
+    }
+    wmDnBuf.ctx.putImageData(wmDnBuf.img, 0, 0);
+    const sm = g.imageSmoothingEnabled;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(wmDnBuf.cv, 0, 0, bw2, bh2, 0, 0, bw2 * DS, bh2 * DS);
+    g.imageSmoothingEnabled = sm;
+    g.restore();
+  }
+  yield;
+  // ---- weather overlay: SYNOPTIC CHART (toggled by the #wm-wx checkbox) ----
+  // A proper weather chart from the deterministic field the world renders
+  // (gameplay/weather.js): sea-level ISOBARS every 4 hPa with pressure labels,
+  // H / L centres at the pressure extrema, FRONTS as classified lines (blue
+  // triangles = cold front, red half-discs = warm, purple alternating =
+  // occluded; symbols sit on the side the front is advancing), WIND BARBS
+  // showing the geostrophic flow along the isobars, and a soft precipitation
+  // shade (blue rain / pale snow) underneath. A light paper wash keeps the
+  // linework readable over the terrain art. The drifting anomaly is resampled
+  // per redraw; the heavy climate fields (humidity/temperature/altitude) are
+  // time-invariant, cached per view, recomputed only on pan/zoom/resize.
+  if (wantWx) {
+    g.save();
+    const DS = 8;                                       // screen px per sample
+    const bw2 = Math.max(1, Math.ceil(W / DS)), bh2 = Math.max(1, Math.ceil(H / DS));
+    if (!wmWxBuf || wmWxBuf.cv.width !== bw2 || wmWxBuf.cv.height !== bh2) {
+      const cv = document.createElement("canvas"); cv.width = bw2; cv.height = bh2;
+      const bctx = cv.getContext("2d");
+      wmWxBuf = { cv, ctx: bctx, img: bctx.createImageData(bw2, bh2) };
+    }
+    const wxAtCol = c => jcx + ((c + 0.5) * DS - W / 2) / z;
+    const wyAtRow = r => jcy + ((r + 0.5) * DS - H / 2) / z;
+    const sxC = c => (c + 0.5) * DS, syR = r => (r + 0.5) * DS;
+    const wxOfPx = px => jcx + (px - W / 2) / z, wyOfPx = py => jcy + (py - H / 2) / z;
+    // climate fields are smooth continental-scale signals but EXPENSIVE to
+    // sample (humidityAt alone runs five elevation() evaluations). Two fixes
+    // vs the old per-cell, per-view sampling that made every pan/zoom hitch:
+    //  1) sample on a 4×-coarser lattice and bilinearly interpolate per cell
+    //     (~16× fewer terrain samples, no visible change in the precip shade
+    //     they gate);
+    //  2) anchor the lattice to WORLD coordinates and cache points in a Map,
+    //     so panning reuses everything already sampled — only newly-exposed
+    //     edge points hit the terrain fields. Zoom changes the lattice step,
+    //     which resets the cache (one ~coarse refill per wheel tick).
+    const CGS = 4;                                      // sample cells per clim-lattice step
+    const latStep = (DS / z) * CGS;                     // tiles per lattice step
+    if (!wmWxClim || wmWxClim.step !== latStep) wmWxClim = { step: latStep, map: new Map() };
+    const u0f = wxAtCol(0) / latStep, v0f = wyAtRow(0) / latStep;
+    const g0x = Math.floor(u0f), g0y = Math.floor(v0f);
+    const uOff = u0f - g0x, vOff = v0f - g0y;           // first cell's fractional lattice coord
+    const cgw = Math.floor(bw2 / CGS) + 3, cgh = Math.floor(bh2 / CGS) + 3;
+    const clim = new Float32Array(cgw * cgh * 3);       // hum, temp, altFrac per lattice point
+    {
+      const LE = world.LAND_ELEVATION, m = wmWxClim.map;
+      if (m.size > 30000) m.clear();                    // bound long pans' memory
+      for (let r = 0; r < cgh; r++) { if (r & 1) yield; for (let c = 0; c < cgw; c++) {
+        const key = (g0x + c) + "," + (g0y + r);
+        let p = m.get(key);
+        if (!p) {
+          const wx = (g0x + c) * latStep, wy = (g0y + r) * latStep;
+          p = [world.humidityAt(wx, wy), world.temperatureAt(wx, wy),
+               Math.max(0, (world.heightAt(wx, wy) - LE) / (1 - LE))];
+          m.set(key, p);
+        }
+        const i3 = (r * cgw + c) * 3;
+        clim[i3] = p[0]; clim[i3 + 1] = p[1]; clim[i3 + 2] = p[2];
+      } }
+    }
+    const tNow = (typeof now !== "undefined") ? now : Date.now();
+    const data = wmWxBuf.img.data;
+    // gradient arm: weatherCore's 28 tiles when zoomed in (matches what the
+    // player experiences on the ground), widening to the sample spacing when
+    // zoomed out so the chart draws the big sweeping fronts, not micro-speckle
+    const ARM = Math.max(28, DS / z);
+    // sample the anomaly ONCE per cell, then finite-difference the sampled
+    // grid for the gradient (arm snapped to a whole number of cells): same
+    // math as resampling ±ARM at a fifth of the wxAnomaly calls, and exactly
+    // identical when zoomed out (there ARM = the sample spacing = one cell)
+    const an = new Float64Array(bw2 * bh2);             // anomaly per cell (isobars, H/L, fronts)
+    const nightRow = new Float64Array(bh2);
+    for (let r = 0; r < bh2; r++) {
+      const wy = wyAtRow(r);
+      nightRow[r] = (typeof daylightAt === "function" && typeof sunPhase === "function")
+        ? 1 - daylightAt(wy, sunPhase(jcx)) : 0;      // per-row: latitude dominates day length
+      for (let c = 0; c < bw2; c++) an[r * bw2 + c] = wxAnomaly(wxAtCol(c), wy, tNow);
+      if ((r & 3) === 3) yield;
+    }
+    const spacing = DS / z;                             // tiles per cell
+    const K = Math.max(1, Math.round(ARM / spacing));   // gradient arm in cells
+    for (let r = 0; r < bh2; r++) {
+      const rt = Math.max(0, r - K), rb = Math.min(bh2 - 1, r + K);
+      for (let c = 0; c < bw2; c++) {
+        const i = r * bw2 + c;
+        const cl = Math.max(0, c - K), cr = Math.min(bw2 - 1, c + K);
+        const gx = (an[r * bw2 + cr] - an[r * bw2 + cl]) / ((cr - cl) * spacing);
+        const gy = (an[rb * bw2 + c] - an[rt * bw2 + c]) / ((rb - rt) * spacing);
+        const grad = Math.hypot(gx, gy);
+        // bilinear clim fetch from the coarse lattice
+        const fc = uOff + c / CGS, fr = vOff + r / CGS;
+        const c0 = fc | 0, r0 = fr | 0, tx = fc - c0, ty = fr - r0;
+        const i00 = (r0 * cgw + c0) * 3, i10 = i00 + 3, i01 = i00 + cgw * 3, i11 = i01 + 3;
+        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+        const hum  = clim[i00] * w00 + clim[i10] * w10 + clim[i01] * w01 + clim[i11] * w11;
+        const temp = clim[i00 + 1] * w00 + clim[i10 + 1] * w10 + clim[i01 + 1] * w01 + clim[i11 + 1] * w11;
+        const alt  = clim[i00 + 2] * w00 + clim[i10 + 2] * w10 + clim[i01 + 2] * w01 + clim[i11 + 2] * w11;
+        const w = wxDerive(an[i], grad, hum, temp, alt, nightRow[r]);
+        // precipitation shade only — the synoptic story is told by the linework
+        let R = 0, G = 0, B = 0, A = 0;
+        if (w.precip > 0) {
+          if (w.kind === "snow") { R = 225; G = 235; B = 250; } else { R = 70; G = 130; B = 235; }
+          A = 40 + w.precip * 110;
+        }
+        const i4 = i * 4;
+        data[i4] = R; data[i4 + 1] = G; data[i4 + 2] = B; data[i4 + 3] = A;
+      }
+      if ((r & 7) === 7) yield;
+    }
+    // paper wash so the chart reads over the terrain art, then the precip shade
+    g.fillStyle = "rgba(233,236,242,0.35)"; g.fillRect(0, 0, W, H);
+    wmWxBuf.ctx.putImageData(wmWxBuf.img, 0, 0);
+    const sm2 = g.imageSmoothingEnabled;
+    g.imageSmoothingEnabled = true;
+    g.drawImage(wmWxBuf.cv, 0, 0, bw2, bh2, 0, 0, bw2 * DS, bh2 * DS);
+    g.imageSmoothingEnabled = sm2;
+
+    // marching squares over a 2×-COARSENED anomaly grid (16 px segments — the
+    // fine grid quadruples the squares and doubles the stroked segments for no
+    // visible gain, and stroking tens of thousands of segments is what blows
+    // the frame budget). Corner values are the 4 neighbouring coarse centres.
+    const MS = z < 0.15 ? 3 : 2, DSS = DS * MS;   // coarser still at continental zoom
+    const gw = Math.floor((bw2 + MS - 1) / MS), gh = Math.floor((bh2 + MS - 1) / MS);
+    const anC = new Float64Array(gw * gh);
+    for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++)
+      anC[r * gw + c] = an[Math.min(r * MS, bh2 - 1) * bw2 + Math.min(c * MS, bw2 - 1)];
+    // low-pass the CHART field: at wide zooms the fine (280-tile) noise layer
+    // aliases at the sample spacing and crinkles every isobar into scribble —
+    // a couple of 3×3 box blurs leave only the synoptic sweep a real chart
+    // draws (the in-game weather field itself is untouched)
+    {
+      const tmpA = new Float64Array(gw * gh);
+      const passes = z < 0.4 ? 2 : 1;
+      for (let p = 0; p < passes; p++) {
+        for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
+          let s = 0, n = 0;
+          for (let dr = -1; dr <= 1; dr++) {
+            const rr = r + dr; if (rr < 0 || rr >= gh) continue;
+            for (let dc = -1; dc <= 1; dc++) {
+              const cc = c + dc; if (cc < 0 || cc >= gw) continue;
+              s += anC[rr * gw + cc]; n++;
+            }
+          }
+          tmpA[r * gw + c] = s / n;
+        }
+        anC.set(tmpA);
+        yield;
+      }
+    }
+    const csx = c => (c * MS + 0.5) * DS, csy = r => (r * MS + 0.5) * DS;
+    const march = (level, cb) => {
+      for (let r = 0; r < gh - 1; r++) for (let c = 0; c < gw - 1; c++) {
+        const i = r * gw + c;
+        const v0 = anC[i], v1 = anC[i + 1], v2 = anC[i + gw + 1], v3 = anC[i + gw];   // TL TR BR BL
+        let p0 = null, p1 = null, p2 = null, p3 = null;
+        if ((v0 < level) !== (v1 < level)) p0 = [csx(c) + DSS * (level - v0) / (v1 - v0), csy(r)];
+        if ((v1 < level) !== (v2 < level)) p1 = [csx(c + 1), csy(r) + DSS * (level - v1) / (v2 - v1)];
+        if ((v3 < level) !== (v2 < level)) p2 = [csx(c) + DSS * (level - v3) / (v2 - v3), csy(r + 1)];
+        if ((v0 < level) !== (v3 < level)) p3 = [csx(c), csy(r) + DSS * (level - v0) / (v3 - v0)];
+        const a1 = p0 || p1 || p2, b1 = p3 || p2 || p1;
+        if (!a1 || !b1 || a1 === b1) continue;
+        if (p0 && p1 && p2 && p3) { cb(p0, p1, i); cb(p2, p3, i); }   // saddle: arbitrary pairing
+        else cb(a1, b1, i);
+      }
+    };
+
+    // -- isobars in the GAME's pressure scale (the Prs meter: 100% = 1 atm at
+    // sea level, sea-level pressure = 100 × (1 + anom × 0.045)); 1% contour
+    // interval, halving to 0.5% when the view spans only a narrow range --
+    let aMin = Infinity, aMax = -Infinity;
+    for (let i = 0; i < anC.length; i++) { if (anC[i] < aMin) aMin = anC[i]; if (anC[i] > aMax) aMax = anC[i]; }
+    const PCT = a => 100 * (1 + a * 0.045);
+    const STEP = (PCT(aMax) - PCT(aMin)) > 2.5 ? 0.5 : 0.25;
+    const isoLabels = [];
+    g.strokeStyle = "rgba(44,46,62,0.72)"; g.lineWidth = 1.2;
+    g.beginPath();
+    for (let k = Math.ceil(PCT(aMin) / STEP); k * STEP <= PCT(aMax); k++) {
+      const pc = k * STEP;
+      const lv = (pc / 100 - 1) / 0.045;
+      const lbl = (+pc.toFixed(2)) + "%";   // strip trailing zeros: "99%", "99.5%", "99.25%"
+      let n = 0;
+      march(lv, (p, q) => {
+        g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]);
+        if ((n++ % 56) === 28) isoLabels.push([p[0], p[1], lbl]);
+      });
+      yield;
+    }
+    g.stroke();
+
+    // -- fronts: the anom = −0.15 isoline (the working edge of each low),
+    // keeping only the ACTIVE stretches — gated by the LOCAL 28-tile pressure
+    // gradient at each segment (frontal sharpness is a local property; the
+    // chart grid's wide-arm gradient washes it out at continental zoom) — and
+    // classified by what the wind is advecting across the line: colder air
+    // advancing = cold front, warmer = warm front, neither = occluded --
+    const cold = [], warm = [], occl = [];
+    const rawF = [];
+    march(-0.15, (p, q) => rawF.push([p, q]));
+    yield;
+    for (let fi = 0; fi < rawF.length; fi++) {
+      const [p, q] = rawF[fi];
+      const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
+      const wxp = wxOfPx(mx), wyp = wyOfPx(my);
+      const g28 = Math.hypot(
+        wxAnomaly(wxp + 28, wyp, tNow) - wxAnomaly(wxp - 28, wyp, tNow),
+        wxAnomaly(wxp, wyp + 28, tNow) - wxAnomaly(wxp, wyp - 28, tNow)) / 56;
+      if (g28 < 0.0025) continue;   // wxDerive's front-gate p80 — keep in sync
+      const v = windAt(wxp, wyp, tNow);
+      const sp = Math.hypot(v.x, v.y) || 1;
+      const ux = v.x / sp, uy = v.y / sp;
+      const dT = world.temperatureAt(wxp - ux * 150, wyp - uy * 150)   // behind (upwind)
+               - world.temperatureAt(wxp + ux * 150, wyp + uy * 150);  // ahead
+      // advance side: the segment normal the wind blows toward (map = world axes)
+      let nx = -(q[1] - p[1]), ny = q[0] - p[0];
+      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+      if (nx * v.x + ny * v.y < 0) { nx = -nx; ny = -ny; }
+      (dT < -0.008 ? cold : dT > 0.008 ? warm : occl).push({ p, q, mx, my, nx, ny });
+      if ((fi & 31) === 31) yield;
+    }
+    const drawFront = (segs, col, sym) => {
+      if (!segs.length) return;
+      g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2.2;
+      g.beginPath();
+      for (const s of segs) { g.moveTo(s.p[0], s.p[1]); g.lineTo(s.q[0], s.q[1]); }
+      g.stroke();
+      let n = 0;
+      for (const s of segs) {
+        if ((n++ % 3) !== 1) continue;
+        const kind = sym === "alt" ? (n % 2 ? "tri" : "arc") : sym;
+        const angN = Math.atan2(s.ny, s.nx);
+        if (kind === "tri") {
+          const tx = -s.ny, ty = s.nx;   // segment tangent
+          g.beginPath();
+          g.moveTo(s.mx + tx * 5, s.my + ty * 5);
+          g.lineTo(s.mx - tx * 5, s.my - ty * 5);
+          g.lineTo(s.mx + s.nx * 7, s.my + s.ny * 7);
+          g.closePath(); g.fill();
+        } else {
+          g.beginPath();
+          g.arc(s.mx, s.my, 5, angN - Math.PI / 2, angN + Math.PI / 2);
+          g.closePath(); g.fill();
+        }
+      }
+    };
+    drawFront(cold, "#2050c8", "tri");
+    drawFront(warm, "#c8283c", "arc");
+    drawFront(occl, "#8a30b0", "alt");
+    yield;
+
+    // -- H / L pressure centres: collect the strict extrema of the coarse
+    // field, then greedily dedupe — the anomaly CLAMPS at ±1, so a deep low is
+    // a plateau of tied cells that would each print their own L; keep only the
+    // deepest/highest centre within any 120-px neighbourhood of its own sign --
+    const NB = Math.max(3, Math.round(7 / MS) + 2);     // extremum neighbourhood radius, coarse cells
+    const centres = [];
+    for (let r = 1; r < gh - 1; r++) for (let c = 1; c < gw - 1; c++) {
+      const a = anC[r * gw + c];
+      if (a < 0.28 && a > -0.28) continue;
+      const hi = a > 0;
+      let ok = true;
+      for (let dr = -NB; dr <= NB && ok; dr++) for (let dc = -NB; dc <= NB; dc++) {
+        if (!dr && !dc) continue;
+        const rr = r + dr, cc = c + dc;
+        if (rr < 0 || rr >= gh || cc < 0 || cc >= gw) continue;
+        const b = anC[rr * gw + cc];
+        if (hi ? b > a : b < a) { ok = false; break; }
+      }
+      if (ok) centres.push({ x: csx(c), y: csy(r), a, hi });
+    }
+    centres.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
+    const kept = [];
+    g.textAlign = "center";
+    for (const e of centres) {
+      if (kept.some(k => k.hi === e.hi && Math.hypot(k.x - e.x, k.y - e.y) < 120)) continue;
+      kept.push(e);
+      const pcs = PCT(e.a).toFixed(1) + "%";
+      g.strokeStyle = "rgba(255,255,255,0.9)"; g.lineWidth = 3;
+      g.font = "bold 20px OpenDyslexic, Verdana";
+      g.strokeText(e.hi ? "H" : "L", e.x, e.y + 7);
+      g.fillStyle = e.hi ? "#2050c8" : "#c8283c";
+      g.fillText(e.hi ? "H" : "L", e.x, e.y + 7);
+      g.font = "bold 10px OpenDyslexic, Verdana";
+      g.strokeText(pcs, e.x, e.y + 19);
+      g.fillText(pcs, e.x, e.y + 19);
+    }
+
+    // -- wind barbs on a coarse grid: the staff points INTO the wind (the
+    // from-direction, like a station plot); feathers count speed — full barb
+    // 10 kn, half barb 5, a bare circle for near-calm --
+    yield;
+    g.strokeStyle = "rgba(24,28,44,0.85)"; g.lineWidth = 1.4;
+    const BSP = 9;                                      // cells between barbs
+    for (let r = 4; r < bh2; r += BSP) for (let c = 4; c < bw2; c += BSP) {
+      const px2 = sxC(c), py2 = syR(r);
+      const v = windAt(wxAtCol(c), wyAtRow(r), tNow);
+      const sp = Math.hypot(v.x, v.y), kn = sp * 10;
+      if (kn < 2.5) { g.beginPath(); g.arc(px2, py2, 2.5, 0, 7); g.stroke(); continue; }
+      const ux = -v.x / sp, uy = -v.y / sp;             // from-direction unit
+      const ex = px2 + ux * 24, ey = py2 + uy * 24;
+      g.beginPath(); g.moveTo(px2, py2); g.lineTo(ex, ey);
+      const fx = uy, fy = -ux;                          // feather side
+      let rem = Math.round(kn / 5) * 5, k = 0;
+      while (rem >= 10) {
+        const bx0 = ex - ux * k * 4.5, by0 = ey - uy * k * 4.5;
+        g.moveTo(bx0, by0); g.lineTo(bx0 + fx * 8 + ux * 3, by0 + fy * 8 + uy * 3);
+        rem -= 10; k++;
+      }
+      if (rem >= 5) {                                   // half barb never sits at the very tip
+        const kk = k || 1;
+        const bx0 = ex - ux * kk * 4.5, by0 = ey - uy * kk * 4.5;
+        g.moveTo(bx0, by0); g.lineTo(bx0 + fx * 4.5 + ux * 1.7, by0 + fy * 4.5 + uy * 1.7);
+      }
+      g.stroke();
+    }
+
+    // -- isobar labels last (white pills so they read over everything) --
+    g.font = "bold 9px OpenDyslexic, Verdana"; g.textAlign = "center";
+    for (const [lx, ly, lbl] of isoLabels) {
+      const tw = g.measureText(lbl).width;
+      g.fillStyle = "rgba(240,242,248,0.92)";
+      g.fillRect(lx - tw / 2 - 3, ly - 6, tw + 6, 12);
+      g.fillStyle = "#2a2c3c";
+      g.fillText(lbl, lx, ly + 3.5);
+    }
+
+    g.restore();
+  }
+}
 // after pan/zoom stops, repaint the overlay composite crisp at the new view
 function wmOverlaySettleSoon() {
   clearTimeout(wmOvSettleTimer);
   wmOvSettleTimer = setTimeout(() => { if (wm.open) wmScheduleDraw(); }, 170);
+}
+
+// --- background chunk-bake scheduler ---------------------------------------
+// Every full-detail map bake for a chunk with no persisted image funnels in
+// here (js/world/map.js hands over its hydration misses, and the z>=8 map
+// tier requests through the same path) instead of rendering inline. At most
+// one bake runs per animation frame, its real cost is paid off as "debt"
+// frames before the next one starts (a ~150ms city bake can't stack into a
+// multi-chunk long task), nothing bakes mid-drag/mid-wheel, and a chunk only
+// bakes once the road worker has delivered its region cells — so the cold
+// river-trace / road-A* generation that used to freeze the map for seconds
+// runs off-thread and renderMapChunk is handed the finished polylines.
+const _wmBakeQ = [];
+const _wmBakeSet = new Set();
+let _wmBakeDebt = 0, _wmBakeRaf = false;
+// Callers (1): js/world/map.js prewarmMapChunk (skip keys already queued here)
+function wmBakeQueued(key) { return _wmBakeSet.has(key); }
+// Callers (1): js/world/map.js _prewarmTick (persisted-image miss -> real bake)
+function wmQueueBake(cx, cy) {
+  const k = cx + "," + cy;
+  if (_wmBakeSet.has(k) || world.mapChunkCache.has(k)) return;
+  if (_wmBakeQ.length > 600) _wmBakeSet.delete(_wmBakeQ.shift()); // pan-across-the-world bound
+  _wmBakeSet.add(k);
+  _wmBakeQ.push(k);
+  if (!_wmBakeRaf) { _wmBakeRaf = true; requestAnimationFrame(_wmBakeTick); }
+}
+function _wmBakeTick() {
+  _wmBakeRaf = false;
+  if (_wmBakeQ.length) { _wmBakeRaf = true; requestAnimationFrame(_wmBakeTick); }
+  _wmBakeDebt = Math.max(0, _wmBakeDebt - 16);
+  if (_wmBakeDebt > 0) return;                        // still paying off the last heavy bake
+  if (wm.open && (wm.drag || performance.now() - wmWheelT < 160)) return; // never bake mid-interaction
+  // a bake before the biome-tile atlas has decoded is uncacheable (map.js
+  // returns it uncached to avoid freezing gradient art into IDB) — wait
+  const bImg = typeof IMGS !== "undefined" && IMGS["b"];
+  if (!bImg || !bImg.complete || !bImg.naturalWidth) return;
+  const CSH = world.CHUNK / 2;                        // map-coord units per chunk
+  // without a worker, wmRegionProgressive falls back to a 120ms-budgeted
+  // sync query per call — probe only the queue head then, not a whole scan
+  const scanMax = _wmRegWorker === false ? 1 : 8;
+  let scanned = 0;
+  for (let n = 0; n < _wmBakeQ.length && scanned < scanMax; n++) {
+    const k = _wmBakeQ[n];
+    if (world.mapChunkCache.has(k)) { _wmBakeQ.splice(n--, 1); _wmBakeSet.delete(k); continue; }
+    scanned++;
+    const ci = k.indexOf(",");
+    const cx = +k.slice(0, ci), cy = +k.slice(ci + 1);
+    const x0 = cx * CSH, y0 = cy * CSH;
+    let q;
+    if (Math.max(Math.abs((cx + 0.5) * world.CHUNK - player.x),
+                 Math.abs((cy + 0.5) * world.CHUNK - player.y)) <= world.CHUNK * 8) {
+      // the player's generated neighbourhood: rivers/roads/villages are
+      // already warm in THIS thread's caches (chunk gen + the road-warm
+      // worker), so the shared query is a cheap cache read — bake now.
+      // This is the markSeen/minimap path: fresh exploration backfills
+      // fast instead of waiting for the region worker's cold recompute.
+      q = world.mapRegionQuery(x0, y0, x0 + CSH, y0 + CSH);
+    } else {
+      // far territory (map browsing): request the chunk's region cells and
+      // bake only once they're all here, so river tracing / road A* /
+      // citygrow never runs on this thread
+      q = wmRegionProgressive(x0, y0, x0 + CSH, y0 + CSH);
+      if (!wmRegionReady(x0, y0, x0 + CSH, y0 + CSH)) continue;
+    }
+    const t0 = performance.now();
+    world.renderMapChunk(cx, cy, q);
+    _wmBakeDebt = performance.now() - t0;
+    _wmBakeQ.splice(n, 1);
+    _wmBakeSet.delete(k);
+    if (wm.open) wmRefineSoon();                      // the open map sharpens as bakes land
+    return;                                           // one bake per frame at most
+  }
 }
 
 // Callers (4):
@@ -744,9 +1295,15 @@ function wmDraw() {
   // setTransform below, same convention as render3d.js's #overlay canvas.
   const W = wmEl.clientWidth, H = wmEl.clientHeight;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  wmCanvas.width = Math.round(W * dpr);
-  wmCanvas.height = Math.round(H * dpr);
+  // setting .width/.height resets (and reallocates) the whole backing store
+  // even when unchanged — only resize when it's genuinely stale; the full
+  // background fillRect below clears every frame anyway
+  const bsw = Math.round(W * dpr), bsh = Math.round(H * dpr);
+  if (wmCanvas.width !== bsw || wmCanvas.height !== bsh) {
+    wmCanvas.width = bsw; wmCanvas.height = bsh;
+  }
   wmCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  wmNeedsRefine = false;
   const z = wm.zoom, CS = world.CHUNK;
   wmCtx.fillStyle = "#000";
   wmCtx.fillRect(0, 0, W, H);
@@ -759,6 +1316,28 @@ function wmDraw() {
   // DEV_MODE shows any chunk in the viewport, like Map.html (no "explored"
   // concept at all); normal mode keeps the fog-of-war restriction.
   const revealAll = DEV_MODE;
+  // viewport region data (rivers/roads/villages/POIs/icons), streamed in
+  // per-cell from the road worker — the z<8 vector overlay fills this; the
+  // label/icon passes below reuse it (or fetch it for the z>=8 tier). The
+  // old direct villagesNearForMap/poisNearForMap/iconsNearForMap label
+  // queries could run citygrow + zone naming for SECONDS on a fresh
+  // viewport — the single biggest "zooming out freezes the game" cost.
+  let regOv = null;
+
+  // stand-in for a missing bake/mip at level Lw: the finished coarser mip
+  // that contains it, scaled up smoothly (used by BOTH zoom tiers)
+  const drawFromAncestor = (Lw, tx2, ty2, sx, sy, px) => {
+    for (let A = Lw + 1; A <= world.MIP_MAX; A++) {
+      const ax = tx2 >> (A - Lw), ay = ty2 >> (A - Lw);
+      const rec = world.mipPeek(A, ax, ay);
+      if (rec && rec.done) {
+        const f = 1 << (A - Lw), sub = 256 / f;
+        wmCtx.drawImage(rec.cv, (tx2 - ax * f) * sub, (ty2 - ay * f) * sub, sub, sub, sx, sy, px, px);
+        return true;
+      }
+    }
+    return false;
+  };
 
   if (z < world.OVERVIEW_Z) {
     // Zoomed out, two layers:
@@ -791,7 +1370,7 @@ function wmDraw() {
           const [sx, sy] = toScreen(mx * MT * 2, my * MT * 2);
           const px = MT * 2 * z;
           let img = world.macroCache.get(step + ":" + mx + "," + my);
-          if (!img) world.requestMacro(step, mx, my);       // hydrate / paced render
+          if (!img) { world.requestMacro(step, mx, my); wmNeedsRefine = true; } // hydrate / paced render
           if (img) { wmCtx.drawImage(img, sx, sy, px, px); continue; }
           let drawn = false;
           for (const s2 of STEPS) {                         // coarser cached step: blur beats blocks
@@ -812,18 +1391,6 @@ function wmDraw() {
     const span = CS * (1 << L);                      // game tiles per drawn tile
     const t0x = Math.floor(gtx0 / span), t1x = Math.floor(gtx1 / span);
     const t0y = Math.floor(gty0 / span), t1y = Math.floor(gty1 / span);
-    const drawFromAncestor = (Lw, tx2, ty2, sx, sy, px) => {
-      for (let A = Lw + 1; A <= world.MIP_MAX; A++) {
-        const ax = tx2 >> (A - Lw), ay = ty2 >> (A - Lw);
-        const rec = world.mipPeek(A, ax, ay);
-        if (rec && rec.done) {
-          const f = 1 << (A - Lw), sub = 256 / f;
-          wmCtx.drawImage(rec.cv, (tx2 - ax * f) * sub, (ty2 - ay * f) * sub, sub, sub, sx, sy, px, px);
-          return true;
-        }
-      }
-      return false;
-    };
     for (let ty2 = t0y; ty2 <= t1y; ty2++)
       for (let tx2 = t0x; tx2 <= t1x; tx2++) {
         if (!seenAny(tx2 * span, ty2 * span, span)) continue;
@@ -834,14 +1401,15 @@ function wmDraw() {
           // reveal of fresh terrain keeps the macro underlay instead of
           // forcing full chunk generation for the whole viewport. Routed
           // through inSeen so the sealed-isle map partition applies here too.
-          const img = inSeen(tx2 * CS + CS / 2, ty2 * CS + CS / 2) ? world.renderMapChunkCached(tx2, ty2) : null;
+          const seen = inSeen(tx2 * CS + CS / 2, ty2 * CS + CS / 2);
+          const img = seen ? world.renderMapChunkCached(tx2, ty2) : null;
           if (img) wmCtx.drawImage(img, sx, sy, px, px);
-          else drawFromAncestor(0, tx2, ty2, sx, sy, px);
+          else { if (seen) wmNeedsRefine = true; drawFromAncestor(0, tx2, ty2, sx, sy, px); }
         } else {
           world.mipTile(L, tx2, ty2);                // build/refine (budgeted)
           const rec = world.mipPeek(L, tx2, ty2);
           if (rec && rec.done) wmCtx.drawImage(rec.cv, sx, sy, px, px);
-          else drawFromAncestor(L, tx2, ty2, sx, sy, px);
+          else { wmNeedsRefine = true; drawFromAncestor(L, tx2, ty2, sx, sy, px); }
         }
       }
 
@@ -854,7 +1422,8 @@ function wmDraw() {
     // One query for the whole viewport (mirrors mapRegionQuery's own "ask
     // once, not once per chunk" fix) — negligible cost next to a chunk bake.
     {
-      const ov = wmRegionProgressive(mtx0, mty0, mtx1, mty1);
+      const ov = regOv = wmRegionProgressive(mtx0, mty0, mtx1, mty1);
+      if (_wmRegPending.size) wmNeedsRefine = true;  // cells still in the worker
       const toS = (mx2, my2) => toScreen(mx2 * 2, my2 * 2); // map-coords -> screen
       // px per map-coord unit — the vector-overlay analogue of the baked
       // full-detail renderer's TILE=16 constant (js/world/map.js), used to
@@ -1055,40 +1624,35 @@ function wmDraw() {
   } else {
     const c0x = Math.floor(gtx0 / CS) - 1, c1x = Math.floor(gtx1 / CS) + 1;
     const c0y = Math.floor(gty0 / CS) - 1, c1y = Math.floor(gty1 / CS) + 1;
-    // riversNear/roadsNear/villages/POIs each search a radius far wider than
-    // one chunk, so N adjacent chunks re-running that search independently is
-    // almost all redundant cache-hit overhead — query the WHOLE viewport once
-    // and hand every chunk below the same shared lists instead of having each
-    // one re-derive them (this was ~99% of a fresh viewport's draw cost).
-    // Computed lazily, only if some chunk actually needs it: a redraw of an
-    // already-fully-cached viewport (e.g. the 900ms map-open refresh timer,
-    // or panning within already-viewed territory) should stay a pure cache
-    // read, not pay for a region query nothing will use.
-    let shared = null;
+    // This branch used to bake every missing chunk SYNCHRONOUSLY (plus a
+    // cold on-thread river/road region query) so the first draw was always
+    // complete — at the price of multi-second freezes whenever a zoom-out
+    // wheel tick or a pan exposed territory whose bakes weren't cached.
+    // Now the draw is pure cache reads: persisted bakes hydrate through the
+    // batched IDB pump, genuinely new chunks bake in the amortized
+    // background scheduler (wmQueueBake — fed the road worker's region
+    // cells, so river tracing / road A* never runs on this thread), and
+    // until a bake lands the tile shows its finished mip ancestor or macro
+    // art. wmRefineSoon() keeps redrawing as pieces stream in, so the
+    // viewport sharpens over a few frames instead of blocking for seconds —
+    // the finished pixels are identical to what the synchronous path drew.
+    world.mipBudget(0, 4);                           // macro stand-in budget
     for (let cy = c0y; cy <= c1y; cy++)
       for (let cx = c0x; cx <= c1x; cx++) {
         // unexplored = dark background; inSeen also applies the sealed-isle
         // map partition, so full-detail zoom can't cross it either
         if (!revealAll && !inSeen(cx * CS + CS / 2, cy * CS + CS / 2)) continue;
-        if (!shared && !world.mapChunkCache.has(`${cx},${cy}`))
-          // mapRegionQuery/renderMapChunk work in MAP-COORD units, where one
-          // chunk is CS/2 wide (js/world/map.js's own local CS=16, "Map.html
-          // tiles per game chunk") — NOT this file's CS=world.CHUNK=32 game
-          // tiles. Multiplying chunk indices by the wrong CS here silently
-          // queried a region at 2x the correct coordinate, so villages/roads
-          // near (but not literally atop) the world origin would resolve to
-          // the wrong, distant settlement — rendering as missing structures
-          // or roads that cut off mid-tile once you zoomed into fresh chunks.
-          shared = world.mapRegionQuery(c0x * CS / 2, c0y * CS / 2, (c1x + 1) * CS / 2, (c1y + 1) * CS / 2);
-        // Synchronous, on purpose: the whole viewport must be complete on the
-        // FIRST draw after any pan/zoom/open — no queue, no placeholder that
-        // pops in later. renderMapChunk caches, so re-visiting the same area
-        // is instant; only genuinely new territory pays the render cost, and
-        // the macro tier above exists specifically so a huge zoomed-out
-        // viewport never needs many of these expensive full bakes at once.
-        const img = world.renderMapChunk(cx, cy, shared);
+        const img = world.renderMapChunkCached(cx, cy); // null = hydrating/baking
         const [sx, sy] = toScreen(cx * CS, cy * CS);
-        wmCtx.drawImage(img, sx, sy, CS * z, CS * z);
+        if (img) { wmCtx.drawImage(img, sx, sy, CS * z, CS * z); continue; }
+        wmNeedsRefine = true;
+        // stand-ins are upscaled coarse art — draw them soft, not blocky
+        wmCtx.imageSmoothingEnabled = true;
+        if (!drawFromAncestor(0, cx, cy, sx, sy, CS * z))
+          // chunk indices → MAP-COORD units: one chunk is CS/2 map units
+          // (js/world/map.js's own CS=16), NOT this file's CS=32 game tiles
+          world.mipMacroFill(wmCtx, sx, sy, CS * z, cx * CS / 2, cy * CS / 2, CS / 2);
+        wmCtx.imageSmoothingEnabled = z < 2;
       }
   }
 
@@ -1134,6 +1698,14 @@ function wmDraw() {
   const mtx0 = gtx0 / 2, mtx1 = gtx1 / 2;
   const mty0 = gty0 / 2, mty1 = gty1 / 2;
 
+  // the z>=8 tier didn't need the vector overlay — fetch the region data
+  // for the label/icon passes here (cells stream from the worker; the
+  // first draws just show fewer labels until they land)
+  if (!regOv) {
+    regOv = wmRegionProgressive(mtx0, mty0, mtx1, mty1);
+    if (_wmRegPending.size) wmNeedsRefine = true;
+  }
+
   // Map icons at Map.html scale, like the OSRS interactive map. Matches the
   // POI-landmark-label threshold below, not the settlement-name one — icons
   // should disappear at the same point their POI names do, not linger alone.
@@ -1142,7 +1714,7 @@ function wmDraw() {
     // downscale to 18px regardless of the terrain's zoom-dependent setting
     // above (wmCtx.imageSmoothingEnabled = z < 2), or they alias at z >= 2.
     wmCtx.imageSmoothingEnabled = true;
-    for (const ic of world.iconsNearForMap(mtx0, mty0, mtx1, mty1)) {
+    for (const ic of regOv.icons) {
       if (!revealAll && !inSeen(ic.x * 2, ic.y * 2)) continue;
       const [sx, sy] = toScreen(ic.x * 2, ic.y * 2);
       if (sx < -20 || sy < -20 || sx > W + 20 || sy > H + 20) continue;
@@ -1159,7 +1731,7 @@ function wmDraw() {
   // unevenly (this was very likely part of the reported "hard to read").
   if (z >= 0.2) {
     wmCtx.textAlign = "center"; wmCtx.lineJoin = "round";
-    for (const v of world.villagesNearForMap(mtx0, mty0, mtx1, mty1, 42)) {
+    for (const v of regOv.villages) {
       if (!revealAll && !inSeen(v.x * 2, v.y * 2)) continue;
       const [sx, sy] = toScreen(v.x * 2, v.y * 2);
       const ly = sy - (v.kind === "city" ? (v.Ry != null ? v.Ry : v.R) * 2 * z + 8 : 14 * z + 6);
@@ -1175,7 +1747,7 @@ function wmDraw() {
     // zoom so the map doesn't turn into wall-to-wall overlapping text.
     if (z >= 0.8) {
       wmCtx.font = "bold 11px OpenDyslexic, Arial, sans-serif";
-      for (const p of world.poisNearForMap(mtx0, mty0, mtx1, mty1, 14)) {
+      for (const p of regOv.pois) {
         if (!WM_LABELED_POI.has(p.type) || !p.name) continue;
         if (!revealAll && !inSeen(p.x * 2, p.y * 2)) continue;
         const [sx, sy] = toScreen(p.x * 2, p.y * 2);
@@ -1190,424 +1762,47 @@ function wmDraw() {
   wmCtx.letterSpacing = "0px";
   // ---- day/night + weather overlays: cached composite ----
   // Both field overlays cost tens of ms to compute at map size — far too slow
-  // to rebuild on every drag/zoom event. They render into an offscreen
-  // composite tagged with the view that produced it; while the view is moving
-  // the stale composite is blitted shifted/scaled (edges go briefly bare) and
-  // a settle timer repaints it crisp shortly after the last interaction. On
-  // an idle map the 900ms tick refreshes it every WM_OV_TTL ms so the fields
-  // still drift with game time.
+  // to build inside ANY draw. This block only decides whether a rebuild is
+  // due; the actual rendering runs in the sliced wmOvBuild/wmOvPump job
+  // (≤8ms a frame into a staging canvas, swapped into wmOvCache when done).
+  // While the view moves — or while a job is mid-build — the previous
+  // composite is blitted shifted/scaled below; a settle timer kicks the
+  // rebuild once interaction stops, and on an idle map the 900ms tick
+  // re-arms it every WM_OV_TTL ms so the fields still drift with game time.
   const wantDn = wm.dn && typeof dayFraction === "function" && typeof sunPhase === "function";
   const wantWx = wm.wx && typeof wxAnomaly === "function" && typeof wxDerive === "function"
     && typeof windAt === "function" && !!world;
-  let ovG = null;                 // non-null → recompute the composite this draw
   if (wantDn || wantWx) {
     const nowMs = Date.now();
     const compat = wmOvCache && wmOvCache.W === W && wmOvCache.H === H && wmOvCache.dpr === dpr
       && wmOvCache.dn === wantDn && wmOvCache.wx === wantWx;
     const sameView = compat && wmOvCache.cx === wm.cx && wmOvCache.cy === wm.cy && wmOvCache.z === z;
     const interacting = !!wm.drag || (performance.now() - wmWheelT) < 160;
-    if (!compat || (!interacting && (!sameView || nowMs - wmOvCache.t >= WM_OV_TTL))) {
-      if (!compat) {
-        const cv = document.createElement("canvas");
-        cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
-        wmOvCache = { cv, g: cv.getContext("2d"), W, H, dpr, dn: wantDn, wx: wantWx, cx: 0, cy: 0, z: 1, t: 0 };
-      }
-      ovG = wmOvCache.g;
-      ovG.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ovG.clearRect(0, 0, W, H);
-      wmOvCache.cx = wm.cx; wmOvCache.cy = wm.cy; wmOvCache.z = z; wmOvCache.t = nowMs;
-    } else if (!sameView || nowMs - wmOvCache.t >= WM_OV_TTL) {
-      wmOverlaySettleSoon();      // repaint crisp once the interaction stops
+    const due = !compat || !sameView || nowMs - wmOvCache.t >= WM_OV_TTL;
+    const jobMatches = wmOvJob && wmOvJob.W === W && wmOvJob.H === H && wmOvJob.dpr === dpr
+      && wmOvJob.dn === wantDn && wmOvJob.wx === wantWx
+      && wmOvJob.cx === wm.cx && wmOvJob.cy === wm.cy && wmOvJob.z === z;
+    if (due && !jobMatches) {
+      if (interacting) wmOverlaySettleSoon();   // rebuild once the hand stills
+      else wmOvStartJob(W, H, dpr, z, wantDn, wantWx);
     }
-  }
-  // ---- day/night overlay (toggled by the #wm-dn checkbox) ----
-  // Tint every part of the map by its DAYLIGHT right now: daylight varies with
-  // LATITUDE (dayFraction triangle wave) and LONGITUDE (continuous sunPhase),
-  // so the terminator runs as a smooth CURVE through the timezones rather than
-  // stepping band by band. Sampled per pixel on a quarter-resolution buffer
-  // (colours blended night → dusk → day on the daylight value) and scaled up
-  // with smoothing. Endless-day/night poles read fully lit / fully dark.
-  if (ovG && wantDn) {
-    const g = ovG;
-    g.save();
-    const DS = 4;                                       // screen px per sample
-    const bw2 = Math.max(1, Math.ceil(W / DS)), bh2 = Math.max(1, Math.ceil(H / DS));
-    if (!wmDnBuf || wmDnBuf.cv.width !== bw2 || wmDnBuf.cv.height !== bh2) {
-      const cv = document.createElement("canvas"); cv.width = bw2; cv.height = bh2;
-      const bctx = cv.getContext("2d");
-      wmDnBuf = { cv, ctx: bctx, img: bctx.createImageData(bw2, bh2) };
-    }
-    // band colours (alpha pre-scaled to 0..255), blended smoothly on L
-    const CN = [12, 22, 66, 158], CT = [255, 120, 45, 87], CD = [255, 235, 150, 26];
-    // the sun term only depends on the COLUMN and the latitude terms only on
-    // the ROW, so precompute each once and combine per pixel (daylightAt math
-    // inlined: L = smoothstep(thr−tw, thr+tw, sun)).
-    const tw = 0.14;
-    const sunC = new Float64Array(bw2);
-    for (let c = 0; c < bw2; c++) {
-      const wx = wm.cx + ((c + 0.5) * DS - W / 2) / z;
-      sunC[c] = Math.cos(2 * Math.PI * (sunPhase(wx) - 0.5));
-    }
-    const data = wmDnBuf.img.data;
-    for (let r = 0; r < bh2; r++) {
-      const wy = wm.cy + ((r + 0.5) * DS - H / 2) / z;
-      const D = dayFraction(wy);
-      const thr = Math.cos(Math.PI * D);
-      for (let c = 0; c < bw2; c++) {
-        let L;
-        if (D >= 0.999) L = 1;
-        else if (D <= 0.001) L = 0;
-        else {
-          const t = Math.max(0, Math.min(1, (sunC[c] - thr + tw) / (2 * tw)));
-          L = t * t * (3 - 2 * t);
-        }
-        // unrolled two-band lerp (a .map() here allocates two arrays per
-        // pixel — ~180k throwaway objects per redraw, pure GC churn)
-        let R2, G2, B2, A2;
-        if (L < 0.5) {
-          const t2 = L * 2;
-          R2 = CN[0] + (CT[0] - CN[0]) * t2; G2 = CN[1] + (CT[1] - CN[1]) * t2;
-          B2 = CN[2] + (CT[2] - CN[2]) * t2; A2 = CN[3] + (CT[3] - CN[3]) * t2;
-        } else {
-          const t2 = (L - 0.5) * 2;
-          R2 = CT[0] + (CD[0] - CT[0]) * t2; G2 = CT[1] + (CD[1] - CT[1]) * t2;
-          B2 = CT[2] + (CD[2] - CT[2]) * t2; A2 = CT[3] + (CD[3] - CT[3]) * t2;
-        }
-        const i4 = (r * bw2 + c) * 4;
-        data[i4] = R2; data[i4 + 1] = G2; data[i4 + 2] = B2; data[i4 + 3] = A2;
-      }
-    }
-    wmDnBuf.ctx.putImageData(wmDnBuf.img, 0, 0);
-    const sm = g.imageSmoothingEnabled;
-    g.imageSmoothingEnabled = true;
-    g.drawImage(wmDnBuf.cv, 0, 0, bw2, bh2, 0, 0, bw2 * DS, bh2 * DS);
-    g.imageSmoothingEnabled = sm;
-    g.restore();
-  }
-  // ---- weather overlay: SYNOPTIC CHART (toggled by the #wm-wx checkbox) ----
-  // A proper weather chart from the deterministic field the world renders
-  // (gameplay/weather.js): sea-level ISOBARS every 4 hPa with pressure labels,
-  // H / L centres at the pressure extrema, FRONTS as classified lines (blue
-  // triangles = cold front, red half-discs = warm, purple alternating =
-  // occluded; symbols sit on the side the front is advancing), WIND BARBS
-  // showing the geostrophic flow along the isobars, and a soft precipitation
-  // shade (blue rain / pale snow) underneath. A light paper wash keeps the
-  // linework readable over the terrain art. The drifting anomaly is resampled
-  // per redraw; the heavy climate fields (humidity/temperature/altitude) are
-  // time-invariant, cached per view, recomputed only on pan/zoom/resize.
-  if (ovG && wantWx) {
-    const g = ovG;
-    g.save();
-    const DS = 8;                                       // screen px per sample
-    const bw2 = Math.max(1, Math.ceil(W / DS)), bh2 = Math.max(1, Math.ceil(H / DS));
-    if (!wmWxBuf || wmWxBuf.cv.width !== bw2 || wmWxBuf.cv.height !== bh2) {
-      const cv = document.createElement("canvas"); cv.width = bw2; cv.height = bh2;
-      const bctx = cv.getContext("2d");
-      wmWxBuf = { cv, ctx: bctx, img: bctx.createImageData(bw2, bh2) };
-    }
-    const wxAtCol = c => wm.cx + ((c + 0.5) * DS - W / 2) / z;
-    const wyAtRow = r => wm.cy + ((r + 0.5) * DS - H / 2) / z;
-    const sxC = c => (c + 0.5) * DS, syR = r => (r + 0.5) * DS;
-    const wxOfPx = px => wm.cx + (px - W / 2) / z, wyOfPx = py => wm.cy + (py - H / 2) / z;
-    // climate fields are smooth continental-scale signals but EXPENSIVE to
-    // sample (humidityAt alone runs five elevation() evaluations). Two fixes
-    // vs the old per-cell, per-view sampling that made every pan/zoom hitch:
-    //  1) sample on a 4×-coarser lattice and bilinearly interpolate per cell
-    //     (~16× fewer terrain samples, no visible change in the precip shade
-    //     they gate);
-    //  2) anchor the lattice to WORLD coordinates and cache points in a Map,
-    //     so panning reuses everything already sampled — only newly-exposed
-    //     edge points hit the terrain fields. Zoom changes the lattice step,
-    //     which resets the cache (one ~coarse refill per wheel tick).
-    const CGS = 4;                                      // sample cells per clim-lattice step
-    const latStep = (DS / z) * CGS;                     // tiles per lattice step
-    if (!wmWxClim || wmWxClim.step !== latStep) wmWxClim = { step: latStep, map: new Map() };
-    const u0f = wxAtCol(0) / latStep, v0f = wyAtRow(0) / latStep;
-    const g0x = Math.floor(u0f), g0y = Math.floor(v0f);
-    const uOff = u0f - g0x, vOff = v0f - g0y;           // first cell's fractional lattice coord
-    const cgw = Math.floor(bw2 / CGS) + 3, cgh = Math.floor(bh2 / CGS) + 3;
-    const clim = new Float32Array(cgw * cgh * 3);       // hum, temp, altFrac per lattice point
-    {
-      const LE = world.LAND_ELEVATION, m = wmWxClim.map;
-      if (m.size > 30000) m.clear();                    // bound long pans' memory
-      for (let r = 0; r < cgh; r++) for (let c = 0; c < cgw; c++) {
-        const key = (g0x + c) + "," + (g0y + r);
-        let p = m.get(key);
-        if (!p) {
-          const wx = (g0x + c) * latStep, wy = (g0y + r) * latStep;
-          p = [world.humidityAt(wx, wy), world.temperatureAt(wx, wy),
-               Math.max(0, (world.heightAt(wx, wy) - LE) / (1 - LE))];
-          m.set(key, p);
-        }
-        const i3 = (r * cgw + c) * 3;
-        clim[i3] = p[0]; clim[i3 + 1] = p[1]; clim[i3 + 2] = p[2];
-      }
-    }
-    const tNow = (typeof now !== "undefined") ? now : Date.now();
-    const data = wmWxBuf.img.data;
-    // gradient arm: weatherCore's 28 tiles when zoomed in (matches what the
-    // player experiences on the ground), widening to the sample spacing when
-    // zoomed out so the chart draws the big sweeping fronts, not micro-speckle
-    const ARM = Math.max(28, DS / z);
-    // sample the anomaly ONCE per cell, then finite-difference the sampled
-    // grid for the gradient (arm snapped to a whole number of cells): same
-    // math as resampling ±ARM at a fifth of the wxAnomaly calls, and exactly
-    // identical when zoomed out (there ARM = the sample spacing = one cell)
-    const an = new Float64Array(bw2 * bh2);             // anomaly per cell (isobars, H/L, fronts)
-    const nightRow = new Float64Array(bh2);
-    for (let r = 0; r < bh2; r++) {
-      const wy = wyAtRow(r);
-      nightRow[r] = (typeof daylightAt === "function" && typeof sunPhase === "function")
-        ? 1 - daylightAt(wy, sunPhase(wm.cx)) : 0;      // per-row: latitude dominates day length
-      for (let c = 0; c < bw2; c++) an[r * bw2 + c] = wxAnomaly(wxAtCol(c), wy, tNow);
-    }
-    const spacing = DS / z;                             // tiles per cell
-    const K = Math.max(1, Math.round(ARM / spacing));   // gradient arm in cells
-    for (let r = 0; r < bh2; r++) {
-      const rt = Math.max(0, r - K), rb = Math.min(bh2 - 1, r + K);
-      for (let c = 0; c < bw2; c++) {
-        const i = r * bw2 + c;
-        const cl = Math.max(0, c - K), cr = Math.min(bw2 - 1, c + K);
-        const gx = (an[r * bw2 + cr] - an[r * bw2 + cl]) / ((cr - cl) * spacing);
-        const gy = (an[rb * bw2 + c] - an[rt * bw2 + c]) / ((rb - rt) * spacing);
-        const grad = Math.hypot(gx, gy);
-        // bilinear clim fetch from the coarse lattice
-        const fc = uOff + c / CGS, fr = vOff + r / CGS;
-        const c0 = fc | 0, r0 = fr | 0, tx = fc - c0, ty = fr - r0;
-        const i00 = (r0 * cgw + c0) * 3, i10 = i00 + 3, i01 = i00 + cgw * 3, i11 = i01 + 3;
-        const w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
-        const hum  = clim[i00] * w00 + clim[i10] * w10 + clim[i01] * w01 + clim[i11] * w11;
-        const temp = clim[i00 + 1] * w00 + clim[i10 + 1] * w10 + clim[i01 + 1] * w01 + clim[i11 + 1] * w11;
-        const alt  = clim[i00 + 2] * w00 + clim[i10 + 2] * w10 + clim[i01 + 2] * w01 + clim[i11 + 2] * w11;
-        const w = wxDerive(an[i], grad, hum, temp, alt, nightRow[r]);
-        // precipitation shade only — the synoptic story is told by the linework
-        let R = 0, G = 0, B = 0, A = 0;
-        if (w.precip > 0) {
-          if (w.kind === "snow") { R = 225; G = 235; B = 250; } else { R = 70; G = 130; B = 235; }
-          A = 40 + w.precip * 110;
-        }
-        const i4 = i * 4;
-        data[i4] = R; data[i4 + 1] = G; data[i4 + 2] = B; data[i4 + 3] = A;
-      }
-    }
-    // paper wash so the chart reads over the terrain art, then the precip shade
-    g.fillStyle = "rgba(233,236,242,0.35)"; g.fillRect(0, 0, W, H);
-    wmWxBuf.ctx.putImageData(wmWxBuf.img, 0, 0);
-    const sm2 = g.imageSmoothingEnabled;
-    g.imageSmoothingEnabled = true;
-    g.drawImage(wmWxBuf.cv, 0, 0, bw2, bh2, 0, 0, bw2 * DS, bh2 * DS);
-    g.imageSmoothingEnabled = sm2;
-
-    // marching squares over a 2×-COARSENED anomaly grid (16 px segments — the
-    // fine grid quadruples the squares and doubles the stroked segments for no
-    // visible gain, and stroking tens of thousands of segments is what blows
-    // the frame budget). Corner values are the 4 neighbouring coarse centres.
-    const MS = z < 0.15 ? 3 : 2, DSS = DS * MS;   // coarser still at continental zoom
-    const gw = Math.floor((bw2 + MS - 1) / MS), gh = Math.floor((bh2 + MS - 1) / MS);
-    const anC = new Float64Array(gw * gh);
-    for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++)
-      anC[r * gw + c] = an[Math.min(r * MS, bh2 - 1) * bw2 + Math.min(c * MS, bw2 - 1)];
-    // low-pass the CHART field: at wide zooms the fine (280-tile) noise layer
-    // aliases at the sample spacing and crinkles every isobar into scribble —
-    // a couple of 3×3 box blurs leave only the synoptic sweep a real chart
-    // draws (the in-game weather field itself is untouched)
-    {
-      const tmpA = new Float64Array(gw * gh);
-      const passes = z < 0.4 ? 2 : 1;
-      for (let p = 0; p < passes; p++) {
-        for (let r = 0; r < gh; r++) for (let c = 0; c < gw; c++) {
-          let s = 0, n = 0;
-          for (let dr = -1; dr <= 1; dr++) {
-            const rr = r + dr; if (rr < 0 || rr >= gh) continue;
-            for (let dc = -1; dc <= 1; dc++) {
-              const cc = c + dc; if (cc < 0 || cc >= gw) continue;
-              s += anC[rr * gw + cc]; n++;
-            }
-          }
-          tmpA[r * gw + c] = s / n;
-        }
-        anC.set(tmpA);
-      }
-    }
-    const csx = c => (c * MS + 0.5) * DS, csy = r => (r * MS + 0.5) * DS;
-    const march = (level, cb) => {
-      for (let r = 0; r < gh - 1; r++) for (let c = 0; c < gw - 1; c++) {
-        const i = r * gw + c;
-        const v0 = anC[i], v1 = anC[i + 1], v2 = anC[i + gw + 1], v3 = anC[i + gw];   // TL TR BR BL
-        let p0 = null, p1 = null, p2 = null, p3 = null;
-        if ((v0 < level) !== (v1 < level)) p0 = [csx(c) + DSS * (level - v0) / (v1 - v0), csy(r)];
-        if ((v1 < level) !== (v2 < level)) p1 = [csx(c + 1), csy(r) + DSS * (level - v1) / (v2 - v1)];
-        if ((v3 < level) !== (v2 < level)) p2 = [csx(c) + DSS * (level - v3) / (v2 - v3), csy(r + 1)];
-        if ((v0 < level) !== (v3 < level)) p3 = [csx(c), csy(r) + DSS * (level - v0) / (v3 - v0)];
-        const a1 = p0 || p1 || p2, b1 = p3 || p2 || p1;
-        if (!a1 || !b1 || a1 === b1) continue;
-        if (p0 && p1 && p2 && p3) { cb(p0, p1, i); cb(p2, p3, i); }   // saddle: arbitrary pairing
-        else cb(a1, b1, i);
-      }
-    };
-
-    // -- isobars in the GAME's pressure scale (the Prs meter: 100% = 1 atm at
-    // sea level, sea-level pressure = 100 × (1 + anom × 0.045)); 1% contour
-    // interval, halving to 0.5% when the view spans only a narrow range --
-    let aMin = Infinity, aMax = -Infinity;
-    for (let i = 0; i < anC.length; i++) { if (anC[i] < aMin) aMin = anC[i]; if (anC[i] > aMax) aMax = anC[i]; }
-    const PCT = a => 100 * (1 + a * 0.045);
-    const STEP = (PCT(aMax) - PCT(aMin)) > 2.5 ? 0.5 : 0.25;
-    const isoLabels = [];
-    g.strokeStyle = "rgba(44,46,62,0.72)"; g.lineWidth = 1.2;
-    g.beginPath();
-    for (let k = Math.ceil(PCT(aMin) / STEP); k * STEP <= PCT(aMax); k++) {
-      const pc = k * STEP;
-      const lv = (pc / 100 - 1) / 0.045;
-      const lbl = (+pc.toFixed(2)) + "%";   // strip trailing zeros: "99%", "99.5%", "99.25%"
-      let n = 0;
-      march(lv, (p, q) => {
-        g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]);
-        if ((n++ % 56) === 28) isoLabels.push([p[0], p[1], lbl]);
-      });
-    }
-    g.stroke();
-
-    // -- fronts: the anom = −0.15 isoline (the working edge of each low),
-    // keeping only the ACTIVE stretches — gated by the LOCAL 28-tile pressure
-    // gradient at each segment (frontal sharpness is a local property; the
-    // chart grid's wide-arm gradient washes it out at continental zoom) — and
-    // classified by what the wind is advecting across the line: colder air
-    // advancing = cold front, warmer = warm front, neither = occluded --
-    const cold = [], warm = [], occl = [];
-    march(-0.15, (p, q) => {
-      const mx = (p[0] + q[0]) / 2, my = (p[1] + q[1]) / 2;
-      const wxp = wxOfPx(mx), wyp = wyOfPx(my);
-      const g28 = Math.hypot(
-        wxAnomaly(wxp + 28, wyp, tNow) - wxAnomaly(wxp - 28, wyp, tNow),
-        wxAnomaly(wxp, wyp + 28, tNow) - wxAnomaly(wxp, wyp - 28, tNow)) / 56;
-      if (g28 < 0.0025) return;   // wxDerive's front-gate p80 — keep in sync
-      const v = windAt(wxp, wyp, tNow);
-      const sp = Math.hypot(v.x, v.y) || 1;
-      const ux = v.x / sp, uy = v.y / sp;
-      const dT = world.temperatureAt(wxp - ux * 150, wyp - uy * 150)   // behind (upwind)
-               - world.temperatureAt(wxp + ux * 150, wyp + uy * 150);  // ahead
-      // advance side: the segment normal the wind blows toward (map = world axes)
-      let nx = -(q[1] - p[1]), ny = q[0] - p[0];
-      const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
-      if (nx * v.x + ny * v.y < 0) { nx = -nx; ny = -ny; }
-      (dT < -0.008 ? cold : dT > 0.008 ? warm : occl).push({ p, q, mx, my, nx, ny });
-    });
-    const drawFront = (segs, col, sym) => {
-      if (!segs.length) return;
-      g.strokeStyle = col; g.fillStyle = col; g.lineWidth = 2.2;
-      g.beginPath();
-      for (const s of segs) { g.moveTo(s.p[0], s.p[1]); g.lineTo(s.q[0], s.q[1]); }
-      g.stroke();
-      let n = 0;
-      for (const s of segs) {
-        if ((n++ % 3) !== 1) continue;
-        const kind = sym === "alt" ? (n % 2 ? "tri" : "arc") : sym;
-        const angN = Math.atan2(s.ny, s.nx);
-        if (kind === "tri") {
-          const tx = -s.ny, ty = s.nx;   // segment tangent
-          g.beginPath();
-          g.moveTo(s.mx + tx * 5, s.my + ty * 5);
-          g.lineTo(s.mx - tx * 5, s.my - ty * 5);
-          g.lineTo(s.mx + s.nx * 7, s.my + s.ny * 7);
-          g.closePath(); g.fill();
-        } else {
-          g.beginPath();
-          g.arc(s.mx, s.my, 5, angN - Math.PI / 2, angN + Math.PI / 2);
-          g.closePath(); g.fill();
-        }
-      }
-    };
-    drawFront(cold, "#2050c8", "tri");
-    drawFront(warm, "#c8283c", "arc");
-    drawFront(occl, "#8a30b0", "alt");
-
-    // -- H / L pressure centres: collect the strict extrema of the coarse
-    // field, then greedily dedupe — the anomaly CLAMPS at ±1, so a deep low is
-    // a plateau of tied cells that would each print their own L; keep only the
-    // deepest/highest centre within any 120-px neighbourhood of its own sign --
-    const NB = Math.max(3, Math.round(7 / MS) + 2);     // extremum neighbourhood radius, coarse cells
-    const centres = [];
-    for (let r = 1; r < gh - 1; r++) for (let c = 1; c < gw - 1; c++) {
-      const a = anC[r * gw + c];
-      if (a < 0.28 && a > -0.28) continue;
-      const hi = a > 0;
-      let ok = true;
-      for (let dr = -NB; dr <= NB && ok; dr++) for (let dc = -NB; dc <= NB; dc++) {
-        if (!dr && !dc) continue;
-        const rr = r + dr, cc = c + dc;
-        if (rr < 0 || rr >= gh || cc < 0 || cc >= gw) continue;
-        const b = anC[rr * gw + cc];
-        if (hi ? b > a : b < a) { ok = false; break; }
-      }
-      if (ok) centres.push({ x: csx(c), y: csy(r), a, hi });
-    }
-    centres.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
-    const kept = [];
-    g.textAlign = "center";
-    for (const e of centres) {
-      if (kept.some(k => k.hi === e.hi && Math.hypot(k.x - e.x, k.y - e.y) < 120)) continue;
-      kept.push(e);
-      const pcs = PCT(e.a).toFixed(1) + "%";
-      g.strokeStyle = "rgba(255,255,255,0.9)"; g.lineWidth = 3;
-      g.font = "bold 20px OpenDyslexic, Verdana";
-      g.strokeText(e.hi ? "H" : "L", e.x, e.y + 7);
-      g.fillStyle = e.hi ? "#2050c8" : "#c8283c";
-      g.fillText(e.hi ? "H" : "L", e.x, e.y + 7);
-      g.font = "bold 10px OpenDyslexic, Verdana";
-      g.strokeText(pcs, e.x, e.y + 19);
-      g.fillText(pcs, e.x, e.y + 19);
-    }
-
-    // -- wind barbs on a coarse grid: the staff points INTO the wind (the
-    // from-direction, like a station plot); feathers count speed — full barb
-    // 10 kn, half barb 5, a bare circle for near-calm --
-    g.strokeStyle = "rgba(24,28,44,0.85)"; g.lineWidth = 1.4;
-    const BSP = 9;                                      // cells between barbs
-    for (let r = 4; r < bh2; r += BSP) for (let c = 4; c < bw2; c += BSP) {
-      const px2 = sxC(c), py2 = syR(r);
-      const v = windAt(wxAtCol(c), wyAtRow(r), tNow);
-      const sp = Math.hypot(v.x, v.y), kn = sp * 10;
-      if (kn < 2.5) { g.beginPath(); g.arc(px2, py2, 2.5, 0, 7); g.stroke(); continue; }
-      const ux = -v.x / sp, uy = -v.y / sp;             // from-direction unit
-      const ex = px2 + ux * 24, ey = py2 + uy * 24;
-      g.beginPath(); g.moveTo(px2, py2); g.lineTo(ex, ey);
-      const fx = uy, fy = -ux;                          // feather side
-      let rem = Math.round(kn / 5) * 5, k = 0;
-      while (rem >= 10) {
-        const bx0 = ex - ux * k * 4.5, by0 = ey - uy * k * 4.5;
-        g.moveTo(bx0, by0); g.lineTo(bx0 + fx * 8 + ux * 3, by0 + fy * 8 + uy * 3);
-        rem -= 10; k++;
-      }
-      if (rem >= 5) {                                   // half barb never sits at the very tip
-        const kk = k || 1;
-        const bx0 = ex - ux * kk * 4.5, by0 = ey - uy * kk * 4.5;
-        g.moveTo(bx0, by0); g.lineTo(bx0 + fx * 4.5 + ux * 1.7, by0 + fy * 4.5 + uy * 1.7);
-      }
-      g.stroke();
-    }
-
-    // -- isobar labels last (white pills so they read over everything) --
-    g.font = "bold 9px OpenDyslexic, Verdana"; g.textAlign = "center";
-    for (const [lx, ly, lbl] of isoLabels) {
-      const tw = g.measureText(lbl).width;
-      g.fillStyle = "rgba(240,242,248,0.92)";
-      g.fillRect(lx - tw / 2 - 3, ly - 6, tw + 6, 12);
-      g.fillStyle = "#2a2c3c";
-      g.fillText(lbl, lx, ly + 3.5);
-    }
-
-    g.restore();
-  }
+  } else if (wmOvJob) wmOvJob = null;           // overlays toggled off mid-build
   if (wantDn || wantWx) {
-    // blit the composite mapped from its captured view onto the current one
-    const oc = wmOvCache, k = z / oc.z;
-    const bx0 = (oc.cx - (oc.W / 2) / oc.z - wm.cx) * z + W / 2;
-    const by0 = (oc.cy - (oc.H / 2) / oc.z - wm.cy) * z + H / 2;
-    const smB = wmCtx.imageSmoothingEnabled;
-    wmCtx.imageSmoothingEnabled = true;
-    wmCtx.drawImage(oc.cv, bx0, by0, oc.W * k, oc.H * k);
-    wmCtx.imageSmoothingEnabled = smB;
+    // blit the latest FINISHED composite mapped from its captured view onto
+    // the current one — but never one whose size/toggles no longer match
+    // (a just-unticked layer must not linger; a blank beat while the job
+    // rebuilds reads better than a wrong overlay). While a job is mid-build
+    // this keeps showing the previous composite, shifted/scaled.
+    const oc = wmOvCache;
+    if (oc && oc.W === W && oc.H === H && oc.dpr === dpr && oc.dn === wantDn && oc.wx === wantWx) {
+      const k = z / oc.z;
+      const bx0 = (oc.cx - (oc.W / 2) / oc.z - wm.cx) * z + W / 2;
+      const by0 = (oc.cy - (oc.H / 2) / oc.z - wm.cy) * z + H / 2;
+      const smB = wmCtx.imageSmoothingEnabled;
+      wmCtx.imageSmoothingEnabled = true;
+      wmCtx.drawImage(oc.cv, bx0, by0, oc.W * k, oc.H * k);
+      wmCtx.imageSmoothingEnabled = smB;
+    }
     // legends drawn LIVE on the map canvas (not into the composite) so a
     // stale shifted blit never slides them around
     if (wantDn) {
@@ -1717,6 +1912,8 @@ function wmDraw() {
   wmCtx.font = "bold 13px OpenDyslexic, Verdana"; wmCtx.textAlign = "left";
   wmCtx.fillStyle = "#000"; wmCtx.fillText(zlabel, 11, 21);
   wmCtx.fillStyle = "#ffe97a"; wmCtx.fillText(zlabel, 10, 20);
+  // anything on screen still a stand-in? redraw shortly as pieces stream in
+  if (wmNeedsRefine && wm.open) wmRefineSoon();
 }
 
 // One-time upgrade from the hand-drawn Canvas2D vector glyphs to the real
@@ -1807,6 +2004,11 @@ function closeWorldMap() {
   wmEl.style.display = "none";
   wmTip.style.display = "none";
   clearInterval(wm.timer);
+  // drop pending refine/settle repaints — they'd be no-ops (wm.open guards)
+  // but there's no reason to leave timers armed after the map is gone
+  clearTimeout(wmRefineTimer); wmRefineTimer = 0;
+  clearTimeout(wmOvSettleTimer);
+  wmOvJob = null;             // abandon a half-built overlay composite
 }
 document.getElementById("wmclose").onclick = closeWorldMap;
 document.getElementById("mapbtn").onclick = () => (wm.open ? closeWorldMap() : openWorldMap());
@@ -1921,13 +2123,17 @@ wmEl.addEventListener("mousemove", e => {
   const mx = wx / 2, my = wy / 2;
   const labels = [world.biomeNameAt(wx, wy)];
   const rad = Math.max(4, 12 / wm.zoom);
-  for (const ic of world.iconsNearForMap(mx - rad / 2, my - rad / 2, mx + rad / 2, my + rad / 2)) {
+  // icon/village lookups read ONLY the region cells already streamed in
+  // (wmCellsNear) — hovering fresh territory must never run settlement
+  // layout/naming generation on this thread; the viewport draw has already
+  // requested these cells, so labels appear the moment they arrive
+  for (const ic of wmCellsNear(mx - rad / 2, my - rad / 2, mx + rad / 2, my + rad / 2, "icons")) {
     if (Math.hypot(ic.x * 2 - wx, ic.y * 2 - wy) < rad) {
       const nm = ICON_TYPES[ic.type]?.name;
       if (nm) labels.push(nm);
     }
   }
-  for (const v of world.villagesNearForMap(mx - rad * 3, my - rad * 3, mx + rad * 3, my + rad * 3, 0)) {
+  for (const v of wmCellsNear(mx - rad * 3, my - rad * 3, mx + rad * 3, my + rad * 3, "villages")) {
     if (Math.hypot(v.x * 2 - wx, v.y * 2 - wy) < rad * 3 + (v.R || 0) * 2) labels.push(v.name);
     // station buildings under the cursor: name the trade and its skills (the
     // gold diamonds / coin / blue dot painted on the chunk map images)

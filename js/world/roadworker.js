@@ -20,6 +20,14 @@ onmessage = e => {
     self.PCELL = d.pcell;
     self.ICELL = d.icell;
     self.WORLDGEN_SIG = d.gensig; // features.js keys the name-registry store by it
+    // the world-map region cells ship villages WITH their map icons —
+    // villageForMap derives those from these gameplay-layer tables, which
+    // live in files this worker doesn't import, so the map worker passes
+    // them in (plain dicts). Other roadworker instances omit them and
+    // villageForMap falls back exactly as it does on a page without them.
+    if (d.shopIcon) self.SHOP_ICON = d.shopIcon;
+    if (d.stationIcon) self.STATION_ICON = d.stationIcon;
+    if (d.shopTypeKeys) self.SHOP_TYPE_KEYS = d.shopTypeKeys;
     importScripts("../data.js", "terrain.js", "citygrow.js", "labgen.js", "features.js");
     features = createWorldFeatures(createWorldTerrain());
     return;
@@ -55,6 +63,14 @@ onmessage = e => {
         .map(rv => ({ polys: rv.polys, bbox: rv.bbox }));
       const roads = features.roadsNear(c.x0 - 8, c.y0 - 8, c.x1 + 8, c.y1 + 8)
         .map(rp => ({ pts: rp.pts, bbox: rp.bbox, key: rp.key }));
-      postMessage({ region: c.id, rivs, roads });
+      // settlement / POI / icon layers ride along in the same cell: a COLD
+      // cell can run citygrow accretion and the zone-naming pass (seconds!),
+      // which used to happen on the main thread the moment the map's label
+      // pass touched a fresh viewport — the single biggest zoom-out freeze.
+      // Same code + same seed = identical results; all plain data.
+      const villages = features.villagesNearForMap(c.x0, c.y0, c.x1, c.y1, 42);
+      const pois = features.poisNearForMap(c.x0, c.y0, c.x1, c.y1, 26);
+      const icons = features.iconsNearForMap(c.x0, c.y0, c.x1, c.y1);
+      postMessage({ region: c.id, rivs, roads, villages, pois, icons });
     }
 };
