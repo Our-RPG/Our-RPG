@@ -90,6 +90,11 @@ function updateWorldStuff() {
     if (world.insideBuilding(sx2, sy2)) continue;
     const _m = {
       uid: ++_monUid,
+      // kx/ky: the IMMUTABLE spawn-def tile — the cross-client identity for
+      // multiplayer entity sync (js/net/entsync.js). Every client derives the
+      // same spawnDefs, so kind+kx,ky names the same monster everywhere. sx/sy
+      // can drift (bird respawn relocation); kx/ky never moves.
+      kx: x, ky: y,
       kind, x: sx2, y: sy2, sx: sx2, sy: sy2, px: PX(sx2), py: PX(sy2),
       hp: monMaxHp(kind), alive: true, moving: null, target: null,
       nextAtkAt: 0, facing: 1, dir8: "south", spr: MONSTERS[kind].spr, lungeT: -9999,
@@ -251,6 +256,12 @@ function markSeen() {
       }
     world.preloadSeen(near);
     if (world.pruneChunks) world.pruneChunks(pcx, pcy);
+    // kick the local region cells (rivers/roads/villages/POIs/icons) to the
+    // road worker NOW: freshly-seen chunks' map bakes are gated on these
+    // cells, and the map/minimap backfill should find them already computed
+    // instead of paying the worker's cold latency at first map-open
+    wmRegionProgressive(player.x / 2 - 400, player.y / 2 - 400,
+                        player.x / 2 + 400, player.y / 2 + 400);
   }
 }
 
@@ -1269,6 +1280,15 @@ const _wmBakeSet = new Set();
 let _wmBakeDebt = 0, _wmBakeRaf = false;
 // Callers (1): js/world/map.js prewarmMapChunk (skip keys already queued here)
 function wmBakeQueued(key) { return _wmBakeSet.has(key); }
+// a stand-in for this chunk is ON SCREEN right now — jump its bake to the
+// queue head so visible macro squares clear first, not in markSeen order
+// (after a MAPBAKE_SIG bump the whole explored world re-bakes, and the two
+// chunks the player is actually looking at must not wait behind that)
+function wmBakePrioritize(cx, cy) {
+  const k = cx + "," + cy;
+  const i = _wmBakeQ.indexOf(k);
+  if (i > 0) { _wmBakeQ.splice(i, 1); _wmBakeQ.unshift(k); }
+}
 // Callers (1): js/world/map.js _prewarmTick (persisted-image miss -> real bake)
 function wmQueueBake(cx, cy) {
   const k = cx + "," + cy;
@@ -1281,8 +1301,14 @@ function wmQueueBake(cx, cy) {
 function _wmBakeTick() {
   _wmBakeRaf = false;
   if (_wmBakeQ.length) { _wmBakeRaf = true; requestAnimationFrame(_wmBakeTick); }
+  const tickT0 = performance.now();
+  // with the map OPEN the 3D world is hidden and the player is staring at
+  // macro stand-ins — bake hard (a 24ms budget per frame, no debt pauses)
+  // so a viewport sharpens in a second or two. Map closed: gameplay is
+  // live, keep the gentle one-bake-per-frame + debt-payback pacing.
+  const mapWatch = wm.open;
   _wmBakeDebt = Math.max(0, _wmBakeDebt - 16);
-  if (_wmBakeDebt > 0) return;                        // still paying off the last heavy bake
+  if (!mapWatch && _wmBakeDebt > 0) return;           // still paying off the last heavy bake
   if (wm.open && (wm.drag || performance.now() - wmWheelT < 160)) return; // never bake mid-interaction
   // a bake before the biome-tile atlas has decoded is uncacheable (map.js
   // returns it uncached to avoid freezing gradient art into IDB) — wait
@@ -1292,7 +1318,7 @@ function _wmBakeTick() {
   // without a worker, wmRegionProgressive falls back to a 120ms-budgeted
   // sync query per call — probe only the queue head then, not a whole scan
   const scanMax = _wmRegWorker === false ? 1 : 8;
-  let scanned = 0;
+  let scanned = 0, baked = 0;
   for (let n = 0; n < _wmBakeQ.length && scanned < scanMax; n++) {
     const k = _wmBakeQ[n];
     if (world.mapChunkCache.has(k)) { _wmBakeQ.splice(n--, 1); _wmBakeSet.delete(k); continue; }
@@ -1300,30 +1326,26 @@ function _wmBakeTick() {
     const ci = k.indexOf(",");
     const cx = +k.slice(0, ci), cy = +k.slice(ci + 1);
     const x0 = cx * CSH, y0 = cy * CSH;
-    let q;
-    if (world.chunks.has(k)) {
-      // the REAL game chunk was generated this session, and generating it
-      // ran these exact river/road/village/POI queries — so the shared
-      // query here is guaranteed cache reads, bake now. (A plain distance
-      // check stood here first and hit a 2s cold river-trace when a nearby
-      // chunk's caches weren't actually warm yet.) This is the markSeen /
-      // minimap path: fresh exploration backfills fast instead of waiting
-      // for the region worker's cold recompute.
-      q = world.mapRegionQuery(x0, y0, x0 + CSH, y0 + CSH);
-    } else {
-      // far territory (map browsing): request the chunk's region cells and
-      // bake only once they're all here, so river tracing / road A* /
-      // citygrow never runs on this thread
-      q = wmRegionProgressive(x0, y0, x0 + CSH, y0 + CSH);
-      if (!wmRegionReady(x0, y0, x0 + CSH, y0 + CSH)) continue;
-    }
+    // region data ALWAYS comes from the worker's cells — bake only once
+    // they've all arrived, so river tracing / road A* / citygrow / zone
+    // naming never runs on this thread. (Two "warm main-thread fast path"
+    // heuristics stood here briefly — distance-from-player, then
+    // chunk-generated-this-session — and BOTH froze the thread seconds on
+    // queries chunk gen hadn't actually warmed, e.g. a cold zone-naming
+    // pass measured at 3.4s. Stand-in latency beats jank; markSeen kicks
+    // the player's local cells to the worker early to hide most of it.)
+    const q = wmRegionProgressive(x0, y0, x0 + CSH, y0 + CSH);
+    if (!wmRegionReady(x0, y0, x0 + CSH, y0 + CSH)) continue;
     const t0 = performance.now();
     world.renderMapChunk(cx, cy, q);
     _wmBakeDebt = performance.now() - t0;
-    _wmBakeQ.splice(n, 1);
+    _wmBakeQ.splice(n--, 1);
     _wmBakeSet.delete(k);
+    baked++;
     if (wm.open) wmRefineSoon();                      // the open map sharpens as bakes land
-    return;                                           // one bake per frame at most
+    if (!mapWatch) return;                            // one bake per frame during gameplay
+    if (performance.now() - tickT0 > 24) return;      // map-watch budget spent
+    scanned = 0;                                      // budget left — keep draining
   }
 }
 
@@ -1446,7 +1468,10 @@ function wmDraw() {
           const seen = inSeen(tx2 * CS + CS / 2, ty2 * CS + CS / 2);
           const img = seen ? world.renderMapChunkCached(tx2, ty2) : null;
           if (img) wmCtx.drawImage(img, sx, sy, px, px);
-          else { if (seen) wmNeedsRefine = true; drawFromAncestor(0, tx2, ty2, sx, sy, px); }
+          else {
+            if (seen) { wmNeedsRefine = true; wmBakePrioritize(tx2, ty2); } // visible → bake first
+            drawFromAncestor(0, tx2, ty2, sx, sy, px);
+          }
         } else {
           world.mipTile(L, tx2, ty2);                // build/refine (budgeted)
           const rec = world.mipPeek(L, tx2, ty2);
@@ -1688,6 +1713,7 @@ function wmDraw() {
         const [sx, sy] = toScreen(cx * CS, cy * CS);
         if (img) { wmCtx.drawImage(img, sx, sy, CS * z, CS * z); continue; }
         wmNeedsRefine = true;
+        wmBakePrioritize(cx, cy);                     // visible stand-in → bake first
         // stand-ins are upscaled coarse art — draw them soft, not blocky
         wmCtx.imageSmoothingEnabled = true;
         if (!drawFromAncestor(0, cx, cy, sx, sy, CS * z))
