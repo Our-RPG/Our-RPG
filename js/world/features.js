@@ -2345,7 +2345,7 @@ function createWorldFeatures(ctx) {
     // other portal, without it ever competing for a spot in the wild lattice.
     for (const v of villagesNearForMap(tx0, ty0, tx1, ty1, pad))
       if (v.kind === "city" && v.portal)
-        out.push({ x: v.portal.x, y: v.portal.y, type: "portal", name: v.name, dir: null });
+        out.push({ x: v.portal.x, y: v.portal.y, type: "portal", name: v.name + " Portal", dir: null });
     return out;
   }
   function iconsNearForMap(tx0, ty0, tx1, ty1) {
