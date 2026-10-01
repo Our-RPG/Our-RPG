@@ -44,9 +44,16 @@ function usePortal(n) {
 // or rare drops), so far travel stays genuinely costly. Among qualifying
 // runes the cheapest tiers are drunk first, from the inventory before the
 // pouch (a mage's loadout is the last thing eaten).
+//
+// Distance and tier are log-linked (same curve shape as content.js's
+// tierVal value curve), anchored on the guaranteed-minimum 200-tile portal
+// spacing (tier 9 "Drain") up through a 100,000-tile world-spanning jump
+// (tier 32 "Eternity"): ~1,000 tiles wants tier 15+, ~10,000 tiles wants
+// tier 23+. minTier is the 0-based RUNES index, i.e. (tier number − 1).
 function portalRuneCost(d) {
+  const t = 8 + 23 * Math.log(Math.max(d, 200) / 200) / Math.log(500);
   return {
-    minTier: Math.min(24, Math.floor(d / 60)),          // ~600 tiles wants Frost+, ~1200 Death+
+    minTier: Math.max(8, Math.min(31, Math.round(t))),
     n: Math.min(5, Math.max(1, Math.ceil(d / 200))),    // 1..5 of them
   };
 }

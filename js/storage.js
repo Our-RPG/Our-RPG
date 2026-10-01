@@ -168,6 +168,7 @@ function buildSaveData() {
     reputation: player.reputation | 0, contractsDone: player.contractsDone || [],
     portals: player.portals || {}, // attuned portal network: "x,y" -> name
     portalsFresh: true,            // set once the one-time portal-network reset has run (see load)
+    portalsFresh2: true,           // set once the post-respacing portal reset has run (see load)
     kills: player.kills || {},     // bestiary: monster kind -> number slain
     unlocked: player.unlocked || {}, // opened door/gate locks: canonical "x,y" -> 1 (gameplay/locks.js)
     quests: player.quests || {},   // quest progress (gameplay/quests.js): active/done/flags/revealed
@@ -395,6 +396,11 @@ function loadGame() {
       // save — the portalsFresh flag is written on the next save so it won't
       // clear again (and newly-attuned portals from here on persist normally).
       if (!d.portalsFresh) player.portals = {};
+      // ONE-TIME MIGRATION #2: the portal lattice got denser/respaced (min
+      // spacing 500 -> 200 tiles, gameplay/portals.js + world/features.js),
+      // so every previously-attuned portal's coordinates are stale — the
+      // portal that used to stand there is gone. Wipe again, same idiom.
+      if (!d.portalsFresh2) player.portals = {};
       // placed furniture & vessels: drop entries whose item id no longer exists
       if (typeof placed !== "undefined") {
         placed = Array.isArray(d.placed)

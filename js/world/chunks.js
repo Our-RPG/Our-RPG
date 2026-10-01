@@ -651,6 +651,13 @@ function createWorldChunks(ctx) {
         // the rest of the variety comes from station-building shopkeepers
         type = hash2i(b.x0, b.y0, S ^ 0x5107) % 3 !== 0 ? "general"
           : KEYS[hash2i(b.x0, b.y0, S ^ 0x5108) % KEYS.length];
+      } else if (b.job === "altar") {
+        // the Runestone altar is CITY-ONLY and CITY_ESSENTIALS-guaranteed (see
+        // features.js villageInfo jobs list — villages never get "altar"), so
+        // forcing (not hash-rolling) a rune trader here is what guarantees
+        // every city keeps one, for players too low-level to craft their own
+        // portal runes (see market.js SHOP_TYPES.runeseller)
+        type = "runeseller";
       } else if (b.job && STATIONS[b.job] && hash2i(b.x0, b.y0, S ^ 0x5109) % 100 < 35) {
         type = KEYS[hash2i(b.x0, b.y0, S ^ 0x510a) % KEYS.length];
       }

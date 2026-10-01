@@ -498,6 +498,18 @@ const SHOP_TYPES = {
       .concat(Object.keys(ITEMS).filter(id => ITEMS[id].log), idsByTag("wood")), 16),
     buys: (id, d) => !!d.log || itemTag(id) === "wood",
   },
+  // every city's Runestone altar keeps one of these (see world/chunks.js
+  // deriveNpcs, forced not hash-rolled): Runecrafting req = tier number, so a
+  // fresh player can't craft tier 9+ runes yet but still needs them for
+  // portalRuneCost's shortest hops (gameplay/portals.js, minTier floor 8 =
+  // tier 9 "Drain"). Stocks tiers 9-16 (RUNES indices 8-15, Drain..Chaos) —
+  // enough for short/medium portal hops without handing out the long-haul
+  // high tiers for free.
+  runeseller: {
+    name: "Rune trader", line: `"Can't weave your own yet? I keep Drain through Chaos in stock — enough to work the portal network."`,
+    sells: () => shopSample((typeof RUNES !== "undefined" ? RUNES.slice(8, 16).map(r => r.id) : []), 8),
+    buys: (id, d) => d.equip === "rune",
+  },
 };
 const SHOP_TYPE_KEYS = Object.keys(SHOP_TYPES).filter(k => k !== "general");
 // lazy stock cache (some sells-lists scan all ITEMS)

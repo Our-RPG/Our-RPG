@@ -1771,12 +1771,14 @@ function createWorldFeatures(ctx) {
   // ---------- ancient portals: a sparse dedicated lattice ----------
   // Portals no longer roll from the POI tables (two adjacent 30-unit cells
   // could both land one — 60 game tiles apart). They place on their own
-  // coarse grid so NO TWO PORTALS generate closer than 250 map units
-  // (= 500 game tiles): each 250-cell rolls one jittered candidate, and a
+  // coarse grid so NO TWO PORTALS generate closer than 100 map units
+  // (= 200 game tiles): each 100-cell rolls one jittered candidate, and a
   // candidate survives only if no candidate in the 8 neighbouring cells
-  // sits within 250 units with a lower priority hash (deterministic
-  // Poisson-disk-lite; slight over-suppression, spacing guaranteed).
-  const PORTAL_CELL = 250, PORTAL_MIN_D = 250;
+  // sits within 100 units with a lower priority hash (deterministic
+  // Poisson-disk-lite; slight over-suppression, spacing guaranteed). This
+  // matches portalRuneCost's floor (gameplay/portals.js): a tier-9 rune
+  // should always be enough for the shortest legal hop.
+  const PORTAL_CELL = 100, PORTAL_MIN_D = 100;
   const portalCandCache = new Map();
   function portalCandidate(pgx, pgy) {
     const key = pgx + "," + pgy;

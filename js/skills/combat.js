@@ -232,7 +232,19 @@ const RUNE_MAGIC = [
 ];
 let RUNE_TIER = null; // rune item id -> ladder index, built lazily from RUNES
 function runeWord(id) {
-  if (!RUNE_TIER) { RUNE_TIER = {}; RUNES.forEach((r, i) => { RUNE_TIER[r.id] = i; }); }
+  // RUNES[i].id is the PRE-canonicalization id (e.g. "rune_10"): numbered rune
+  // ids match id-canonical.js's GENERIC pattern, so every rune actually
+  // crafted (RECIPES.runecraft out: r.id gets rewritten by that pass) lands
+  // in inventory under the renamed id (e.g. "rune_frost"). Index both so a
+  // crafted stack still resolves — see ITEM_ALIAS (old -> new), published by
+  // id-canonical.js for exactly this old-id/new-id gap.
+  if (!RUNE_TIER) {
+    RUNE_TIER = {};
+    RUNES.forEach((r, i) => {
+      RUNE_TIER[r.id] = i;
+      if (typeof ITEM_ALIAS !== "undefined" && ITEM_ALIAS[r.id]) RUNE_TIER[ITEM_ALIAS[r.id]] = i;
+    });
+  }
   const i = RUNE_TIER[id];
   return i === undefined ? null : { tier: i, name: RUNES[i].name, ...RUNE_MAGIC[i] };
 }

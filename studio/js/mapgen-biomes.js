@@ -227,7 +227,7 @@ const MAPGEN_SYSTEMS = (() => {
   { title: "POIs & wilderness features", note: "Existence gates and grid cells for points-of-interest, portals, icons & chests.", rows: [
     { name: "POI_EXISTENCE", eq: "rand < 0.30 + civ·0.30", floats: [f("base", "0.30", "poi.base"), f("civ scale", "0.30", "poi.civ")] },
     { name: "POI_GRID", eq: "PCELL 30 tiles", floats: [f("cell", "30", "poi.cell")] },
-    { name: "PORTAL", eq: "PORTAL_CELL 250;   min spacing 250 tiles", floats: [f("cell", "250", "poi.portal_cell"), f("min spacing", "250", "poi.portal_min")] },
+    { name: "PORTAL", eq: "PORTAL_CELL 100 map units;   min spacing 200 tiles", floats: [f("cell", "100", "poi.portal_cell"), f("min spacing", "100", "poi.portal_min")] },
     { name: "WILD_ICON", eq: "rand < 0.2 + civ·0.6;   ICELL 44", floats: [f("base", "0.2", "poi.wild_base"), f("civ scale", "0.6", "poi.wild_civ"), f("cell", "44", "poi.wild_cell")] },
     { name: "WAYSIDE_CHEST", eq: "192×192 lattice;   rand < 0.3", floats: [f("lattice", "192", "poi.chest_lattice"), f("chance", "0.3", "poi.chest_ch")] },
   ] },

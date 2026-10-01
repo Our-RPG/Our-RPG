@@ -279,6 +279,7 @@ const SHOPTYPE_ROLE = {
   general: "merchant", woodcutter: "woodcutter", mining: "miner", fishmonger: "fisher",
   armoury: "armourer", weaponsmith: "blacksmith", seedsman: "farmer", herbalist: "herbalist",
   jeweller: "jeweller", clothier: "tailor", provisioner: "merchant", timberwright: "carpenter",
+  runeseller: "elder", // keeper of the city's Runestone altar — reuses the existing role bank
 };
 
 function npcRoleKey(npc) {
