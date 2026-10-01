@@ -4867,8 +4867,8 @@ void main() {
     if (!mat) return;
     // a villager asleep on their OWN bed lies down on it (world-anchored flat
     // sprite, like flat decor) instead of standing on the mattress. Requires a
-    // real _bed — chunk shopkeepers "sleep" at their post and stay upright.
-    const lying = !!npc._bed && typeof npcAsleep === "function" && npcAsleep(npc);
+    // real _bed (or, for a stranded NPC, an away-bed found at bedtime).
+    const lying = (!!npc._bed || !!npc._awayBed) && typeof npcAsleep === "function" && npcAsleep(npc);
     const frame = MIXR.frameFor(lying ? "south" : (npc.dir8 || "south"));
     const g = MIXR.geomFor(def, frame);
     let m = meshes.get(id);
@@ -5129,14 +5129,16 @@ void main() {
   // Route an NPC to its building's ladder and climb one storey at a time toward
   // targetLevel (the player's own useLadder, but autonomous). Returns true while
   // still busy climbing/walking to the ladder, so the caller skips its own move.
-  function npcClimbToward(npc, targetLevel, T) {
+  function npcClimbToward(npc, targetLevel, T, ldsOverride) {
     const cur = npc.level | 0;
     if (cur === targetLevel) return false;
     // per-storey ladder shafts: the leg being climbed is (cur, cur+1) going
     // up or (cur-1, cur) going down — walk to THAT shaft's tile. A legacy
-    // single ladder (no .s) serves every leg at one tile.
-    const lds = npc._ladders && npc._ladders.length ? npc._ladders
-      : npc._ladder ? [{ x: npc._ladder[0], y: npc._ladder[1] }] : [];
+    // single ladder (no .s) serves every leg at one tile. ldsOverride lets a
+    // stranded NPC climb an away-bed's ladders without borrowing its (own,
+    // unrelated) npc._ladder/_ladders fields.
+    const lds = ldsOverride || (npc._ladders && npc._ladders.length ? npc._ladders
+      : npc._ladder ? [{ x: npc._ladder[0], y: npc._ladder[1] }] : []);
     if (!lds.length) return false;
     const pair = targetLevel > cur ? cur : cur - 1;
     const ld = lds.find(l => l.s == null || l.s === pair) || lds[0];
@@ -5151,6 +5153,135 @@ void main() {
     npc._wanderAt = T + 230 + Math.random() * 150;
     stuckStepToward(npc, "_climbStuck", ld.x, ld.y, T);
     return true;
+  }
+
+  // ---- stranded fallback: an NPC with no usable home (or dragged far
+  // outside its own leash — the tight wander radius means this is normally
+  // unreachable) finds a spare bed elsewhere instead of idling forever.
+  // "Fastest route" = straight-line distance, the same proxy gameplay/
+  // portals.js's own destination chooser uses — there's no pathfinder here.
+  const awayBedClaims = new Map();  // "x,y" bed tile -> the npc that claimed it
+  function releaseAwayBed(npc) {
+    const ab = npc._awayBed; if (!ab) return;
+    const k = ab.x + "," + ab.y;
+    if (awayBedClaims.get(k) === npc) awayBedClaims.delete(k);
+    npc._awayBed = null;
+  }
+  // first free, unclaimed bed in settlement v (resident bed formula), skipping
+  // trader/bank buildings (owned by their own shopkeeper) and the seeker's
+  // own bed. No "inn" building job exists in this engine (job buildings are
+  // bank/trader/stations only — inn is a standalone wilderness POI), so
+  // there's no inn-preference to apply; first match in building order wins.
+  function awayBedInSettlement(v, forNpc) {
+    if (!v.buildings) return null;
+    for (const b of v.buildings) {
+      if (b.job === "trader" || b.job === "bank") continue;
+      const bed = b.rooms ? [b.rooms[0].x + 1, b.rooms[0].y + 1] : [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
+      if (forNpc._bed && bed[0] === forNpc._bed[0] && bed[1] === forNpc._bed[1]) continue;
+      const claim = awayBedClaims.get(bed[0] + "," + bed[1]);
+      if (claim && claim !== forNpc) continue;
+      const bm = world.buildingMeta ? world.buildingMeta(b) : null;
+      const storeys = (bm && bm.storeys) || 1;
+      const ladders = storeys > 1 ? (bm.ladders && bm.ladders.length ? bm.ladders
+        : bm.ladder ? [{ x: bm.ladder.x, y: bm.ladder.y }] : null) : null;
+      return { x: bed[0], y: bed[1], level: storeys > 1 ? storeys - 1 : 0, ladders };
+    }
+    return null;
+  }
+  // poisNearForMap mixes two coordinate scales: wild lattice portals in MAP
+  // units (need ×2) and each city's injected guaranteed portal already in
+  // GAME units (features.js villageInfo's v.portal) — resolve by matching
+  // against the known cities' own v.portal, falling back to ×2 otherwise.
+  function portalGameXY(p, cities) {
+    for (const v of cities) if (v.portal && v.portal.x === p.x && v.portal.y === p.y) return [v.portal.x, v.portal.y];
+    return [p.x * 2, p.y * 2];
+  }
+  // free NPC-equivalent of gameplay/portals.js portalTravel: no rune cost, no
+  // log/sfx/save (player-only), same ring-search for an open landing tile.
+  function npcPortalJump(npc, px2, py2) {
+    world.getChunk(Math.floor(px2 / world.CHUNK), Math.floor(py2 / world.CHUNK));
+    let tx = px2, ty = py2 + 1;
+    outer: for (let r = 1; r <= 4; r++)
+      for (let dy = -r; dy <= r; dy++)
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          const ax = px2 + dx, ay = py2 + dy;
+          if (!world.isBlocked(ax, ay) && !world.isWater(ax, ay)) { tx = ax; ty = ay; break outer; }
+        }
+    npc.x = tx; npc.y = ty; npc.px = PX(tx); npc.py = PX(ty);
+    npc.level = 0; npc.moving = null;
+  }
+  // compares exactly two routes (walk vs portal), both straight-line-cost
+  // proxies, and picks whichever resolves cheaper (or whichever resolves at
+  // all). Portals are free for NPCs — only the two walking legs cost anything.
+  function npcFindAwayBed(npc) {
+    const near = (world.villagesNearPt && world.villagesNearPt(npc.x, npc.y, 2000)) || [];
+    const cities = near.filter(v => v.kind === "city");
+    let best = null, bestD = Infinity;
+    for (const v of near) {
+      if (v.kind !== "city" && v.kind !== "village") continue;
+      const spare = awayBedInSettlement(v, npc);
+      if (!spare) continue;
+      const d = Math.hypot(npc.x - spare.x, npc.y - spare.y);
+      if (d < bestD) { bestD = d; best = { ...spare, viaPortal: false }; }
+    }
+    let entry = null, entryD = Infinity;
+    try {
+      const mx = npc.x / 2, my = npc.y / 2, pad = 1000;
+      for (const p of world.poisNearForMap(mx - pad, my - pad, mx + pad, my + pad, pad)) {
+        if (p.type !== "portal") continue;
+        const [gx, gy] = portalGameXY(p, cities);
+        const d = Math.hypot(npc.x - gx, npc.y - gy);
+        if (d < entryD) { entryD = d; entry = { x: gx, y: gy }; }
+      }
+    } catch (e) { /* feature queries must never break a frame */ }
+    if (entry) {
+      let exitSpare = null, exitPortal = null, exitD = Infinity;
+      for (const v of cities) {
+        if (!v.portal) continue;
+        const spare = awayBedInSettlement(v, npc);
+        if (!spare) continue;
+        const d = Math.hypot(v.portal.x - spare.x, v.portal.y - spare.y);
+        if (d < exitD) { exitD = d; exitSpare = spare; exitPortal = v.portal; }
+      }
+      const total = entryD + exitD;
+      if (exitSpare && total < bestD) {
+        best = { ...exitSpare, viaPortal: true, portalEntry: entry, portalExit: exitPortal };
+        bestD = total;
+      }
+    }
+    return best;
+  }
+  // bedtime routing for an NPC whose own bed/home isn't usable: walk (or
+  // portal-hop) to npc._awayBed, computed once and cached — retried at most
+  // every 8s on failure so an unreachable NPC doesn't re-scan every frame.
+  function stepAwayBed(npc, T) {
+    if (!npc._awayBed && (npc._awayBedAt == null || T > npc._awayBedAt + 8000)) {
+      npc._awayBedAt = T;
+      npc._awayBed = npcFindAwayBed(npc);
+    }
+    const ab = npc._awayBed;
+    if (!ab) return;                                  // nothing in range — stand put
+    const k = ab.x + "," + ab.y;
+    if (!awayBedClaims.has(k)) awayBedClaims.set(k, npc);
+    if (ab.viaPortal && !ab.jumped) {
+      if ((npc.level | 0) > 0) { npcClimbToward(npc, 0, T); return; }
+      if (Math.max(Math.abs(npc.x - ab.portalEntry.x), Math.abs(npc.y - ab.portalEntry.y)) <= 1) {
+        npcPortalJump(npc, ab.portalExit.x, ab.portalExit.y);
+        ab.jumped = true; return;
+      }
+      if (T < npc._wanderAt) return;
+      npc._wanderAt = T + 240 + Math.random() * 140;
+      stuckStepToward(npc, "_awayStuck", ab.portalEntry.x, ab.portalEntry.y, T);
+      return;
+    }
+    if ((npc.level | 0) !== (ab.level | 0)) {
+      if (npcClimbToward(npc, ab.level, T, ab.ladders)) return;
+    }
+    if (npc.x === ab.x && npc.y === ab.y) return;        // in bed — stand
+    if (T < npc._wanderAt) return;
+    npc._wanderAt = T + 240 + Math.random() * 140;
+    stuckStepToward(npc, "_awayStuck", ab.x, ab.y, T);
   }
   function stepMixNpc(npc) {
     const T = performance.now();
@@ -5211,6 +5342,13 @@ void main() {
     // bedtime (20:00–04:00): head home and stand on the bed (residents) or the
     // home post (shopkeepers), instead of wandering. Overrides the idle wander.
     if (typeof isBedtime === "function" && isBedtime(npc.x)) {   // NPC's own timezone
+      // stranded (no home, or dragged outside its own leash — the tight
+      // wander radius means this basically never fires today): find/walk a
+      // spare bed elsewhere instead of falling through to the code below.
+      if (!npc._home || Math.hypot(npc.x - npc._home[0], npc.y - npc._home[1]) > (npc._r || 6) * 4) {
+        stepAwayBed(npc, T); return;
+      }
+      if (npc._awayBed) releaseAwayBed(npc);   // back within its own leash — drop the stale claim
       const bed = npc._bed || npc._home;
       const bedLv = npc._bedLevel | 0;
       if (bed) {
@@ -5241,6 +5379,7 @@ void main() {
         return;
       }
     }
+    if (npc._awayBed) releaseAwayBed(npc);   // bedtime's over — free the bed for someone else
     // daytime: if we slept upstairs, climb back down before resuming the wander
     if ((npc.level | 0) > 0) { npcClimbToward(npc, 0, T); return; }
     if (T < npc._wanderAt) return;
@@ -5404,6 +5543,9 @@ void main() {
     //    (appearance only; keeps its trader/banker role, name and shop).
     //    These are placed/removed by the chunk system, so we just tag any we
     //    haven't yet.
+    // the main bank hall seats up to 3 clerks in the ONE building — offset
+    // each later clerk's bed off the first so they don't all claim one tile
+    const shopBedOcc = new Map();
     for (const npc of world.npcs) {
       if ((npc.trader || npc.banker) && !npc.mix) {
         const h = mixHash("shop:" + npc.x + "," + npc.y);
@@ -5426,6 +5568,22 @@ void main() {
         // Bankers hold their counter instead of roaming the hall.
         npc._home = [npc.x, npc.y]; npc._r = npc.banker ? 2 : 6;
         npc._wanderAt = performance.now() + 1200 + (h % 4000); npc._mt = performance.now();
+        // the owner's bedroom upstairs (buildingMeta forces storeys>=2 for any
+        // job building) — same bed formula the resident loop below uses, so a
+        // shopkeeper sleeping over the shop renders lying down like everyone else
+        const b = slot && slot.v.buildings[slot.i];
+        if (b) {
+          const bm = world.buildingMeta ? world.buildingMeta(b) : null;
+          const storeys = (bm && bm.storeys) || 1;
+          const bkey = slot.v.x + "," + slot.v.y + ":" + slot.i;
+          const occ = shopBedOcc.get(bkey) || 0; shopBedOcc.set(bkey, occ + 1);
+          const base = b.rooms ? [b.rooms[0].x + 1, b.rooms[0].y + 1]
+            : [b.x0 + (b.w >> 1) - 1, b.y0 + 1];
+          npc._bed = [base[0] + occ, base[1]];
+          npc._bedLevel = storeys > 1 ? storeys - 1 : 0;
+          if (storeys > 1 && bm.ladder) npc._ladder = [bm.ladder.x, bm.ladder.y];
+          if (storeys > 1 && bm.ladders) npc._ladders = bm.ladders;
+        }
       }
     }
     // 2) ambient townsfolk + quest-givers at nearby sites (map coords)

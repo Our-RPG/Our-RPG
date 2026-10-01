@@ -629,6 +629,12 @@ function paintDarkness(ctx, w, h, dark, lights, nightCol) {
 // answer or be talked to. (An NPC still walking home at night is NOT asleep.)
 function npcAsleep(npc) {
   if (!npc || typeof isBedtime !== "function" || !isBedtime(npc.x)) return false;
+  // a stranded NPC that walked/portalled to someone else's spare bed (see
+  // render3d.js stepAwayBed) is "in bed" there, same test as its own bed
+  if (npc._awayBed) {
+    const ab = npc._awayBed;
+    return (npc.level | 0) === (ab.level | 0) && npc.x === ab.x && npc.y === ab.y;
+  }
   const bed = npc._bed || npc._home;
   if (!bed) return false;
   const bedLv = npc._bed ? (npc._bedLevel | 0) : 0;
