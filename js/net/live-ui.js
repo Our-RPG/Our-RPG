@@ -110,6 +110,10 @@
           else if (typeof log === "function") log('No one online named "' + wm[1] + '".', "sys");
         } else {
           Live.sendChat(text);
+          // NPCs in earshot hear normal chat too (engine glue in npc-chat.js);
+          // silent — the Live echo already puts the line in the log. Whispers
+          // stay private.
+          if (typeof npcBroadcast === "function") npcBroadcast(text, { silent: true });
         }
       }
       inputEl.value = "";

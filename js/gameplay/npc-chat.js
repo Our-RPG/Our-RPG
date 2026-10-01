@@ -481,7 +481,13 @@ function npcChatTick() {
       if (AI_NPC_ENABLED && !npcChatOffline()) npcFetch("/npc/leave", { id: cid }).catch(() => {});
     }
   }
-  updateChatBar(near.length);
+  // The dedicated NPC chat bar is a LEGACY affordance: with the server-side
+  // engine, NPCs listen to the normal Live chat instead (live-ui.js feeds
+  // npcBroadcast). Show the bar only where that chat isn't available — the
+  // legacy AI/retrieval modes, or offline/tutorial play (keeps Ravenna's
+  // Sky Knoll typed-chat gate reachable pre-account).
+  const liveChatOn = typeof Live !== "undefined" && Live.chatOn && Live.chatOn();
+  updateChatBar((AI_NPC_ENABLED || NPC_RETRIEVAL_ENABLED || !liveChatOn) ? near.length : 0);
 }
 
 // NPC opens the conversation when you wander up (once per ~90s per NPC).
@@ -567,12 +573,15 @@ function npcGreet(npc, cid) {
 }
 
 // Player speaks: every NPC in earshot answers in their own voice.
-function npcBroadcast(text) {
+function npcBroadcast(text, opts) {
   text = (text || "").trim();
   if (!text) return;
+  // silent: the line came through the Live chat input, which already echoes
+  // it to the log — and players-only earshot is normal there, not a warning
+  const silent = !!(opts && opts.silent);
   const near = npcsInEarshot();
-  if (!near.length) { log("There's no one nearby to hear you.", "warn"); return; }
-  log(`You say: "${text}"`, "sys");
+  if (!near.length) { if (!silent) log("There's no one nearby to hear you.", "warn"); return; }
+  if (!silent) log(`You say: "${text}"`, "sys");
   if (!AI_NPC_ENABLED) {
     // retrieval mode: each NPC answers from the bank in their own voice,
     // staggered a touch so bubbles don't all pop at once.

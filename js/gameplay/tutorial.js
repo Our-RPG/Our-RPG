@@ -1951,12 +1951,15 @@ const Tutorial = (() => {
     act: [["Choose my character", "charselect"]] }];
   // With no fence between the Landing and the Harbour (one open village
   // shore), a fresh hand can stroll up to Sigrid on DAY ONE — she plays
-  // village host, but the crossing (and her stage) waits for the journey:
-  // these pages show instead of her real ones while any keeper is unmet,
-  // and finishing them marks NOTHING seen (the staged sky doesn't turn).
+  // village host, but also offers the crossing early (user req): the
+  // "graduate" act works unchanged for an early Sigrid (finishSilent() no-ops
+  // on cur._early, so no stage/reward bookkeeping fires — graduate() itself
+  // doesn't care how far the journey got). Declining, or just reading to the
+  // end and hitting Done, marks NOTHING seen (the staged sky doesn't turn).
   const FERRY_EARLY_PAGES = [{ h: "The waka waits — but not for you, yet",
     t: ["Haere mai to the village, traveller! This shore is where the keepers lay their heads when the day's teaching is done — walk among the tents; you're welcome here any hour.",
-        "But my waka sails for NEWHAVEN only when every keeper on the path has sent you on. Finish the journey, e hoa — gate by gate, lesson by lesson — then come find me by the pier and we'll talk about the crossing."] }];
+        "My waka properly sails for NEWHAVEN once every keeper on the path has sent you on — their lessons, tools and gifts are yours to keep along the way. But if you'd rather not wait, say the word and I'll sing you there right now — you'll land in the city with empty hands and nothing learned, no going back to finish what you skipped."],
+    act: [["Skip ahead — sing me up now", "graduate"], ["I'll earn it properly", "close"]] }];
   // journey's done, night's fallen — Sigrid invites the player to rest
   // before the crossing rather than singing them up on the spot (user req
   // 2026-09-17). Finishing this page (finish(), not an act button) marks her

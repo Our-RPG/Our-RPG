@@ -68,6 +68,7 @@
 <p class="gate-sub">Beyond this crossing, the world is shared and alive — other players, real-time. You enter it with an account so your progress is safe in the cloud and others can find you. No email needed.</p>
 <input id="gate-user" placeholder="username (3–20: letters, digits, _ or -)" maxlength="20" autocomplete="username">
 <input id="gate-pass" type="password" placeholder="password (8+ characters)" autocomplete="new-password">
+<input id="gate-pass2" type="password" placeholder="repeat password" autocomplete="new-password">
 <input id="gate-email" placeholder="email — optional, only for account recovery" autocomplete="email">
 <div id="gate-ts"></div>
 <div class="gate-btns">
@@ -110,9 +111,16 @@
       if (r && r.ok) { say("", true); done(); }
       else say((r && r.error) || "Something went wrong — try again.", false);
     };
-    $("gate-create").onclick = () => run((n, p) => Server.register(n, p, $("gate-email").value.trim(), $("gate-ts")));
+    $("gate-create").onclick = () => {
+      if ($("gate-pass").value !== $("gate-pass2").value) { say("Passwords don't match.", false); return; }
+      run((n, p) => Server.register(n, p, $("gate-email").value.trim(), $("gate-ts")));
+    };
     $("gate-login").onclick = () => run((n, p) => Server.login(n, p, $("gate-ts")));
     $("gate-pass").onkeydown = e => { if (e.key === "Enter") $("gate-create").click(); };
+    $("gate-pass2").onkeydown = e => { if (e.key === "Enter") $("gate-create").click(); };
+    // typing it twice only catches a typo if neither copy can be a paste of the other
+    $("gate-pass2").addEventListener("paste", e => e.preventDefault());
+    $("gate-pass2").addEventListener("drop", e => e.preventDefault());
     $("gate-pk").onclick = async () => {
       if (busy) return;
       busy = true; say("Waiting for your passkey…", true);

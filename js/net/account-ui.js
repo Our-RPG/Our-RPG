@@ -49,6 +49,7 @@
 <div class="acc-hint">The game never needs an account — everything works and saves on this device, logged out, forever. An account adds: your save kept in a <b>cloud vault</b> (browser storage dies with browsers), your workshop votes <b>counted with everyone else's</b>, and opt-in leaderboards. No email required.</div>
 <input id="acc-user" placeholder="username" maxlength="20" autocomplete="username">
 <input id="acc-pass" type="password" placeholder="password (8+ characters)" autocomplete="current-password">
+<input id="acc-pass2" type="password" placeholder="repeat password (only needed to create an account)" autocomplete="new-password">
 <input id="acc-email" placeholder="email — optional, only for account recovery" autocomplete="email">
 <div id="acc-ts"></div>
 <div class="acc-err${msgOk ? " acc-ok" : ""}">${esc(msg)}</div>
@@ -109,8 +110,15 @@ ${workshopHtml("Open Our RPG Workshop ↗")}
         say(r.ok ? "" : r.error || "Something went wrong.", false);
       };
       $("acc-login").onclick = () => go((n, p) => Server.login(n, p, $("acc-ts")));
-      $("acc-register").onclick = () => go((n, p) => Server.register(n, p, $("acc-email").value.trim(), $("acc-ts")));
+      $("acc-register").onclick = () => {
+        if ($("acc-pass").value !== $("acc-pass2").value) { say("Passwords don't match.", false); return; }
+        go((n, p) => Server.register(n, p, $("acc-email").value.trim(), $("acc-ts")));
+      };
       $("acc-pass").onkeydown = e => { if (e.key === "Enter") $("acc-login").click(); };
+      $("acc-pass2").onkeydown = e => { if (e.key === "Enter") $("acc-register").click(); };
+      // typing it twice only catches a typo if neither copy can be a paste of the other
+      $("acc-pass2").addEventListener("paste", e => e.preventDefault());
+      $("acc-pass2").addEventListener("drop", e => e.preventDefault());
       $("acc-pklogin").onclick = async () => {
         say("Waiting for your passkey…", true);
         const r = await Server.passkeyLogin($("acc-user").value.trim() || undefined);
