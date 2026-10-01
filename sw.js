@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v25"; // v25: never cache map bakes made before the biome art decodes
+const CACHE_VERSION = "taiao-v26"; // v26: ship game workers + lua wasm (purge poisoned HTML cache entries)
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

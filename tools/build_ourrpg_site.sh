@@ -42,6 +42,12 @@ copydir fonts
 copy dist/bundle.js
 copy libs/three.min.js
 copy libs/lua/wasmoon.js   # Lua runtime (quests/dialogue/routines) — index.html loads it as a vendor tag
+copy libs/lua/glue.wasm    # wasmoon's wasm binary — without it Lua init fails (HTML fallback != wasm)
+# the game's own web workers (chunk/terrain gen + road/map painting). The
+# importScripts deps they pull (/js/data.js, /js/world/terrain|erosion|
+# citygrow|features.js) are already placed by the studio build's WORKER_DEPS.
+copy js/world/roadworker.js
+copy js/world/chunkworker.js
 copydir assets/sheets
 copy assets/bifrost.webm
 copy assets/birdsong/CREDITS.txt

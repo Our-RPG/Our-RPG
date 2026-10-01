@@ -53,6 +53,18 @@ copydir fonts
 copy dist/bundle.js
 copy libs/three.min.js
 copy libs/lua/wasmoon.js   # Lua runtime (quests/dialogue/routines) — index.html loads it as a vendor tag
+copy libs/lua/glue.wasm    # wasmoon's wasm binary — without it Lua init fails
+# the game's own web workers + their importScripts dependency closure
+# (roadworker: ../data.js, terrain.js, citygrow.js, features.js;
+#  chunkworker: ../data.js, terrain.js, erosion.js) — a worker that 404s
+# degrades the map to the flat macro stand-in (the "gradient" band)
+copy js/world/roadworker.js
+copy js/world/chunkworker.js
+copy js/data.js
+copy js/world/terrain.js
+copy js/world/erosion.js
+copy js/world/citygrow.js
+copy js/world/features.js
 copydir assets/sheets
 copy assets/bifrost.webm
 # attribution ships even when the audio it describes streams from the CDN
