@@ -57,20 +57,28 @@ onmessage = e => {
       const px = features.macroPixels(t.step, t.mx, t.my, d.MACRO_PX, d.MAP_COLORS, d.MAP_WATER);
       postMessage({ macro: t, px: px.buffer }, [px.buffer]);
     }
-  if (d.type === "region" && features)
+  if (d.type === "region" && features) {
+    // PASS 1 — rivers + roads for EVERY cell first: the map's vector overlay
+    // wants these promptly, and the label layers below can cost seconds per
+    // cold cell (citygrow + zone naming). Each cell posts twice: a partial
+    // reply (rivs/roads), then the final label layers.
     for (const c of d.cells) {
       const rivs = features.riversNear(c.x0 - 12, c.y0 - 12, c.x1 + 12, c.y1 + 12)
         .map(rv => ({ polys: rv.polys, bbox: rv.bbox }));
       const roads = features.roadsNear(c.x0 - 8, c.y0 - 8, c.x1 + 8, c.y1 + 8)
         .map(rp => ({ pts: rp.pts, bbox: rp.bbox, key: rp.key }));
-      // settlement / POI / icon layers ride along in the same cell: a COLD
-      // cell can run citygrow accretion and the zone-naming pass (seconds!),
-      // which used to happen on the main thread the moment the map's label
-      // pass touched a fresh viewport — the single biggest zoom-out freeze.
-      // Same code + same seed = identical results; all plain data.
+      postMessage({ region: c.id, rivs, roads, partial: true });
+    }
+    // PASS 2 — settlement / POI / icon layers: a COLD cell can run citygrow
+    // accretion and the zone-naming pass (seconds!), which used to happen on
+    // the main thread the moment the map's label pass touched a fresh
+    // viewport — the single biggest zoom-out freeze. Same code + same seed =
+    // identical results; all plain data.
+    for (const c of d.cells) {
       const villages = features.villagesNearForMap(c.x0, c.y0, c.x1, c.y1, 42);
       const pois = features.poisNearForMap(c.x0, c.y0, c.x1, c.y1, 26);
       const icons = features.iconsNearForMap(c.x0, c.y0, c.x1, c.y1);
-      postMessage({ region: c.id, rivs, roads, villages, pois, icons });
+      postMessage({ region: c.id, villages, pois, icons, final: true });
     }
+  }
 };

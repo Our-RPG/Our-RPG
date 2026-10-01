@@ -1962,6 +1962,7 @@ function createWorldFeatures(ctx) {
   function poiInfo(pcx, pcy) {
     const key = pcx + "," + pcy;
     if (poiCache.has(key)) return poiCache.get(key);
+    if (_warmOnly) return null;       // warm-only query: never generate
     let p = null;
     const seat = poiSeat(pcx, pcy);
     if (seat) {
@@ -2008,6 +2009,9 @@ function createWorldFeatures(ctx) {
   function wildIcon(icx, icy) {
     const key = icx + "," + icy;
     if (iconCache.has(key)) return iconCache.get(key);
+    // warm-only query: the villagesNear suppression check below can generate
+    // village heads (names!), and the field samples aren't free either
+    if (_warmOnly) return null;
     let icon = null;
     const x = icx * ICELL + 8 + Math.floor(rand2(icx, icy, S ^ 0x1c02) * (ICELL - 16));
     const y = icy * ICELL + 8 + Math.floor(rand2(icx, icy, S ^ 0x1c03) * (ICELL - 16));
@@ -2216,6 +2220,10 @@ function createWorldFeatures(ctx) {
   function villageForMap(vcx, vcy) {
     const key = `${vcx},${vcy}`;
     if (villageForMapCache.has(key)) return villageForMapCache.get(key);
+    // warm-only query: only proceed when villageInfo is ALREADY cached (chunk
+    // gen warms it for everywhere the session has rendered) — the mapping
+    // below is then cheap; a cold cell would run citygrow + naming, so skip
+    if (_warmOnly && !villageCache.has(key)) return null;
     const info = villageInfo(vcx, vcy);
     let v = null;
     if (info) {
@@ -2255,6 +2263,22 @@ function createWorldFeatures(ctx) {
     }
     villageForMapCache.set(key, v);
     return v;
+  }
+  // warm-only mode: while set, villageForMap/poiInfo answer ONLY from their
+  // caches (populated by chunk gen for everywhere this session has rendered)
+  // and never generate — so mapWarmQuery below is always instant. The world
+  // map uses it to label a viewport immediately while the road worker
+  // computes the full region cells in the background.
+  let _warmOnly = false;
+  function mapWarmQuery(tx0, ty0, tx1, ty1) {
+    _warmOnly = true;
+    try {
+      return {
+        villages: villagesNearForMap(tx0, ty0, tx1, ty1, 42),
+        pois: poisNearForMap(tx0, ty0, tx1, ty1, 26),
+        icons: iconsNearForMap(tx0, ty0, tx1, ty1),
+      };
+    } finally { _warmOnly = false; }
   }
   function villagesNearForMap(tx0, ty0, tx1, ty1, pad) {
     const out = [];
@@ -2392,22 +2416,27 @@ function createWorldFeatures(ctx) {
     // WAYSIDE bank chests (chunks.js lattice: one candidate per 192×192 GAME
     // tiles, 30% materialise). Water candidates are skipped as an openTile
     // proxy; settlement-adjacent ones are suppressed just like in the chunk.
-    const w0x = Math.floor(tx0 * 2 / 192), w1x = Math.floor(tx1 * 2 / 192);
-    const w0y = Math.floor(ty0 * 2 / 192), w1y = Math.floor(ty1 * 2 / 192);
-    for (let wcy = w0y; wcy <= w1y; wcy++)
-      for (let wcx = w0x; wcx <= w1x; wcx++) {
-        if (rand2(wcx, wcy, S ^ 0xBA7C) > 0.3) continue;
-        const gx = wcx * 192 + Math.floor(rand2(wcx * 3 + 1, wcy, S ^ 0xBA7D) * 192);
-        const gy = wcy * 192 + Math.floor(rand2(wcy * 3 + 1, wcx, S ^ 0xBA7E) * 192);
-        const mx = gx / 2, my = gy / 2;
-        if (elevation(mx, my) < LAND_E) continue;
-        let inTown = false;
-        for (const v of villagesNear(mx, my, mx, my, 40)) {
-          const dx = mx - v.x, dy = my - v.y;
-          if (dx * dx + dy * dy < (v.R + 8) * (v.R + 8)) { inTown = true; break; }
+    // Skipped by warm-only queries: the villagesNear suppression check can
+    // generate village heads (names!) — these icons arrive with the worker's
+    // full cell instead.
+    if (!_warmOnly) {
+      const w0x = Math.floor(tx0 * 2 / 192), w1x = Math.floor(tx1 * 2 / 192);
+      const w0y = Math.floor(ty0 * 2 / 192), w1y = Math.floor(ty1 * 2 / 192);
+      for (let wcy = w0y; wcy <= w1y; wcy++)
+        for (let wcx = w0x; wcx <= w1x; wcx++) {
+          if (rand2(wcx, wcy, S ^ 0xBA7C) > 0.3) continue;
+          const gx = wcx * 192 + Math.floor(rand2(wcx * 3 + 1, wcy, S ^ 0xBA7D) * 192);
+          const gy = wcy * 192 + Math.floor(rand2(wcy * 3 + 1, wcx, S ^ 0xBA7E) * 192);
+          const mx = gx / 2, my = gy / 2;
+          if (elevation(mx, my) < LAND_E) continue;
+          let inTown = false;
+          for (const v of villagesNear(mx, my, mx, my, 40)) {
+            const dx = mx - v.x, dy = my - v.y;
+            if (dx * dx + dy * dy < (v.R + 8) * (v.R + 8)) { inTown = true; break; }
+          }
+          if (!inTown) out.push({ x: mx, y: my, type: "bank" });
         }
-        if (!inTown) out.push({ x: mx, y: my, type: "bank" });
-      }
+    }
     // Tūhura Isle: the tutorial's stamped bank chests + the arrival pier.
     // The stamps live in gameplay/tutorial.js in GAME tiles — halve into map
     // coords. typeof-guarded: tutorial.js evaluates after this file in the
@@ -2438,6 +2467,6 @@ function createWorldFeatures(ctx) {
     dreamGateSite, dreamGatesNear, dreamGateClearAt,
     GRASS_LIKE_B, FOREST_LIKE_B, DESERT_LIKE_B, ROCK_LIKE_B, SWAMP_LIKE_B,
     WATER_LIKE_B, localTierCap, rollTier, villageForMap, villagesNearForMap,
-    poisNearForMap, iconsNearForMap,
+    poisNearForMap, iconsNearForMap, mapWarmQuery,
   };
 }

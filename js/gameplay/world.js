@@ -654,14 +654,35 @@ const _wmRegCells = new Map();      // "cx,cy" → {rivs, roads, villages, pois}
 const _wmRegPending = new Set();
 const WM_REG_CELL = 768;            // map units per cell
 let _wmRegWorker = null;            // null = not started, false = unavailable
-function _wmRegCellFinish(id, rivs, roads, villages, pois, icons) {
-  // villages/POIs/icons are computed in the WORKER too (its features
-  // instance, same seed = identical data): a cold cell's settlement layout
-  // (citygrow accretion) or zone-naming pass can cost SECONDS, and running
-  // it here on cell arrival froze the frame just as badly as the old
-  // synchronous label queries did
-  if (_wmRegCells.size > 300) _wmRegCells.clear();
-  _wmRegCells.set(id, { rivs, roads, villages: villages || [], pois: pois || [], icons: icons || [] });
+// bounded store that never evicts a cell still being assembled (partial) —
+// clearing one mid-flight would orphan its final reply into an empty cell
+function _wmRegStore(id, cell) {
+  if (!_wmRegCells.has(id) && _wmRegCells.size > 300)
+    for (const k of _wmRegCells.keys()) {
+      if (_wmRegCells.size <= 200) break;
+      if (!_wmRegCells.get(k).partial) _wmRegCells.delete(k);
+    }
+  _wmRegCells.set(id, cell);
+}
+// villages/POIs/icons are computed in the WORKER too (its features
+// instance, same seed = identical data): a cold cell's settlement layout
+// (citygrow accretion) or zone-naming pass can cost SECONDS, and running
+// it here on cell arrival froze the frame just as badly as the old
+// synchronous label queries did. Each cell arrives in TWO replies — the
+// quick rivers/roads partial, then the label layers — so the vector
+// overlay never waits behind a cold settlement bake.
+function _wmRegCellFinish(d) {
+  const id = d.region;
+  if (d.partial) {
+    _wmRegStore(id, { rivs: d.rivs || [], roads: d.roads || [],
+      villages: [], pois: [], icons: [], partial: true });
+    return;                          // stays pending until the final reply
+  }
+  const cur = _wmRegCells.get(id) ||
+    { rivs: d.rivs || [], roads: d.roads || [], villages: [], pois: [], icons: [] };
+  cur.villages = d.villages || []; cur.pois = d.pois || []; cur.icons = d.icons || [];
+  cur.partial = false;
+  _wmRegStore(id, cur);
   _wmRegPending.delete(id);
 }
 function _wmRegWorkerEnsure() {
@@ -676,7 +697,7 @@ function _wmRegWorkerEnsure() {
       shopIcon: typeof SHOP_ICON !== "undefined" ? SHOP_ICON : null,
       stationIcon: typeof STATION_ICON !== "undefined" ? STATION_ICON : null,
       shopTypeKeys: typeof SHOP_TYPE_KEYS !== "undefined" ? SHOP_TYPE_KEYS : null });
-    _wmRegWorker.onmessage = e => { const d = e.data; if (d && d.region) _wmRegCellFinish(d.region, d.rivs, d.roads, d.villages, d.pois, d.icons); };
+    _wmRegWorker.onmessage = e => { const d = e.data; if (d && d.region) _wmRegCellFinish(d); };
     _wmRegWorker.onerror = () => { try { _wmRegWorker.terminate(); } catch (e2) { /* dead */ } _wmRegWorker = false; };
   } catch (e) { _wmRegWorker = false; }
   return _wmRegWorker;
@@ -698,15 +719,26 @@ function wmRegionProgressive(x0, y0, x1, y1) {
             missing.push({ id: k, x0: cx * WM_REG_CELL, y0: cy * WM_REG_CELL,
               x1: (cx + 1) * WM_REG_CELL, y1: (cy + 1) * WM_REG_CELL });
           }
-          continue;                                       // arrives via worker
+        } else if (performance.now() - t0 <= 120) {       // no worker: budgeted sync
+          cell = world.mapRegionQuery(cx * WM_REG_CELL, cy * WM_REG_CELL,
+            (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
+          cell.icons = world.iconsNearForMap(cx * WM_REG_CELL, cy * WM_REG_CELL,
+            (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
+          _wmRegStore(k, cell);
         }
-        if (performance.now() - t0 > 120) continue;       // no worker: budgeted sync
-        cell = world.mapRegionQuery(cx * WM_REG_CELL, cy * WM_REG_CELL,
+      }
+      if (!cell || cell.partial) {
+        // the cell's label layers are still off in the worker — fill names,
+        // settlements and icons from whatever THIS thread has already
+        // generated (mapWarmQuery = pure cache reads, instant; play keeps
+        // the area around the player warm). The worker's full cell replaces
+        // these on arrival; dedupe below makes the overlap harmless.
+        const wq = world.mapWarmQuery(cx * WM_REG_CELL, cy * WM_REG_CELL,
           (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
-        cell.icons = world.iconsNearForMap(cx * WM_REG_CELL, cy * WM_REG_CELL,
-          (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
-        if (_wmRegCells.size > 300) _wmRegCells.clear();
-        _wmRegCells.set(k, cell);
+        for (const v of wq.villages) { const vk = v.x + "," + v.y; if (!sV.has(vk)) { sV.add(vk); villages.push(v); } }
+        for (const p of wq.pois) { const pk = p.x + "," + p.y; if (!sP.has(pk)) { sP.add(pk); pois.push(p); } }
+        for (const ic of wq.icons) { const ik = ic.x + "," + ic.y + ":" + ic.type; if (!sI.has(ik)) { sI.add(ik); icons.push(ic); } }
+        if (!cell) continue;
       }
       for (const r of cell.rivs) if (!sRv.has(r)) { sRv.add(r); rivs.push(r); }
       for (const r of cell.roads) if (!sRd.has(r.key)) { sRd.add(r.key); roads.push(r); }
@@ -727,7 +759,14 @@ function wmCellsNear(x0, y0, x1, y1, kind) {
   for (let cy = Math.floor(y0 / WM_REG_CELL); cy <= Math.floor(y1 / WM_REG_CELL); cy++)
     for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++) {
       const c = _wmRegCells.get(cx + "," + cy);
-      if (c && c[kind]) out.push(...c[kind]);
+      if (c && !c.partial) { if (c[kind]) out.push(...c[kind]); }
+      else {
+        // cell still in the worker — answer from this thread's warm caches
+        // (never generates), so hovering near the player names things now
+        const wq = world.mapWarmQuery(cx * WM_REG_CELL, cy * WM_REG_CELL,
+          (cx + 1) * WM_REG_CELL, (cy + 1) * WM_REG_CELL);
+        if (wq[kind]) out.push(...wq[kind]);
+      }
     }
   return out;
 }
@@ -748,8 +787,10 @@ function wmScheduleDraw() {
 // still pending in the road worker
 function wmRegionReady(x0, y0, x1, y1) {
   for (let cy = Math.floor(y0 / WM_REG_CELL); cy <= Math.floor(y1 / WM_REG_CELL); cy++)
-    for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++)
-      if (!_wmRegCells.has(cx + "," + cy)) return false;
+    for (let cx = Math.floor(x0 / WM_REG_CELL); cx <= Math.floor(x1 / WM_REG_CELL); cx++) {
+      const c = _wmRegCells.get(cx + "," + cy);
+      if (!c || c.partial) return false;   // partial = labels still in the worker
+    }
   return true;
 }
 
@@ -1260,13 +1301,14 @@ function _wmBakeTick() {
     const cx = +k.slice(0, ci), cy = +k.slice(ci + 1);
     const x0 = cx * CSH, y0 = cy * CSH;
     let q;
-    if (Math.max(Math.abs((cx + 0.5) * world.CHUNK - player.x),
-                 Math.abs((cy + 0.5) * world.CHUNK - player.y)) <= world.CHUNK * 8) {
-      // the player's generated neighbourhood: rivers/roads/villages are
-      // already warm in THIS thread's caches (chunk gen + the road-warm
-      // worker), so the shared query is a cheap cache read — bake now.
-      // This is the markSeen/minimap path: fresh exploration backfills
-      // fast instead of waiting for the region worker's cold recompute.
+    if (world.chunks.has(k)) {
+      // the REAL game chunk was generated this session, and generating it
+      // ran these exact river/road/village/POI queries — so the shared
+      // query here is guaranteed cache reads, bake now. (A plain distance
+      // check stood here first and hit a 2s cold river-trace when a nearby
+      // chunk's caches weren't actually warm yet.) This is the markSeen /
+      // minimap path: fresh exploration backfills fast instead of waiting
+      // for the region worker's cold recompute.
       q = world.mapRegionQuery(x0, y0, x0 + CSH, y0 + CSH);
     } else {
       // far territory (map browsing): request the chunk's region cells and

@@ -48,7 +48,7 @@ function genWorld() {
     S, elevation, latitudeAt, humidity, temperature, biomeAtTile,
   } = terrain;
   const {
-    personalityAt, villagesNearForMap, poisNearForMap, iconsNearForMap, villagesNear,
+    personalityAt, villagesNearForMap, poisNearForMap, iconsNearForMap, mapWarmQuery, villagesNear,
     riverSourceAt, riverDoors, riverFlowAt, roadNearPt, riversNear, roadsNear, roadsNearCached,
   } = features;
   const {
@@ -481,6 +481,7 @@ function genWorld() {
     villagesNearForMap,
     poisNearForMap,
     iconsNearForMap,
+    mapWarmQuery,
     BIOME_NAMES,
     riverSourceAt,
     riverFlowAt,
