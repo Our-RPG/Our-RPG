@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v27"; // v27: shell (js/dist/css/html) now stale-while-revalidate — instant repeat loads, update check runs in the background instead of gating the load
+const CACHE_VERSION = "taiao-v28"; // v28: world-map never-block rework — bundle + raw worker files (roadworker/features) must refresh together or region cells mismatch the new WORLDGEN_SIG
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),
