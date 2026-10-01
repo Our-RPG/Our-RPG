@@ -424,7 +424,7 @@ function npcHealthProbe() {
 // Per-frame (throttled): track NPCs entering/leaving earshot (chat-bar state,
 // talksFirst greetings), reap the instances of those who left.
 function npcChatTick() {
-  if (!AI_NPC_ENABLED && !NPC_RETRIEVAL_ENABLED) return;   // fully canned
+  if (!AI_NPC_ENABLED && !NPC_RETRIEVAL_ENABLED && !NPC_ENGINE_ENABLED) return;   // fully canned
   if (performance.now() - NPC_CHAT._lastScan < NPC_CHAT.scanMs) return;
   NPC_CHAT._lastScan = performance.now();
 
@@ -536,9 +536,10 @@ function npcGreet(npc, cid) {
     const last0 = NPC_CHAT.greetedAt.get(cid) || 0;
     if (now - last0 < 90000) return;
     if (NPC_CHAT.pending.has(cid)) return;
-    if (NPCR.state !== "ready") {
-      // no working bank (fresh clone, offline, load failed, …) — still
-      // greet from the starter pool rather than staying silent forever
+    if (!npcEngineAvailable() && NPCR.state !== "ready") {
+      // no engine session and no working local bank (fresh clone, offline,
+      // load failed, …) — still greet from the starter pool rather than
+      // staying silent forever
       npcRetrievalWarm();
       NPC_CHAT.greetedAt.set(cid, now);
       npcrSayStreaming(npc, npcStarterReply(npc, null));
@@ -546,7 +547,7 @@ function npcGreet(npc, cid) {
     }
     NPC_CHAT.greetedAt.set(cid, now);
     NPC_CHAT.pending.add(cid);
-    npcRetrieveReply(npc, null)
+    npcAnyReply(npc, null)
       .then(line => npcrSayStreaming(npc, line || npcStarterReply(npc, null)))
       .catch(() => npcrSayStreaming(npc, npcStarterReply(npc, null)))
       .finally(() => NPC_CHAT.pending.delete(cid));
@@ -594,7 +595,7 @@ function npcBroadcast(text) {
         npcrSayStreaming(npc, line);
         if (typeof Tutorial !== "undefined" && Tutorial.onChatReply) Tutorial.onChatReply(npc, line);
       };
-      npcRetrieveReply(npc, text)
+      npcAnyReply(npc, text)
         .then(line => new Promise(res => setTimeout(() => res(line), delay)))
         .then(line => say(line || npcStarterReply(npc, text)))
         .catch(() => say(npcStarterReply(npc, text)))

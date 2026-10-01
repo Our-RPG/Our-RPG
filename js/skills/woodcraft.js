@@ -12,7 +12,7 @@
   if (typeof ITEMS === "undefined" || typeof RECIPES === "undefined" || typeof defineIcon !== "function") return;
   const TV = typeof tierVal === "function" ? tierVal : (i => 5 + i * 5);
   const TX = typeof tierXp === "function" ? tierXp : (i, b) => Math.round(b * (1 + i * 0.5));
-  const woodName = d => (d.name.replace(/\s*(logs|rākau)$/i, "").trim() || "Rough");
+  const woodName = d => (d.name.replace(/\s*logs$/i, "").trim() || "Rough");
   const a = w => (/^[aeiou]/i.test(w) ? "an" : "a"); // article
   const cat = c => (RECIPES[c] = RECIPES[c] || []);
   const ST_FL = ["fletchers_bench", "workbench"], ST_CP = ["workbench"], ST_TM = ["toolsmith", "anvil", "workbench"];

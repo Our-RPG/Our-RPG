@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v26"; // v26: ship game workers + lua wasm (purge poisoned HTML cache entries)
+const CACHE_VERSION = "taiao-v27"; // v27: shell (js/dist/css/html) now stale-while-revalidate — instant repeat loads, update check runs in the background instead of gating the load
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),
@@ -141,33 +141,36 @@ self.addEventListener("fetch", e => {
   if (matchAny(path, NETWORK_FIRST)) {
     e.respondWith((async () => {
       const cache = await caches.open(CACHE_VERSION);
-      try {
-        // cache:"no-cache" forces revalidation with the server — without it the
-        // browser's heuristic HTTP cache (python http.server sends no
-        // Cache-Control) can hand back a STALE bundle.js for hours after a
-        // rebuild, so "network-first" silently wasn't. Revalidation is a cheap
-        // conditional GET (304 when unchanged).
-        const res = await fetch(req, { cache: "no-cache" });
-        // refresh the offline copy OUT-OF-BAND (waitUntil), and only when the
-        // file actually changed: unconditionally re-putting the ~5MB bundle on
-        // every reload was a Cache Storage write storm that dragged the next
-        // navigation's start down by over a second.
+      const hit = await cache.match(req);
+      // cache:"no-cache" forces revalidation with the server — without it the
+      // browser's heuristic HTTP cache (python http.server sends no
+      // Cache-Control) can hand back a STALE bundle.js for hours after a
+      // rebuild. Revalidation is a cheap conditional GET (304 when unchanged).
+      const revalidate = fetch(req, { cache: "no-cache" }).then(res => {
         if (res.ok) {
-          const resClone = res.clone();
-          e.waitUntil((async () => {
-            const hit = await cache.match(req);
-            const same = hit &&
-              hit.headers.get("last-modified") === resClone.headers.get("last-modified") &&
-              hit.headers.get("content-length") === resClone.headers.get("content-length");
-            if (!same) await cache.put(req, resClone);
-          })().catch(() => { /* offline copy refresh is best-effort */ }));
+          // only re-put when the file actually changed: unconditionally
+          // rewriting the ~5MB bundle on every load was a Cache Storage
+          // write storm that dragged the next navigation's start down by
+          // over a second.
+          const same = hit &&
+            hit.headers.get("last-modified") === res.headers.get("last-modified") &&
+            hit.headers.get("content-length") === res.headers.get("content-length");
+          if (!same) e.waitUntil(cache.put(req, res.clone()).catch(() => {}));
         }
         return res;
-      } catch (err) {
-        const hit = await cache.match(req);
-        if (hit) return hit;
-        throw err;
+      }).catch(() => null);
+      // Stale-while-revalidate: a cached copy is served INSTANTLY — only the
+      // first (cold) load ever waits on the network. The revalidation fetch
+      // above still runs, out-of-band, so edits/updates land on the next
+      // load instead of gating this one. This is the "mostly just checking
+      // for updates" behaviour: once cached, loads never block on the network.
+      if (hit) {
+        e.waitUntil(revalidate);
+        return hit;
       }
+      const res = await revalidate;
+      if (res) return res;
+      throw new Error(`offline and no cached copy for ${path}`);
     })());
   }
 });

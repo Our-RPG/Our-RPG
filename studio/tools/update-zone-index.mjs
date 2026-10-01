@@ -8,7 +8,12 @@
 // studio's Roster catalog) derives it, so the static NPC pages stay in sync
 // as new zones get baked.
 //
-//   node studio/tools/update-zone-index.mjs [--dry]
+//   node studio/tools/update-zone-index.mjs [--dry] [--force]
+//
+// --force   skip the sanity-check abort below (still prints the overlap
+//           %) — for a deliberate, world-wide rename (e.g. the settlement
+//           name-pool swap in js/world/features.js NAME_A/NAME_B), which
+//           legitimately drops the overlap near zero on every affected zone.
 //
 // The id derivation MUST mirror js/sprites/... + roster.js's listNpcs()
 // (roster.js:63-77) and util.js's slug() (util.js:125) EXACTLY, or the
@@ -112,7 +117,7 @@ function buildZonenpc() {
 }
 
 // ---------- sanity check: zone 0,0 must reproduce the existing ids ----------
-function sanityCheck(newAll, oldZonenpc) {
+function sanityCheck(newAll, oldZonenpc, force) {
   const newZ00 = new Set(newAll.filter(e => e.id.endsWith("$0.0")).map(e => e.id));
   const oldZ00 = new Set((oldZonenpc || []).filter(e => e && typeof e.id === "string" && e.id.endsWith("$0.0")).map(e => e.id));
   if (!oldZ00.size) {
@@ -124,8 +129,13 @@ function sanityCheck(newAll, oldZonenpc) {
   const pct = (hit / oldZ00.size) * 100;
   console.log(`sanity check — zone 0,0 id overlap: ${hit}/${oldZ00.size} (${pct.toFixed(2)}%)`);
   if (pct < 99) {
+    if (force) {
+      console.warn(`WARNING: zone-0,0 id overlap ${pct.toFixed(2)}% is below the 99% correctness threshold — --force set, continuing anyway.`);
+      return pct;
+    }
     console.error(`ABORT: zone-0,0 id overlap ${pct.toFixed(2)}% is below the 99% correctness threshold —`);
     console.error("the spriteSnake derivation has drifted from what's currently shipped. Not writing items-index.json.");
+    console.error("(pass --force to proceed anyway, e.g. after a deliberate world-wide rename)");
     process.exit(1);
   }
   return pct;
@@ -134,6 +144,7 @@ function sanityCheck(newAll, oldZonenpc) {
 // ---------- main ----------
 function main() {
   const dry = process.argv.slice(2).includes("--dry");
+  const force = process.argv.slice(2).includes("--force");
   const raw = fs.readFileSync(IDX_PATH, "utf8");
   const idx = JSON.parse(raw);
   const oldZonenpc = Array.isArray(idx.zonenpc) ? idx.zonenpc : [];
@@ -144,7 +155,7 @@ function main() {
   for (const z of perZone) console.log(`  zone ${z.zx},${z.zy}: ${z.count} emitted` + (z.skipped ? ` (${z.skipped} skipped)` : "") + ` / ${z.total} in manifest`);
   console.log(`total: ${all.length} zonenpc entr${all.length === 1 ? "y" : "ies"} across ${perZone.length} zone(s)`);
 
-  const pct = sanityCheck(all, oldZonenpc);
+  const pct = sanityCheck(all, oldZonenpc, force);
 
   const oldIds = new Set(oldZonenpc.map(e => e && e.id).filter(Boolean));
   const newIds = new Set(all.map(e => e.id));

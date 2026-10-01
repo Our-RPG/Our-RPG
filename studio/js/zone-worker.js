@@ -18,7 +18,7 @@ function boot(d) {
   self.ICELL = d.icell;
   self.WORLDGEN_SIG = d.gensig;
   // paths are relative to THIS worker (/studio/js/) → the game lives at /js/
-  importScripts("../../js/data.js", "../../js/world/terrain.js", "../../js/world/citygrow.js", "../../js/world/features.js");
+  importScripts("../../js/data.js", "../../js/world/terrain.js", "../../js/world/citygrow.js", "../../js/world/labgen.js", "../../js/world/features.js");
   terrain = createWorldTerrain();
   features = createWorldFeatures(terrain);
   // the sealed special locations are never baked into the main map (they live in

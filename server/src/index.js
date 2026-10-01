@@ -13,6 +13,7 @@ import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
 import * as gen from "./gen.js";
 import * as profile from "./profile.js";
+import * as npc from "./npc.js";
 import * as koha from "./koha.js";
 import * as admin from "./admin.js";
 import { buildAndPostDigest } from "./digest.js";
@@ -74,6 +75,8 @@ const ROUTES = {
   "GET /api/gen/mine":                  gen.mine,
   "GET /api/gen/job":                   gen.getResult,
   "POST /api/gen/delete":               gen.remove,
+
+  "POST /api/npc/chat":                 npc.chat,
 
   "POST /api/profile/gallery/add":      profile.add,
   "GET /api/profile/gallery":           profile.mine,

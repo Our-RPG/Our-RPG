@@ -193,13 +193,15 @@ input, textarea { user-select: text; -webkit-user-select: text; -moz-user-select
 #statbar { padding: 8px 10px 4px; }
 #cmblevel { color: #ffe97a; font-size: 11px; margin: 2px 0 4px 2px; }
 
-#terrainbar { padding: 4px 10px 6px; border-bottom: 1px solid #38304a; font-size: 11px; }
-.tbrow { display: flex; align-items: baseline; gap: 4px; line-height: 1.7; }
-.tblabel { color: #7a6e92; min-width: 26px; }
-.tbrow span:not(.tblabel) { color: #c8bedd; flex: 1; }
-.tbrow span.tbmed { flex: 2; }   /* span.x beats span:not() — same specificity, later wins */
-.tbrow span.tbwide { flex: 3; }
-.tbrow span.tbfit { flex: 0 0 auto; white-space: nowrap; }   /* size to content (Sky/Wx); the tbwide neighbour absorbs the slack */
+/* 3 label/value pairs per row, laid out as one grid so every row's label and
+   value columns land at the same x regardless of how many pairs that row
+   uses (short rows just leave the trailing pair's cells empty — see the
+   padding spans in index.html). display:contents unwraps .tbrow so its
+   spans become direct grid items of #terrainbar itself. */
+#terrainbar { display: grid; grid-template-columns: repeat(3, auto 1fr); align-items: baseline; column-gap: 4px; padding: 4px 10px 6px; border-bottom: 1px solid #38304a; font-size: 11px; line-height: 1.7; }
+.tbrow { display: contents; }
+.tblabel { color: #7a6e92; }
+.tbrow span:not(.tblabel) { color: #c8bedd; white-space: nowrap; }
 .statline { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .statline > span:first-child { width: 22px; font-weight: bold; color: #ffb3b3; }
 .bar { position: relative; flex: 1; height: 16px; background: #3a1010; border: 1px solid #000; }

@@ -20,7 +20,7 @@ onmessage = e => {
     self.PCELL = d.pcell;
     self.ICELL = d.icell;
     self.WORLDGEN_SIG = d.gensig; // features.js keys the name-registry store by it
-    importScripts("../data.js", "terrain.js", "citygrow.js", "features.js");
+    importScripts("../data.js", "terrain.js", "citygrow.js", "labgen.js", "features.js");
     features = createWorldFeatures(createWorldTerrain());
     return;
   }

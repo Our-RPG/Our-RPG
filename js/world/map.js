@@ -1382,8 +1382,11 @@ function createWorldMap(ctx) {
     // to be frozen into IDB forever for whichever chunks baked first each
     // sig — the recurring "gradient rectangle over Newhaven north"): return
     // it uncached so the next frame re-renders, properly tiled, once the
-    // image has decoded.
-    if (bImg && !(bImg.complete && bImg.naturalWidth > 0)) return canvas;
+    // image has decoded. "Ready" means the atlas is BOTH present AND decoded —
+    // a missing/unassigned IMGS['b'] (falsy bImg) also yields an all-gradient
+    // bake and must likewise stay uncached, or it freezes in exactly the same
+    // way the decode race did.
+    if (!(bImg && bImg.complete && bImg.naturalWidth > 0)) return canvas;
     _mapCacheSet(key, canvas);
     persistMapImage(key, canvas);
     return canvas;

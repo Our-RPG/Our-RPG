@@ -105,6 +105,7 @@ js/gameplay/locks.js
 js/gameplay/world.js
 js/gameplay/input.js
 js/gameplay/npc-retrieval.js
+js/gameplay/npc-engine-client.js
 js/gameplay/npc-chat.js
 js/gameplay/chant.js
 js/main/ui.js
