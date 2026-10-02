@@ -599,6 +599,12 @@ function createWorldMap(ctx) {
   // persisted bakes (chunk images, mip tiles, macro tiles) on the next
   // build. The map and minimap can never show stale terrain; no manual
   // bump, ever. Stale generations are swept below by enumeration.
+  // 2026-10-02: this comment exists to force ONE map-store re-key (any byte
+  // change to this file moves MAPBAKE_SIG): the torn-v29 deploy window let
+  // clients running a mid-edit bundle persist broken bakes/mip tiles under
+  // the then-current sig, and no sw bump can clear IndexedDB. Re-keying
+  // sweeps them; map.js is NOT in GEN_FILES, so chunk data, zone names and
+  // roads stay cached — only the map images re-bake (streamed, no freezes).
   const _MAPDB = 'ioe-mapimg-' + (typeof MAPBAKE_SIG !== 'undefined' ? MAPBAKE_SIG : 'dev');
   function _sweepStaleIDB(prefix, keep) {   // (same helper as chunks.js — files are standalone)
     try {

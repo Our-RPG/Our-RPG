@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v30"; // v30: cache-bust past a torn v29 bundle — two deploys shared v29 (multiplayer round, then the finished wmBakePrioritize map fix), so clients that cached the first kept serving a mid-edit world.js and Newhaven's map chunks fell back to the vista stand-in. Rule reaffirmed: EVERY deploy that changes the bundle bumps this, even same-day.
+const CACHE_VERSION = "taiao-v31"; // v31: MAPBAKE_SIG re-key (map.js comment edit) — torn-v29 clients persisted broken map bakes/mips into IDB under the final sig, which v30 couldn't clear (sw bumps never touch IndexedDB); the re-key sweeps the poisoned store and the map re-bakes streamed.
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),
