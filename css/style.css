@@ -336,9 +336,6 @@ input, textarea { user-select: text; -webkit-user-select: text; -moz-user-select
 #panel-help p, #panel-help ul { margin-bottom: 8px; line-height: 1.4; }
 #panel-help ul { padding-left: 16px; }
 #panel-help li { margin-bottom: 3px; }
-.credits { color: #77689a; font-size: 11px; }
-#resetbtn { background: #5e2430; color: #ffb3b3; border: 1px solid #a04; padding: 5px 10px; cursor: pointer; margin: 6px 0; }
-#exportbtn, #importbtn { background: #2a3d5e; color: #b3d4ff; border: 1px solid #3a68a4; padding: 5px 10px; cursor: pointer; margin: 6px 6px 0 0; }
 
 #panel-shop h3, #panel-bank h3, #panel-craft h3 { color: #ffd75e; margin-bottom: 8px; }
 .hint { color: #a99cc4; font-size: 11px; margin: 8px 0 6px; line-height: 1.3; }

@@ -16,7 +16,7 @@ const SAVE_KEY = DEV_MODE ? "taiao_save_cheat_v1" : NORMAL_SAVE_KEY;
 // Callers (2):
 //  storage.js:80,100
 const OLD_KEY = "taiao_save_v1";
-let resetting = false; // doReset writes a modified save; don't clobber it on unload
+let resetting = false; // importSaveFromText writes a modified save; don't clobber it on unload
 let gameReady = false;  // guards against beforeunload/autosave firing before init() has loaded/created a player
 // Slot names retired by the 30-slot anatomical equip redesign (2026-09) —
 // "weapon"/"shield" survived unchanged so aren't here. A save written before
@@ -207,45 +207,20 @@ function saveGame() {
   try { if (world && world.flushChunks) world.flushChunks(); } catch (e) {}
 }
 
-// ---------- save file export / import (real files on disk, independent of browser storage) ----------
-// Callers (1):
-//  storage.js:47
-function exportSave() {
-  const data = buildSaveData();
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  const date = new Date().toISOString().slice(0, 10);
-  a.href = url;
-  a.download = `our-rpg-save-${date}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  log("Save exported to your downloads.", "sys");
-}
-// Callers (1):
-//  storage.js:54
+// ---------- save import (account cloud restore, js/net/savesync.js) ----------
+// Everything now saves to the player's account (SaveSync auto-uploads on
+// login, every 5 minutes, and on tab hide/logout); this is the shared
+// validate -> confirm -> reload path SaveSync.restore() calls after pulling
+// a vaulted save blob down. No manual file export/import UI anymore.
 function importSaveFromText(text) {
   let d;
-  try { d = JSON.parse(text); } catch (e) { alert("That file isn't a valid save (bad JSON)."); return; }
-  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That file doesn't look like a save from this game."); return; }
+  try { d = JSON.parse(text); } catch (e) { alert("That save isn't valid (bad JSON)."); return; }
+  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That doesn't look like a save from this game."); return; }
   if (!confirm("Load this save? Your current in-browser character will be overwritten.")) return;
   resetting = true; // prevent beforeunload autosave from clobbering the imported data before reload
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) { alert("Couldn't write the save to browser storage: " + e.message); resetting = false; return; }
   location.reload();
 }
-document.getElementById("exportbtn").onclick = e => { e.stopPropagation(); exportSave(); };
-document.getElementById("importbtn").onclick = e => { e.stopPropagation(); document.getElementById("importfile").click(); };
-document.getElementById("importfile").onchange = e => {
-  const file = e.target.files[0];
-  e.target.value = ""; // allow re-selecting the same file later
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => importSaveFromText(reader.result);
-  reader.onerror = () => alert("Couldn't read that file.");
-  reader.readAsText(file);
-};
 // ---------- Tūhura Isle relocation (2026-09-18) ----------
 // The tutorial isle moved from game (-760,1000) to (-6168,1736) — a far
 // open-sea basin — so it exists as a SEPARATE map instead of sitting in the
@@ -533,79 +508,6 @@ function migrateBankNets() {
   }
   player.bank = player.banks.main;
 }
-// starter kit as raw save data (mirrors newPlayer)
-// Callers (1):
-//  storage.js:123
-function starterInv() {
-  const inv = new Array(32).fill(null);
-  [["coins", 40], ["flatbread", 3], ["axe_iron", 1], ["pickaxe_iron", 1], ["fishing_rod", 1], ["shortsword_iron", 1]]
-    .forEach(([id, qty], i) => { inv[i] = { id, qty }; });
-  return inv;
-}
-// Callers (4):
-//  storage.js:7,139,142,145
-function doReset(resetMap, resetChar) {
-  // a split player (gameplay/split.js) must start over as ONE self — merge the
-  // echoes back first (xp conserved) so the saved state, and the reborn spark of
-  // light on Tūhura, is a single body, never several.
-  if (typeof Split !== "undefined" && Split.mergeAll) Split.mergeAll();
-  saveGame();
-  resetting = true;
-  const d = JSON.parse(localStorage.getItem(SAVE_KEY));
-  d.bodies = []; d.num = 1; d.queue = []; // defensive: no residual echoes survive a reset
-  if (resetMap) {
-    d.seen = [];
-  }
-  if (resetChar) {
-    d.skills = freshSkills();
-    d.inv = starterInv();
-    d.equip = validateEquip(null);
-    d.bank = [];
-    d.banks = { main: [] };
-    d.bankAccounts = {}; // a fresh character signs up at a main branch again
-    d.hp = 10;
-    d.style = "melee";
-    d.stink = { fl: {} }; // fresh face, no reek (stink metre, gameplay/stink.js)
-    d.mastery = {}; d.jobs = []; d.prov = {}; d.provSeq = 1;
-    d.kills = {};
-    d.reputation = 0; d.contractsDone = [];
-    d.respawn = null; // fresh characters wake in Newhaven again
-    d.tutorial = null; // …and a reset character does the isle over (below)
-  }
-  // a RESET CHARACTER (either mode) wakes on Tūhura Isle for the tutorial
-  // like any other fresh face (gameplay/tutorial.js); a map-only reset keeps
-  // the character and returns to Newhaven as its ? tab label promises
-  if (resetChar && typeof Tutorial !== "undefined") {
-    d.x = Tutorial.START.x;
-    d.y = Tutorial.START.y;
-    d.respawn = { x: d.x, y: d.y, name: "Tūhura Isle" };
-    d.tutorial = { seen: {}, given: {}, welcomed: 0, graduated: 0 };
-    d.inv = new Array(48).fill(null); // bare pockets — the keepers provide
-    // wash ashore as an UNFORMED SPARK again — no body until the Guide's lesson
-    // (render3d draws the orb while Tutorial.active() && player.character==null)
-    d.character = null; d.outfit = "Idle";
-  } else {
-    d.x = world.playerStart.x;
-    d.y = world.playerStart.y;
-  }
-  localStorage.setItem(SAVE_KEY, JSON.stringify(d));
-  location.reload();
-}
-document.getElementById("resetbtn").onclick = e => {
-  e.stopPropagation(); // the document click-away handler would instantly close the menu
-  showCtx([
-    { label: "Reset exploration (return to Newhaven)", fn: () => {
-      if (confirm("Clear your explored map and return to Newhaven? Your character is kept.")) doReset(true, false);
-    }},
-    { label: "Reset character (keep world)", fn: () => {
-      if (confirm("Reset your character? Levels return to default and your inventory and bank are cleared. The world is kept.")) doReset(false, true);
-    }},
-    { label: "Reset both (fresh start)", fn: () => {
-      if (confirm("Completely fresh start? Your character and explored map are reset.")) doReset(true, true);
-    }},
-    { label: "Cancel", fn: () => {} },
-  ], e.clientX, e.clientY);
-};
 window.addEventListener("beforeunload", saveGame);
 
 // ---------- init ----------
