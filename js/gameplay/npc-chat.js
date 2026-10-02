@@ -487,7 +487,12 @@ function npcChatTick() {
   // legacy AI/retrieval modes, or offline/tutorial play (keeps Ravenna's
   // Sky Knoll typed-chat gate reachable pre-account).
   const liveChatOn = typeof Live !== "undefined" && Live.chatOn && Live.chatOn();
-  updateChatBar((AI_NPC_ENABLED || NPC_RETRIEVAL_ENABLED || !liveChatOn) ? near.length : 0);
+  // suppressed while a scripted tutor conversation (gameplay/tutorial.js) is
+  // open — its own reply list docks in this same corner; Ravenna's Sky Knoll
+  // typed-chat gate is unaffected (that's ambient proximity chat, not a
+  // Tutorial.talk() beat)
+  const tutDlgOpen = typeof Tutorial !== "undefined" && Tutorial.dialogueOpen && Tutorial.dialogueOpen();
+  updateChatBar(tutDlgOpen ? 0 : (AI_NPC_ENABLED || NPC_RETRIEVAL_ENABLED || !liveChatOn) ? near.length : 0);
 }
 
 // NPC opens the conversation when you wander up (once per ~90s per NPC).

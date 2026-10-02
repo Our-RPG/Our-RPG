@@ -1934,12 +1934,16 @@ const Tutorial = (() => {
   }
 
   // ---------- dialogue UI ----------
-  // No panel at all (user req): the keeper's one spoken line appears ONLY as
-  // an overhead speech bubble (npcSay), just like any other NPC in the game —
-  // the only on-screen element here is a short plain-text list of the
-  // player's replies, bottom-centre, no card/box chrome. Clicking a response
-  // advances the talk; a plain response on the last beat finishes (grant +
-  // staged-sky roll). See the DLG note.
+  // NO popup/card/panel (user req): this reads as part of the SAME chat UI the
+  // rest of the game uses, not a bespoke tutorial-only box. The keeper's line
+  // appears only as an overhead speech bubble (npcSay — mirrors into #log like
+  // any NPC); the player's replies are borderless text options docked exactly
+  // where js/net/live-ui.js's #livechat bar sits (bottom-left, below #log),
+  // styled like #log's own .msg lines (css/style.css) rather than boxed
+  // buttons. While open, the real chat bars are suppressed (dialogueOpen()
+  // export, read by live-ui.js's chatFieldOn and npc-chat.js's npcChatTick) so
+  // there's never a redundant "press Enter to chat" bar competing for the
+  // same corner of the screen.
   let el = null, cur = null, curNpc = null, beat = 0;
   function liveNpc(id) {
     const list = (typeof world !== "undefined" && world && world.npcs) ||
@@ -1950,18 +1954,13 @@ const Tutorial = (() => {
     if (el) return;
     el = document.createElement("div");
     el.id = "tutdlg";
-    // NO GUI PANEL (user req): the keeper's line is spoken entirely through
-    // the overhead speech bubble (npcSay, called from render() below — it
-    // also mirrors the line into the sidebar log, same as any other NPC). This
-    // element only catches stray clicks while picking a response (so you can't
-    // accidentally walk off mid-conversation) and hosts the plain-text reply
-    // list itself — no card, no name/role header, no box chrome.
-    el.style.cssText = "display:none;position:fixed;inset:0;z-index:9000;pointer-events:auto;" +
-      "align-items:flex-end;justify-content:center;font:16px OpenDyslexic, Verdana, sans-serif;";
-    el.innerHTML = `<div id="tutdlg-r" style="display:flex;flex-direction:column;align-items:center;gap:6px;margin:0 0 10vh;"></div>`;
+    // left:10px / bottom:8px matches #livechat's dock exactly (live-ui.js) —
+    // same corner of the screen as the game's own chat bar. No full-screen
+    // catcher: like every other chat/quest UI here, it never blocks the rest
+    // of the screen.
+    el.style.cssText = "display:none;position:fixed;left:10px;bottom:8px;width:72%;max-width:860px;" +
+      "z-index:45;flex-direction:column;gap:2px;font:12px OpenDyslexic, Verdana, sans-serif;";
     document.body.appendChild(el);
-    // clicks on the transparent catcher do nothing (no accidental close); the
-    // response text swallows its own clicks
     el.addEventListener("mousedown", e => e.stopPropagation());
     el.addEventListener("click", e => e.stopPropagation());
     document.addEventListener("keydown", e => {
@@ -2022,7 +2021,11 @@ const Tutorial = (() => {
   function pick(r) {
     if (!cur) return;
     const label = subst(typeof r === "string" ? r : r.t);
-    if (typeof log === "function") log(`You: ${label}`, "sys");
+    // "Player" literally — matching the game's own chat (live-ui.js logs the
+    // account's real name; a spark of light on Tūhura Isle has no name yet,
+    // and it floats over the player's own head too, like real chat does
+    if (typeof log === "function") log(`Player: ${label}`, "sys");
+    if (typeof playerSay === "function") { try { playerSay(label); } catch (e) { /* no-op off-screen */ } }
     if (r && typeof r === "object") {
       if (r.end) { close(); return; }
       if (r.finish) { finish(); return; }
@@ -2084,20 +2087,23 @@ const Tutorial = (() => {
     // separate text panel to duplicate it into (the Goals tab covers the
     // itinerary the old first-beat panel used to show here)
     if (curNpc && typeof npcSay === "function") { try { npcSay(curNpc, line); } catch (e) { /* no live npc */ } }
-    const row = document.getElementById("tutdlg-r");
-    row.innerHTML = "";
+    el.innerHTML = "";
     (b.r || []).forEach((r, i) => {
       const label = subst(typeof r === "string" ? r : r.t);
       const isAct = !!(r && typeof r === "object" && r.act);
       const btn = document.createElement("button");
       btn.textContent = `${i + 1}. ${label}`;
-      btn.style.cssText = "background:none;border:none;padding:4px 12px;cursor:pointer;font:inherit;" +
-        "text-shadow:0 1px 5px rgba(0,0,0,.95),0 0 12px rgba(0,0,0,.7);" +
-        (isAct ? "color:#9fe8c0;" : "color:#eaf1ff;");
-      btn.onmouseenter = () => (btn.style.color = isAct ? "#c8ffdf" : "#ffe9a8");
-      btn.onmouseleave = () => (btn.style.color = isAct ? "#9fe8c0" : "#eaf1ff");
+      // matches css/style.css's #log .msg (borderless, left-aligned, the same
+      // dark 4-direction text-shadow outline so it reads over any terrain) —
+      // act options tint like .msg.xp, plain ones like .msg.chat b
+      btn.style.cssText = "display:block;width:100%;text-align:left;background:none;border:none;" +
+        "padding:1px 0;cursor:pointer;font:inherit;" +
+        "text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 3px #000;" +
+        (isAct ? "color:#8ff08f;" : "color:#a8ffc9;");
+      btn.onmouseenter = () => (btn.style.color = isAct ? "#b8ffb8" : "#ffe9a8");
+      btn.onmouseleave = () => (btn.style.color = isAct ? "#8ff08f" : "#a8ffc9");
       btn.onclick = e => { e.stopPropagation(); pick(r); };
-      row.appendChild(btn);
+      el.appendChild(btn);
     });
   }
 
@@ -2355,6 +2361,7 @@ const Tutorial = (() => {
     skillVisible, riverFlow, tick, onCraft, anvilRecipes,
     villageHome, villageLamps, offDutyLine, villageBed, tutHouseUpperDecor,
     sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, onApproachArrive, tickEscort,
+    dialogueOpen: isOpen,
     onGather, onWash, onBank, onKill, onChant,
     onQueue, onBrace, onStoke, onMerge, onChatReply,
     onHarvest, onTend, onEquip, onPickup, onOutOfArrows, keeperMixIdx };
