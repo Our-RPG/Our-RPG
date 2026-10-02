@@ -305,6 +305,7 @@ tr.tf-controls input, tr.tf-controls select { font-size: .76rem; padding: .22rem
 .banner { border-radius: var(--radius-sm); padding: .6rem .8rem; margin-bottom: 1rem; font-size: .88rem; border: 1px solid var(--line-2); }
 .banner.warn { background: rgba(255,180,84,.07); border-color: rgba(255,180,84,.35); color: #ffcf9c; }
 .banner.info { background: rgba(62,198,192,.07); border-color: rgba(62,198,192,.3); color: #bfe9e4; }
+.banner.ok { background: rgba(86,227,159,.07); border-color: rgba(86,227,159,.3); color: #b6f0d2; }
 .mono { font-family: var(--mono); font-size: .82rem; }
 .tagline { color: var(--ink-dim); }
 .sectitle { display: flex; align-items: center; justify-content: space-between; margin-bottom: .6rem; }
@@ -312,6 +313,9 @@ tr.tf-controls input, tr.tf-controls select { font-size: .76rem; padding: .22rem
   font-family: var(--mono); font-size: .62rem; letter-spacing: .1em; text-transform: uppercase;
   padding: .12rem .4rem; border-radius: 2px; background: var(--bg-3); color: var(--ink-dim);
 }
+.badge.ok { background: rgba(86,227,159,.14); color: #8ff0c0; }
+.badge.info { background: rgba(62,198,192,.14); color: #bfe9e4; }
+.badge.warn { background: rgba(255,180,84,.14); color: #ffcf9c; }
 .triglist { display: flex; flex-direction: column; gap: .4rem; }
 .trig { display: grid; grid-template-columns: 1fr 1fr auto; gap: .4rem; align-items: center; }
 .droprow { display: grid; grid-template-columns: 1.5fr 1fr 1fr 1.2fr; gap: .6rem; align-items: start; padding: .45rem 0; border-top: 1px solid var(--line); }

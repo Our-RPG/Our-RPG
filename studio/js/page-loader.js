@@ -152,6 +152,7 @@
   "../js/pages/zones.js",
   "../js/pages/quests.js",
   "../js/pages/ideas.js",
+  "../js/pages/code.js",
   "../js/pages/editor.js",
   "../js/pages/review.js",
   "../js/pages/needs-art.js",

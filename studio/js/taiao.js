@@ -295,6 +295,91 @@ const Taiao = (function () {
     return r && r.ok ? r.fields : {};
   }
 
+  // ---- code submissions: community patches (studio/js/pages/code.js) --------
+  // A git diff + an extensive write-up + optional screenshots, proposed for any
+  // part of the project EXCEPT the NPC engine, admin controls, and koha. The
+  // community votes; nothing auto-applies — a human reviews every one. Server:
+  // server/src/submissions.js (POST /api/code/submit, GET /api/code/list|item|
+  // mine, PUT /api/code/shot, POST /api/code/vote|flag|review|delete).
+  //
+  // Which submissions I've voted on isn't in the public (cached) list, so — as
+  // with castVote — we mirror it locally to render the vote button filled. The
+  // item endpoint returns the authoritative viewerVoted, which we reconcile in.
+  const CODEVOTES_LS = "studio_codevotes_v1";
+  let codeVotes; try { codeVotes = JSON.parse(localStorage.getItem(CODEVOTES_LS) || "{}"); } catch (_) { codeVotes = {}; }
+  const persistCodeVotes = () => { try { localStorage.setItem(CODEVOTES_LS, JSON.stringify(codeVotes)); } catch (_) {} };
+  const myCodeVoted = id => !!codeVotes[Number(id)];
+  const noteCodeVote = (id, voted) => { if (voted) codeVotes[Number(id)] = true; else delete codeVotes[Number(id)]; persistCodeVotes(); };
+
+  async function submitCode(sub) {
+    if (!logged()) return { error: "Sign in to submit." };
+    return call("/api/code/submit", { body: {
+      name: sub.name, summary: sub.summary, area: sub.area,
+      description: sub.description, diff: sub.diff, provenance: sub.provenance || null,
+    } });
+  }
+  // Upload one screenshot (a File/Blob) to a just-created submission. Uses raw()
+  // because the body is binary, not JSON. n is the 0-based slot.
+  async function uploadCodeShot(id, n, blob) {
+    if (!logged()) return { error: "Sign in to upload." };
+    try {
+      const res = await raw("/api/code/shot?id=" + Number(id) + "&n=" + Number(n), {
+        method: "PUT", contentType: blob.type || "image/png", body: blob,
+      });
+      let data; try { data = await res.json(); } catch (_) { data = { error: "Bad server response." }; }
+      return data;
+    } catch (_) { return { error: "Couldn't upload the screenshot." }; }
+  }
+  // Full URL for a submission screenshot (for <img src>). n is 0-based.
+  const codeShotUrl = (id, n) => serverUrl + "/api/code/shot?id=" + Number(id) + "&n=" + Number(n);
+
+  async function listCode(opts = {}) {
+    const q = new URLSearchParams();
+    if (opts.area) q.set("area", opts.area);
+    if (opts.status) q.set("status", opts.status);
+    if (opts.sort) q.set("sort", opts.sort);
+    q.set("_", Date.now());
+    const r = await call("/api/code/list?" + q.toString());
+    // null (not []) on failure so the board can tell an outage from an empty
+    // board; an ok response with no rows is a real empty array.
+    return r && r.ok && Array.isArray(r.submissions) ? r.submissions : null;
+  }
+  async function codeItem(id) {
+    const r = await call("/api/code/item?id=" + Number(id) + "&_=" + Date.now());
+    return r && r.ok ? r.submission : (r || null);
+  }
+  async function myCode() {
+    if (!logged()) return [];
+    const r = await call("/api/code/mine");
+    return r && r.ok ? r.submissions : [];
+  }
+  // Toggle a vote; keeps the local "voted" mirror in sync with the server's
+  // authoritative reply.
+  async function voteCode(id) {
+    if (!logged()) return { error: "Sign in to vote." };
+    const r = await call("/api/code/vote", { body: { id: Number(id) } });
+    if (r && r.ok) noteCodeVote(id, r.voted);
+    return r;
+  }
+  async function flagCode(id) {
+    if (!logged()) return { error: "Sign in to flag." };
+    return call("/api/code/flag", { body: { id: Number(id) } });
+  }
+  async function deleteCode(id) {
+    if (!logged()) return { error: "Sign in first." };
+    return call("/api/code/delete", { body: { id: Number(id) } });
+  }
+  // Curator-only review surface.
+  async function codePending() {
+    if (!curator()) return { error: "Curators only." };
+    const r = await call("/api/code/pending");
+    return r && r.ok ? r.queue : (r || []);
+  }
+  async function reviewCode(id, status, note) {
+    if (!curator()) return { error: "Curators only." };
+    return call("/api/code/review", { body: { id: Number(id), status, note: note || null } });
+  }
+
   // ---- generation jobs: a durable status board for PixelLab generations ---
   // (server/src/gen.js — see js/genjobs.js). The server never talks to PixelLab
   // and never sees the key: the browser runs the generation with the player's
@@ -389,6 +474,8 @@ const Taiao = (function () {
     endorseCostume, flagCostume, voteCostume, tally,
     castVote, myVote,
     curator, listMine, pendingQueue, review,
+    submitCode, uploadCodeShot, codeShotUrl, listCode, codeItem, myCode,
+    voteCode, myCodeVoted, flagCode, deleteCode, codePending, reviewCode,
     genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
     galleryAdd, galleryMine, galleryItem, galleryDelete,
     publishSprite, listPublishedSprites, publishedSpriteItem,

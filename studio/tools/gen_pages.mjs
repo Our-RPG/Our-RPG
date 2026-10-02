@@ -100,7 +100,7 @@ const write = (rel, content) => {
 };
 
 // wipe every managed folder (old route-name folders + new tab-name folders)
-const MANAGED = ["player","npc","players","npcs","sprites","world-objects","objects","monsters","biomes","tiles","items","ui","procgen","map","zones","quests","ideas","sounds","triggers","skills","review","needs-art","settings","profile","edit"];
+const MANAGED = ["player","npc","players","npcs","sprites","world-objects","objects","monsters","biomes","tiles","items","ui","procgen","map","zones","quests","ideas","code","sounds","triggers","skills","review","needs-art","settings","profile","edit"];
 for (const d of MANAGED) fs.rmSync(path.join(OUT_ROOT, d), { recursive: true, force: true });
 
 // tab hubs — folder name = slug of the tab label
@@ -116,6 +116,7 @@ const HUBS = [
   ["zones",         "Zones",         { kind:"zones",   tab:"zones" }],
   ["quests",        "Quests",        { kind:"quests",  tab:"quests" }],
   ["ideas",         "Ideas",         { kind:"ideas",   tab:"ideas" }],
+  ["code",          "Code",          { kind:"code",    tab:"code" }],
   ["sounds",        "Sounds",        { kind:"catalog", tab:"sounds",        type:"sound" }],
   ["skills",        "Skills",        { kind:"skills",  tab:"skills" }],
   ["review",        "Review",        { kind:"review",  tab:"review" }],

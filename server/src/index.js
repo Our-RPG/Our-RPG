@@ -11,6 +11,7 @@ import * as link from "./link.js";
 import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
+import * as submissions from "./submissions.js";
 import * as gen from "./gen.js";
 import * as profile from "./profile.js";
 import * as npc from "./npc.js";
@@ -67,6 +68,18 @@ const ROUTES = {
   "POST /api/workshop/review":          workshop.review,
   "GET /api/workshop/digest/latest":    workshop.latestDigest,
   "GET /api/workshop/gaps":             workshop.gaps,
+
+  "POST /api/code/submit":              submissions.create,
+  "GET /api/code/list":                 submissions.list,
+  "GET /api/code/item":                 submissions.item,
+  "GET /api/code/mine":                 submissions.mine,
+  "PUT /api/code/shot":                 submissions.uploadShot,
+  "GET /api/code/shot":                 submissions.getShot,
+  "POST /api/code/vote":                submissions.vote,
+  "POST /api/code/flag":                submissions.flag,
+  "GET /api/code/pending":              submissions.pending,
+  "POST /api/code/review":              submissions.review,
+  "POST /api/code/delete":              submissions.remove,
 
   "POST /api/gen/start":                gen.start,
   "POST /api/gen/progress":             gen.progress,

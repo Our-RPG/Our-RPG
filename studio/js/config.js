@@ -61,3 +61,19 @@ const EQUIP_SLOTS = ["head", "torso", "legs", "feet", "hands", "back/cloak", "ma
 // Where the game keeps its rotation art, shown as guidance when a player
 // downloads a finished set for a pull request.
 const GAME_ART_PATH = "assets/families_source/<folder>/<state>/rotations/<dir>.png";
+
+// The areas a code submission (studio/js/pages/code.js) may target. MUST mirror
+// server/src/submissions.js AREAS exactly (value = the server's area id). The
+// NPC engine, admin controls, and koha are deliberately absent — those aren't
+// open for community code submissions, and the server refuses them too.
+const CODE_AREAS = [
+  { id: "game",        label: "Game client / gameplay",      hint: "js/, dist/bundle.js — the browser RPG itself" },
+  { id: "worldgen",    label: "Worldgen & world content",    hint: "js/world/, skills, items, biomes, quests" },
+  { id: "workshop",    label: "Workshop site",               hint: "studio/ — this companion site" },
+  { id: "server",      label: "Server / backend",            hint: "server/ — the Cloudflare Worker (excl. NPC/admin/koha)" },
+  { id: "accounts",    label: "Accounts & auth",             hint: "login, passkeys, sessions, linking" },
+  { id: "multiplayer", label: "Multiplayer / networking",    hint: "live presence, hub, zones, sync" },
+  { id: "tools",       label: "Build & tooling",             hint: "tools/, studio/tools/, scripts" },
+  { id: "docs",        label: "Docs & other",                hint: "README, docs/, governance" },
+  { id: "other",       label: "Something else",              hint: "anything else in scope" },
+];

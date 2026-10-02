@@ -123,6 +123,49 @@ CREATE TABLE IF NOT EXISTS proposal_flags (
   PRIMARY KEY (proposal_id, user_id)
 );
 
+-- Code submissions (the studio's "Code" tab; server/src/submissions.js). A git
+-- diff + an extensive write-up + optional screenshots, proposed for any part of
+-- the project EXCEPT the NPC engine, admin controls, and koha. Diff + write-up
+-- live in R2 at submissions/{id}.json; screenshots at submissions/{id}/shot{n}.
+-- Metadata + the community vote tally here. Nothing applies automatically — a
+-- human reviews every one (status open|reviewing → merged|declined by a curator).
+CREATE TABLE IF NOT EXISTS code_submissions (
+  id          INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  name        TEXT NOT NULL,                         -- submission title
+  summary     TEXT NOT NULL,                         -- one-line pitch for the list
+  area        TEXT NOT NULL,                         -- game|worldgen|workshop|server|accounts|multiplayer|tools|docs|other
+  size        INTEGER NOT NULL,                      -- bytes of the stored JSON payload
+  diff_lines  INTEGER NOT NULL DEFAULT 0,            -- line count of the diff
+  shots       INTEGER NOT NULL DEFAULT 0,            -- screenshot count
+  status      TEXT NOT NULL DEFAULT 'open',          -- open|reviewing|merged|declined|flagged
+  flags       INTEGER NOT NULL DEFAULT 0,            -- distinct community flag count
+  review_note TEXT,                                  -- a curator's note on the verdict
+  reviewed_at INTEGER,                               -- when a curator last acted
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_code_sub_status ON code_submissions(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_code_sub_area ON code_submissions(area, status);
+CREATE INDEX IF NOT EXISTS idx_code_sub_user ON code_submissions(user_id, created_at);
+
+-- One vote per user per submission; switchable (delete to un-vote). Tally is
+-- COUNT(*) on read, never a stored column.
+CREATE TABLE IF NOT EXISTS submission_votes (
+  submission_id INTEGER NOT NULL REFERENCES code_submissions(id),
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  created_at    INTEGER NOT NULL,
+  PRIMARY KEY (submission_id, user_id)
+);
+
+-- One community flag per user per submission. code_submissions.flags caches the
+-- distinct count; auto-hide needs FLAG_HIDE_AT distinct flaggers.
+CREATE TABLE IF NOT EXISTS submission_flags (
+  submission_id INTEGER NOT NULL REFERENCES code_submissions(id),
+  user_id       INTEGER NOT NULL REFERENCES users(id),
+  created_at    INTEGER NOT NULL,
+  PRIMARY KEY (submission_id, user_id)
+);
+
 -- §6.1-B offline action summaries. Phase 1 only STORES them (validated=0);
 -- Phase 2 turns on the plausibility envelope and starts setting validated.
 CREATE TABLE IF NOT EXISTS action_summaries (
