@@ -26,13 +26,19 @@
   const DEV = typeof DEV_MODE !== "undefined" && DEV_MODE;
   const TOKEN_KEY = "taiao_session_v1";       // serverapi.js's session token
   const PING_EVERY = 25e3;                    // well inside CF's idle timeout
-  const STALE_MS = 180e3;                     // drop a remote we've heard nothing from
+  // Drop a remote only after a LONG silence. The server broadcasts leave
+  // reliably, and idle players now heartbeat their position every 45s — the
+  // old 180s prune made a standing trade partner literally vanish mid-trade.
+  const STALE_MS = 600e3;
+  const HEARTBEAT_MS = 45e3;                  // idle position re-announce
   const RETRY_MIN = 2e3, RETRY_MAX = 60e3;
 
   if (DEV) {
     window.Live = { players: new Map(), tick: () => {}, connected: () => false,
       chatOn: () => false, tradeOn: () => false, sendChat: () => {}, sendTrade: () => {},
       onChat: () => {}, onTrade: () => {}, onRoster: () => {}, myId: () => 0,
+      sendE: () => {}, onE: () => {}, sendFeed: () => {}, onFeed: () => {},
+      sendGive: () => {}, onGift: () => {}, sendGiftAck: () => {}, nameOf: () => "",
       status: () => ({ enabled: false }) };
     return;
   }
@@ -53,7 +59,10 @@
   let flags = { chat: false, trade: false };
   let myId = 0;
   const chatListeners = [], tradeListeners = [], rosterListeners = [];
+  const entListeners = [], feedListeners = [], giftListeners = [];
   const fire = (fns, m) => { for (const fn of fns) { try { fn(m); } catch (e) {} } };
+  // the light the local player carries, as a sync-able brightness tier
+  const myCndl = () => (typeof candleInHand === "function" ? candleInHand() : 0) | 0;
 
   function zoneKey() {
     const z = world.zoneOf(player.x, player.y);
@@ -100,10 +109,12 @@
     myId = (Server.user && Server.user.id) | 0;
     send({ t: "hello", x: player.x, y: player.y, lvl: player.level | 0,
            clvl: (typeof combatLevel === "function" ? combatLevel() : 1) | 0,
-           character: player.character, outfit: player.outfit || "Idle" });
+           character: player.character, outfit: player.outfit || "Idle",
+           cndl: myCndl() });
     helloSent = true;
     // re-announce whatever we're mid-doing so a fresh zone sees it
-    lastAct = undefined; lastOutfit = undefined;
+    lastAct = undefined; lastOutfit = undefined; lastSp = undefined;
+    heartbeatAt = Date.now() + HEARTBEAT_MS;
   }
 
   // ---------- inbound ----------
@@ -113,7 +124,7 @@
     if (!rp) {
       rp = { id: p.id, name: "?", x: 0, y: 0, px: 0, py: 0, level: 0, clvl: 0,
              dir8: "south", moving: null, character: null, outfit: "Idle",
-             act: null, _say: null, last: Date.now() };
+             act: null, cndl: 0, sp: null, _say: null, last: Date.now() };
       players.set(p.id, rp);
     }
     if (p.name != null) rp.name = String(p.name);
@@ -123,8 +134,22 @@
     if (p.character !== undefined) rp.character = p.character;
     if (p.outfit !== undefined) rp.outfit = p.outfit || "Idle";
     if (p.act !== undefined) rp.act = p.act;
+    if (p.cndl !== undefined) rp.cndl = p.cndl | 0;
+    if (p.sp !== undefined) rp.sp = applySp(rp, p.sp);
     rp.last = Date.now();
     return rp;
+  }
+  // split-self ghost bodies of a remote player: [[x,y,d8,level],...] → kept
+  // as slim body objects with their own pixel coords (eased in tick below so
+  // ghosts glide instead of teleporting between 600ms announcements)
+  function applySp(rp, b) {
+    if (!b || !b.length) return null;
+    const prev = rp.sp || [];
+    return b.map((e, i) => {
+      const o = prev[i] || { x: e[0], y: e[1], px: PX(e[0]), py: PX(e[1]) };
+      o.tx = e[0]; o.ty = e[1]; o.dir8 = e[2] || "south"; o.level = e[3] | 0;
+      return o;
+    });
   }
   // a message about an id we've never met (we joined mid-story, or the DO
   // rebooted): make a placeholder — the next join/roster fills the name in
@@ -169,8 +194,18 @@
         rp.last = Date.now();
         return;
       }
-      case "s": { const rp = known(m.id); if (rp) upsert({ id: m.id, character: m.character, outfit: m.outfit }); return; }
+      case "s": { const rp = known(m.id); if (rp) upsert({ id: m.id, character: m.character, outfit: m.outfit, cndl: m.cndl }); return; }
+      case "sp": { const rp = known(m.id); if (rp) { rp.sp = applySp(rp, m.b); rp.last = Date.now(); } return; }
       case "a": { const rp = known(m.id); if (rp) { rp.act = m.k || null; rp.last = Date.now(); } return; }
+      case "E":     // entity-sync batch from a proximity authority (entsync.js)
+        fire(entListeners, m);
+        return;
+      case "fe":    // someone fed us — the eater applies the food locally
+        fire(feedListeners, m);
+        return;
+      case "gcommit": // a gift addressed to us (escrowed server-side until gack)
+        fire(giftListeners, m);
+        return;
       case "e": {   // someone's deed, made visible
         const rp = players.get(m.id); if (!rp) return;
         if (typeof addFloat !== "function" || !nearLocal(rp, 48)) return;
@@ -190,7 +225,11 @@
         fire(chatListeners, { id: m.id, name: m.name, text: m.text });
         return;
       }
-      case "ti": case "to": case "ta": case "tc":
+      case "ti": case "to": case "ta": case "tc": case "tcommit":
+        // tcommit was MISSING here — the server's committed swap fell through
+        // the switch unseen, so trades hung forever at "Exchanging…" (the
+        // 2026-10-02 "trading doesn't work" report). live-ui.js applyCommit
+        // has always been ready for it.
         fire(tradeListeners, m);
         return;
       case "err":
@@ -203,24 +242,32 @@
 
   // ---------- outbound watchers ----------
   let lastMoving = null, lastX = null, lastY = null, lastLvl = null;
-  let lastAct, lastOutfit, lastCharacter;
+  let lastAct, lastOutfit, lastCharacter, lastCndl, lastSp;
+  let heartbeatAt = 0, spAt = 0;
 
   function watchOutbound() {
     // movement: one message per tile step, sent the moment it STARTS — the
     // one-way latency hides inside the step's own duration
     const mv = player.moving;
     const clvl = (typeof combatLevel === "function" ? combatLevel() : 1) | 0;
+    const tNow = Date.now();
     if (mv && mv !== lastMoving) {
       lastMoving = mv;
       send({ t: "m", fx: mv.fx, fy: mv.fy, tx: mv.tx, ty: mv.ty,
              dur: Math.round(mv.dur), d8: player.dir8, lvl: player.level | 0, clvl });
       lastX = mv.tx; lastY = mv.ty; lastLvl = player.level | 0;
+      heartbeatAt = tNow + HEARTBEAT_MS;
     } else if (!mv) {
       lastMoving = null;
       // position changed with no step animating = a teleport (door, veil,
-      // respawn, Bifrost) — remotes snap
-      if (player.x !== lastX || player.y !== lastY || (player.level | 0) !== lastLvl) {
+      // respawn, Bifrost) — remotes snap. The same message doubles as the
+      // IDLE HEARTBEAT: a player standing still (trading, chatting, afk at a
+      // bank) re-announces every 45s so remotes never stale-prune them and
+      // the zone DO's attachment keeps a fresh position across hibernation.
+      if (player.x !== lastX || player.y !== lastY || (player.level | 0) !== lastLvl ||
+          tNow >= heartbeatAt) {
         lastX = player.x; lastY = player.y; lastLvl = player.level | 0;
+        heartbeatAt = tNow + HEARTBEAT_MS;
         send({ t: "tp", x: player.x, y: player.y, d8: player.dir8, lvl: lastLvl, clvl });
       }
     }
@@ -228,10 +275,22 @@
     const act = player.act ? (player.act.kind === "gather" || player.act.kind === "combat"
       ? player.act.kind : "craft") : null;
     if (act !== lastAct) { lastAct = act; send({ t: "a", k: act }); }
-    // appearance
-    if (player.outfit !== lastOutfit || player.character !== lastCharacter) {
-      lastOutfit = player.outfit; lastCharacter = player.character;
-      send({ t: "s", character: player.character, outfit: player.outfit || "Idle" });
+    // appearance — including the light we carry (remotes draw our candle glow)
+    const cndl = myCndl();
+    if (player.outfit !== lastOutfit || player.character !== lastCharacter || cndl !== lastCndl) {
+      lastOutfit = player.outfit; lastCharacter = player.character; lastCndl = cndl;
+      send({ t: "s", character: player.character, outfit: player.outfit || "Idle", cndl });
+    }
+    // split selves: announce ghost-body positions (throttled; only on change)
+    if (tNow >= spAt) {
+      spAt = tNow + 600;
+      let sp = null;
+      if (typeof Split !== "undefined" && player.bodies && player.bodies.length) {
+        sp = player.bodies.slice(0, 4).map(b =>
+          [b.x, b.y, b.dir8 || "south", b.level | 0]);
+      }
+      const key = sp ? JSON.stringify(sp) : null;
+      if (key !== lastSp) { lastSp = key; send({ t: "sp", b: sp }); }
     }
   }
 
@@ -241,15 +300,27 @@
     // (cutscenes) — the world keeps moving for everyone else
     for (const rp of players.values()) {
       const m = rp.moving;
-      if (!m) continue;
-      m.t += dt / m.dur;
-      if (m.t >= 1) {
-        rp.x = m.tx; rp.y = m.ty;
-        rp.px = PX(m.tx); rp.py = PX(m.ty);
-        rp.moving = null;
-      } else {
-        rp.px = PX(m.fx) + (PX(m.tx) - PX(m.fx)) * m.t;
-        rp.py = PX(m.fy) + (PX(m.ty) - PX(m.fy)) * m.t;
+      if (m) {
+        m.t += dt / m.dur;
+        if (m.t >= 1) {
+          rp.x = m.tx; rp.y = m.ty;
+          rp.px = PX(m.tx); rp.py = PX(m.ty);
+          rp.moving = null;
+        } else {
+          rp.px = PX(m.fx) + (PX(m.tx) - PX(m.fx)) * m.t;
+          rp.py = PX(m.fy) + (PX(m.ty) - PX(m.fy)) * m.t;
+        }
+      }
+      // split-self ghosts glide toward their last-announced tile (announcements
+      // come every ~600ms, so the ease closes the gap in about that long)
+      if (rp.sp) for (const b of rp.sp) {
+        b.x = b.tx; b.y = b.ty;
+        const gx = PX(b.tx), gy = PX(b.ty);
+        const k = Math.min(1, dt / 500);
+        b.px += (gx - b.px) * k;
+        b.py += (gy - b.py) * k;
+        if (Math.abs(gx - b.px) > PX(3) - PX(0)) b.px = gx;   // too far — snap
+        if (Math.abs(gy - b.py) > PX(3) - PX(0)) b.py = gy;
       }
     }
 
@@ -317,8 +388,18 @@
     chatOn: () => !!(ws && wsOpen && flags.chat),
     tradeOn: () => !!(ws && wsOpen && flags.trade),
     myId: () => myId,
+    nameOf: id => { const rp = players.get(id); return (rp && rp.name) || ""; },
     sendChat: text => { if (flags.chat) send({ t: "chat", text: String(text).slice(0, 240) }); },
     sendTrade: m => { if (flags.trade) send(m); },
+    // entity sync (js/net/entsync.js): authority batches out, everyone's in
+    sendE: ops => { if (ops && ops.length) send({ t: "E", a: ops }); },
+    onE: fn => entListeners.push(fn),
+    // feeding & giving (right-click on a player)
+    sendFeed: (to, item) => send({ t: "fe", to, item }),
+    onFeed: fn => feedListeners.push(fn),
+    sendGive: (to, items) => send({ t: "gv", to, items }),
+    onGift: fn => giftListeners.push(fn),
+    sendGiftAck: gid => send({ t: "gack", gid }),
     onChat: fn => chatListeners.push(fn),
     onTrade: fn => tradeListeners.push(fn),
     onRoster: fn => rosterListeners.push(fn),

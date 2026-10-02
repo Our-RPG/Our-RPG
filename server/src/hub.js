@@ -69,16 +69,39 @@ export class GlobalHub {
 
   attach(ws) { try { return ws.deserializeAttachment(); } catch (e) { return null; } }
 
+  // HIBERNATION-PROOF presence: everything the hub knows about a player is
+  // mirrored into the socket's attachment (which survives DO hibernation).
+  // Before this, a wake wiped this.p, and every sendTo/roster built from it
+  // silently missed all the players who hadn't spoken since the wake — DMs
+  // "sent" but never delivered, rosters showing one player in a full world.
   state(ws) {
     let st = this.p.get(ws);
     if (!st) {
       const at = this.attach(ws);
       if (!at) return null;
-      st = { id: at.id, name: at.name, clvl: 0, zone: "", character: null,
-             hello: false, nudged: false, tokens: 20, tAt: Date.now() };
+      st = { id: at.id, name: at.name, clvl: at.clvl | 0, zone: at.zone || "",
+             character: at.character == null ? null : at.character,
+             hello: !!at.hello, nudged: false, tokens: 20, tAt: Date.now() };
       this.p.set(ws, st);
     }
     return st;
+  }
+
+  // persist the durable half of st back into the attachment
+  save(ws, st) {
+    try {
+      ws.serializeAttachment({ id: st.id, name: st.name, clvl: st.clvl,
+        zone: st.zone, character: st.character, hello: st.hello });
+    } catch (e) {}
+  }
+
+  // every connected socket with its state — the ONLY safe way to enumerate
+  // players (this.p alone forgets everyone across a hibernation wake)
+  *all() {
+    for (const ws of this.ctx.getWebSockets()) {
+      const st = this.state(ws);
+      if (st) yield [ws, st];
+    }
   }
 
   pub(st) { return { id: st.id, name: st.name, clvl: st.clvl, zone: st.zone, character: st.character }; }
@@ -95,7 +118,7 @@ export class GlobalHub {
 
   sendTo(userId, obj) {
     let any = false;
-    for (const [ws, st] of this.p)
+    for (const [ws, st] of this.all())
       if (st.id === userId) { this.send(ws, obj); any = true; }
     return any;
   }
@@ -124,8 +147,9 @@ export class GlobalHub {
       st.zone = str(m.zone, ZONE_MAX);
       st.character = m.character == null ? null : num(m.character, 999) | 0;
       st.hello = true;
+      this.save(ws, st);
       const roster = [];
-      for (const [ows, os] of this.p)
+      for (const [ows, os] of this.all())
         if (ows !== ws && os.hello) roster.push(this.pub(os));
       this.send(ws, { t: "roster", players: roster });
       this.bcast({ t: "join", p: this.pub(st) }, ws);
@@ -142,6 +166,7 @@ export class GlobalHub {
         st.clvl = num(m.clvl, 99) | 0;
         st.zone = str(m.zone, ZONE_MAX);
         if (m.character !== undefined) st.character = m.character == null ? null : num(m.character, 999) | 0;
+        this.save(ws, st);
         this.bcast({ t: "upd", id: st.id, clvl: st.clvl, zone: st.zone, character: st.character }, ws);
         return;
       }
@@ -163,7 +188,9 @@ export class GlobalHub {
   webSocketClose(ws) { this.gone(ws); }
   webSocketError(ws) { this.gone(ws); }
   gone(ws) {
-    const st = this.p.get(ws);
+    // read via attachment too: a socket that dies after a hibernation wake
+    // (before speaking) still needs its leave broadcast
+    const st = this.p.get(ws) || this.state(ws);
     this.p.delete(ws);
     if (st && st.hello) this.bcast({ t: "leave", id: st.id });
   }

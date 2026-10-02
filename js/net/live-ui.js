@@ -37,11 +37,6 @@
     font:inherit; outline:none; pointer-events:auto; }
   #livechat input::placeholder { color:rgba(200,215,230,0.5); }
   #livechat input:focus { background:rgba(10,14,20,0.96); border-color:#5a7a9a; }
-  #livenear { position:fixed; left:10px; bottom:60px; z-index:40; display:none;
-    gap:4px; font:11px OpenDyslexic, Verdana, sans-serif; pointer-events:auto; }
-  #livenear.on { display:flex; }
-  #livenear button { background:rgba(20,30,26,0.9); color:#a8ffc9;
-    border:1px solid #3a5a4a; border-radius:5px; padding:2px 8px; cursor:pointer; font:inherit; }
   #livetrade { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
     width:460px; z-index:60; background:rgba(16,22,30,0.96); border:1px solid #46586a;
     border-radius:10px; padding:12px; color:#e6eef6; display:none;
@@ -89,8 +84,12 @@
     if (typeof logHTML === "function") logHTML(html, sys ? "sys" : "chat");
   }
 
+  // whispers ride the global hub, so the chat field opens whenever EITHER
+  // channel is up (zone chat may be off while DMs still work)
+  const chatFieldOn = () => Live.chatOn() || (typeof Hub !== "undefined" && Hub.connected());
+
   document.addEventListener("keydown", e => {
-    if (e.key !== "/" || !Live.chatOn()) return;
+    if (e.key !== "/" || !chatFieldOn()) return;
     const ae = document.activeElement;
     if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
     e.preventDefault();
@@ -108,12 +107,14 @@
           const id = Hub.idByName(wm[1]);
           if (id) Hub.sendDM(id, wm[2]);
           else if (typeof log === "function") log('No one online named "' + wm[1] + '".', "sys");
-        } else {
+        } else if (Live.chatOn()) {
           Live.sendChat(text);
           // NPCs in earshot hear normal chat too (engine glue in npc-chat.js);
           // silent — the Live echo already puts the line in the log. Whispers
           // stay private.
           if (typeof npcBroadcast === "function") npcBroadcast(text, { silent: true });
+        } else if (typeof log === "function") {
+          log("Local chat isn't available right now — /w name message still whispers.", "sys");
         }
       }
       inputEl.value = "";
@@ -128,7 +129,8 @@
   // button prefills "/w <name> "), so DMs are just chat with a prefix.
   window.LiveChat = {
     compose(prefix) {
-      if (!Live.chatOn()) { if (typeof log === "function") log("Chat isn't available right now.", "sys"); return; }
+      if (!chatFieldOn()) { if (typeof log === "function") log("Chat isn't available right now.", "sys"); return; }
+      box.classList.add("on");
       inputEl.value = prefix || "";
       inputEl.focus();
       const n = inputEl.value.length;
@@ -150,26 +152,8 @@
     }
   });
 
-  // ---------- nearby-players strip (trade entry point) ----------
-  const near = document.createElement("div");
-  near.id = "livenear";
-  document.body.appendChild(near);
-
-  function refreshNear() {
-    if (!Live.tradeOn() || typeof player === "undefined") { near.classList.remove("on"); return; }
-    const close = [];
-    for (const rp of Live.players.values())
-      if (Math.abs(rp.x - player.x) <= 8 && Math.abs(rp.y - player.y) <= 8) close.push(rp);
-    if (!close.length || (T && T.open)) { near.classList.remove("on"); return; }
-    near.innerHTML = "";
-    for (const rp of close.slice(0, 4)) {
-      const b = document.createElement("button");
-      b.textContent = "⇄ trade " + rp.name;
-      b.onclick = () => LiveTrade.invite(rp.id);
-      near.appendChild(b);
-    }
-    near.classList.add("on");
-  }
+  // (The old bottom-left "⇄ trade name" strip is gone — trade invites now
+  // come from the right-click menu on the player themself, gameplay/input.js.)
 
   // ---------- trading ----------
   // Session state. `mine`/`theirs` are [[itemId, qty], ...]. Offers cross the
@@ -364,9 +348,8 @@
 
   // ---------- visibility cadence ----------
   setInterval(() => {
-    box.classList.toggle("on", Live.chatOn());
-    if (!Live.chatOn() && document.activeElement === inputEl) inputEl.blur();
-    refreshNear();
+    box.classList.toggle("on", chatFieldOn());
+    if (!chatFieldOn() && document.activeElement === inputEl) inputEl.blur();
     if (T && T.open && !Live.tradeOn()) cancel(false);
   }, 1000);
 })();

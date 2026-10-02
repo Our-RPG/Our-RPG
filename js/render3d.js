@@ -5297,6 +5297,9 @@ void main() {
       }
       return;
     }
+    // multiplayer (js/net/entsync.js): another client is this NPC's proximity
+    // authority — it drives the wander; we only replay the synced steps above
+    if (npc._remoteUntil && T < npc._remoteUntil) return;
     // escort: walk to an arbitrary tile/storey, highest priority (Tūhura
     // Isle's Sigrid sequence, gameplay/tutorial.js) — properly climbs via
     // npcClimbToward (unlike the lamp task below, which only ever targets
@@ -6103,6 +6106,30 @@ void main() {
         place(m, rx, ry, 1, rPs * rH, false, false,
           liftAt(rp.x, rp.y) + (rp.level | 0) * STOREY_H - CHAR_FEET_FRAC * rPs * rH);
         m.scale.x = rPs * rW;
+        // their SPLIT SELVES (net/livesync.js rp.sp): translucent echoes in
+        // their own character's body, exactly like the local player's inactive
+        // bodies above. Count varies — the registry sweep reaps retired ones.
+        if (rp.sp) for (let gi = 0; gi < rp.sp.length; gi++) {
+          const b = rp.sp[gi];
+          if (Math.abs(b.x - player.x) > _vr || Math.abs(b.y - player.y) > _vr) continue;
+          const gkey = "livesp" + rp.id + "_" + gi;
+          let gm = meshes.get(gkey);
+          if (!gm) {
+            const gmat = charMat.clone();
+            gmat.transparent = true; gmat.opacity = 0.72; gmat.alphaTest = 0.3;
+            gm = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), gmat);
+            gm.renderOrder = 5;
+            scene.add(gm);
+            meshes.set(gkey, gm);
+          }
+          gm.userData.seen = true; gm.visible = true;
+          const gwi = Math.max(0, CHAR_DIRS.indexOf(b.dir8 || "south"));
+          setCharUV(gm.geometry, rp.character * CHAR_DIRS.length + ((gwi - camDir + 8) & 7));
+          gm.userData.lift = 0;
+          place(gm, WX(b.px), WX(b.py), 1, rPs * rH, false, false,
+            liftAt(b.x, b.y) + (b.level | 0) * STOREY_H - CHAR_FEET_FRAC * rPs * rH);
+          gm.scale.x = rPs * rW;
+        }
       }
     }
     // held tool

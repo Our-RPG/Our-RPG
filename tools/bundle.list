@@ -233,7 +233,12 @@ js/net/seedroll.js
 # instant mutations) + the chat/trade UI it gates. livesync wraps killMonster/
 # ShopSync/RegionSync, so it must follow combat + the Phase-2 layer.
 js/net/livesync.js
+# shared monsters & NPCs: proximity-authority entity sync. After livesync (its
+# socket) and after combat/monsters (it wraps addSplat + killMonster).
+js/net/entsync.js
 js/net/live-ui.js
+# right-click player actions: follow / give / feed (wraps walkTo + setGoal)
+js/net/player-actions.js
 # Phase-4 global presence: the cross-zone hub socket (online roster + DMs) and
 # its UI. hubsync must precede social-ui (which guards on `typeof Hub`).
 js/net/hubsync.js

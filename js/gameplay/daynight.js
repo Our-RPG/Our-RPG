@@ -30,14 +30,16 @@ function dayPhase() {
   }
   return (((_clockMs() % DAY_MS) + DAY_MS) % DAY_MS) / DAY_MS;
 }
-// the world clock in ms, with every shift applied — the base for the sun, the
-// moon's slower cycle and the aurora slots, so a time cheat moves all three.
-// player.timeShiftMs: a PERSISTED whole-world clock shift (graduation's
-// overnight crossing lands the player in a Newhaven morning; the shift
-// sticks so their days stay anchored to that arrival, not the wall clock)
+// the world clock in ms — the base for the sun, the moon's slower cycle and
+// the aurora slots. SHARED-WORLD INVARIANT (multiplayer): this is a pure
+// function of unix time, so every player standing on the same tile sees the
+// same sun, sky and weather. The old per-player graduation shift
+// (player.timeShiftMs) broke that — two adjacent players carried different
+// suns — so it is no longer applied (the Bifrost crossing simply lands in
+// whatever time of day the shared world has). __timeOffsetMs (cheats panel)
+// survives: DEV builds never join the shared world.
 function _clockMs() {
-  const off = ((typeof window !== "undefined" && window.__timeOffsetMs) || 0) +
-    ((typeof player !== "undefined" && player.timeShiftMs) || 0);
+  const off = (typeof window !== "undefined" && window.__timeOffsetMs) || 0;
   return (typeof now !== "undefined" ? now : Date.now()) + off;
 }
 
@@ -333,6 +335,17 @@ function collectNightLights() {
   const HM = (typeof HEAT_MAX !== "undefined") ? HEAT_MAX : 1000;
   const c = candleInHand();
   if (c > 0) { const cl = candleLight(c); out.push({ px: player.px, py: player.py, r: cl.r, s: cl.s, col: [255, 222, 150], gr: cl.gr, gs: cl.gs }); }
+  // fellow players carrying lit candles (net/livesync.js syncs the brightness
+  // tier as rp.cndl): their glow pools around THEM, so standing in a friend's
+  // candlelight genuinely lights your way
+  if (typeof Live !== "undefined" && Live.players && Live.players.size) {
+    for (const rp of Live.players.values()) {
+      if (!rp.cndl) continue;
+      if (Math.abs(rp.x - player.x) > 60 || Math.abs(rp.y - player.y) > 60) continue;
+      const cl = candleLight(rp.cndl);
+      out.push({ px: rp.px, py: rp.py, r: cl.r, s: cl.s, col: [255, 222, 150], gr: cl.gr, gs: cl.gs });
+    }
+  }
   // candles/lamps the player has SET DOWN on the ground or a table: each burns
   // as a warm world light on the player's current storey.
   if (typeof placed !== "undefined" && placed && placed.length) {

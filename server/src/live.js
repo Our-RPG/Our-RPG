@@ -6,35 +6,50 @@
  *   hello/roster/join/leave   who is here, what they look like
  *   m / tp                    tile steps (with duration, so remotes replay
  *                             the exact interpolation) and teleports
- *   s / a                     appearance (outfit/character) and action state
+ *   s / a                     appearance (outfit/character/carried light) and
+ *                             action state
+ *   sp                        split selves — the sender's extra bodies
  *   e                         discrete deeds: kill, shop buy/sell
  *   n                         instant node/decor depletion (a VISUAL courier —
  *                             the RegionLedger stays the authority; its pull
  *                             corrects anything this raced)
- *   chat / t*                 public chat and player-to-player trading — the
- *                             protocol ships NOW but both are refused unless
- *                             env LIVE_CHAT / LIVE_TRADE = "on" (moderation
- *                             isn't staffed yet; flip the vars to launch,
- *                             no client rebuild needed)
+ *   E                         entity-sync batches (shared monsters & NPCs):
+ *                             an opaque op array from the proximity authority,
+ *                             relayed to everyone near the sender (the CLIENTS
+ *                             define the op grammar — js/net/entsync.js)
+ *   chat / t*                 public chat and player-to-player trading (gated
+ *                             by env LIVE_CHAT / LIVE_TRADE = "on")
+ *   fe                        feeding another player (one food item, relayed)
+ *   gv / gcommit / gack       giving items: a one-sided escrow — the gift is
+ *                             persisted BEFORE delivery and re-delivered on
+ *                             reconnect until the recipient acks, so a drop
+ *                             mid-give can't eat the items
  *
  * The DO relays, it does not simulate: every client runs its own world and
  * the plausibility envelope (envelope.js) remains the anti-cheat line. The
  * worker (connect below) authenticates the session and forwards with trusted
  * ?u=&n= params — the DO trusts its caller, like region.js.
  *
- * Hibernation: per-socket meta lives in the attachment (survives), volatile
- * state (position, appearance) lives in this.p (doesn't). After a wake the
- * first message from a socket we don't know triggers a {t:"sync"} nudge and
- * the client re-introduces itself. Nothing here touches storage. */
+ * HIBERNATION: per-socket meta lives in the attachment and now mirrors the
+ * WHOLE durable half of the state (identity + last position + appearance),
+ * refreshed on hello/appearance and throttled on movement. this.p is only a
+ * cache over it. Before this, a wake wiped this.p and every sendTo /
+ * bcastNear / roster built from it silently missed all the players who
+ * hadn't spoken since — trade invites and whispers "sent" but never
+ * delivered, proximity chat falling on deaf ears. state(ws) reconstructs
+ * from the attachment, and all() is the only enumeration anyone uses. */
 
 const MAX_CONNS = 200;            // per zone — a bound, not a target
-const MAX_MSG_BYTES = 2048;
+const MAX_MSG_BYTES = 8192;       // entity-sync batches are the big ones
 const CHAT_MAX_CHARS = 240;
 const NAME_MAX = 24;
 // public chat is PROXIMITY: only players within the speaker's full-zoom-out
 // view range hear them (client viewRadius() peaks at ~77 tiles at camZoom 3.0,
 // render3d.js:764). A zone can be far bigger, so a shout never crosses it.
 const CHAT_RADIUS = 80;
+// entity-sync batches reach everyone who could possibly see the entities the
+// sender is simulating (sim radius 48 + a generous view margin)
+const ENT_RADIUS = 140;
 
 const num = (v, lim = 1e7) => {
   const n = Number(v);
@@ -47,11 +62,18 @@ const ACT_KINDS = new Set(["gather", "combat", "craft", "farm", "agility"]);
 const EVENT_KINDS = new Set(["kill", "buy", "sell"]);
 const TRADE_TYPES = new Set(["ti", "to", "ta", "tc"]); // invite/offer/accept/cancel
 
+// sanitize a [[itemId, qty], ...] offer/gift list (small and shallow)
+function itemList(v, maxLen) {
+  if (!Array.isArray(v) || v.length > maxLen) return null;
+  return v.map(it => [str(it && it[0], 64), Math.max(1, num(it && it[1], 1e6) | 0)])
+    .filter(it => it[0]);
+}
+
 export class LiveZone {
   constructor(ctx, env) {
     this.ctx = ctx;
     this.env = env;
-    this.p = new Map(); // ws -> {id,name,hello,x,y,lvl,clvl,character,outfit,act,tokens,tAt,nudged}
+    this.p = new Map(); // ws -> state cache (attachment holds the durable half)
     // live trade sessions between two players in this zone, keyed by the sorted
     // id pair. Authoritative: the DO holds each side's offer + accept flag and
     // only ever commits both offers together (see commitTrade). Volatile — a
@@ -102,17 +124,43 @@ export class LiveZone {
     if (!st) {
       const at = this.attach(ws);
       if (!at) return null;
-      st = { id: at.id, name: at.name, hello: false, nudged: false,
-             x: 0, y: 0, lvl: 0, clvl: 0, character: null, outfit: "", act: null,
-             tokens: 30, tAt: Date.now() };
+      st = { id: at.id, name: at.name, hello: !!at.hello, nudged: false,
+             x: at.x || 0, y: at.y || 0, lvl: at.lvl | 0, clvl: at.clvl | 0,
+             character: at.character == null ? null : at.character,
+             outfit: at.outfit || "", cndl: at.cndl | 0, sp: at.sp || null,
+             act: null, tokens: 60, tAt: Date.now(), saveAt: 0 };
       this.p.set(ws, st);
     }
     return st;
   }
 
+  // mirror the durable half of st into the attachment (survives hibernation).
+  // `always` forces it; otherwise throttled to one write per 3s per socket so
+  // a brisk walker isn't serializing every step.
+  save(ws, st, always) {
+    const t = Date.now();
+    if (!always && t < st.saveAt) return;
+    st.saveAt = t + 3000;
+    try {
+      ws.serializeAttachment({ id: st.id, name: st.name, hello: st.hello,
+        x: st.x, y: st.y, lvl: st.lvl, clvl: st.clvl, character: st.character,
+        outfit: st.outfit, cndl: st.cndl, sp: st.sp });
+    } catch (e) {}
+  }
+
+  // every connected socket with its state — the only hibernation-safe way to
+  // enumerate players (this.p alone forgets everyone across a wake)
+  *all() {
+    for (const ws of this.ctx.getWebSockets()) {
+      const st = this.state(ws);
+      if (st) yield [ws, st];
+    }
+  }
+
   pub(st) {
     return { id: st.id, name: st.name, x: st.x, y: st.y, lvl: st.lvl, clvl: st.clvl,
-             character: st.character, outfit: st.outfit, act: st.act };
+             character: st.character, outfit: st.outfit, act: st.act,
+             cndl: st.cndl || 0, sp: st.sp || null };
   }
 
   send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch (e) {} }
@@ -126,19 +174,18 @@ export class LiveZone {
   }
 
   sendTo(userId, obj) {
-    for (const [ws, st] of this.p)
+    for (const [ws, st] of this.all())
       if (st.id === userId) { this.send(ws, obj); return true; }
     return false;
   }
 
-  // proximity broadcast: everyone (the origin included) whose last-known
-  // position is within `radius` tiles of the origin. Uses this.p positions,
-  // kept fresh by every m/tp; a peer we haven't heard a position from yet
-  // (post-wake) simply doesn't hear it until they move.
-  bcastNear(origin, obj, radius) {
+  // proximity broadcast: everyone (the origin included, unless excepted) whose
+  // last-known position is within `radius` tiles of the origin. Positions come
+  // from the attachment-backed states, kept fresh by every m/tp.
+  bcastNear(origin, obj, radius, except) {
     const msg = JSON.stringify(obj);
-    for (const [ws, st] of this.p) {
-      if (!st.hello) continue;
+    for (const [ws, st] of this.all()) {
+      if (!st.hello || ws === except) continue;
       if (Math.abs(st.x - origin.x) <= radius && Math.abs(st.y - origin.y) <= radius) {
         try { ws.send(msg); } catch (e) {}
       }
@@ -198,14 +245,45 @@ export class LiveZone {
     } catch (e) {}
   }
 
+  // ---- gift escrow (one-sided trade: "Give items" / right-click) ----------
+  // The giver's client removes the items the moment it sends gv (its own save
+  // is the authority on its inventory); the DO persists the gift and delivers
+  // a gcommit the recipient applies idempotently and acks — re-delivered on
+  // every hello until acked, exactly like a committed trade's missing half.
+  async giveItems(st, to, items) {
+    const gid = crypto.randomUUID();
+    const rec = { gid, from: st.id, fromName: st.name, to, items, at: Date.now() };
+    try { await this.ctx.storage.put("gift:" + gid, rec); } catch (e) {}
+    const delivered = this.sendTo(to, { t: "gcommit", gid, from: st.id, fromName: st.name, items });
+    return delivered;
+  }
+  async ackGift(uid, gid) {
+    try {
+      const rec = await this.ctx.storage.get("gift:" + gid);
+      if (rec && rec.to === uid) await this.ctx.storage.delete("gift:" + gid);
+    } catch (e) {}
+  }
+  async recoverGifts(ws, uid) {
+    try {
+      const list = await this.ctx.storage.list({ prefix: "gift:" });
+      const stale = Date.now() - 6 * 3600e3;
+      for (const [k, rec] of list) {
+        if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
+        if (rec.to === uid)
+          this.send(ws, { t: "gcommit", gid: rec.gid, from: rec.from, fromName: rec.fromName, items: rec.items });
+      }
+    } catch (e) {}
+  }
+
   webSocketMessage(ws, msg) {
     if (typeof msg !== "string" || msg.length > MAX_MSG_BYTES) return;
     const st = this.state(ws);
     if (!st) return;
-    // token bucket: 30 burst, 12/s refill — brisk play (a step every ~150 ms
-    // plus action chatter) stays well inside; a flooder gets cut off
+    // token bucket: 60 burst, 25/s refill — brisk play (a step every ~150 ms,
+    // action chatter, 3 Hz entity-sync batches when carrying authority) stays
+    // well inside; a flooder gets cut off
     const t = Date.now();
-    st.tokens = Math.min(30, st.tokens + (t - st.tAt) * 0.012);
+    st.tokens = Math.min(60, st.tokens + (t - st.tAt) * 0.025);
     st.tAt = t;
     if (--st.tokens < 0) {
       this.p.delete(ws);
@@ -222,9 +300,11 @@ export class LiveZone {
       st.clvl = num(m.clvl, 99) | 0;
       st.character = m.character == null ? null : num(m.character, 999) | 0;
       st.outfit = str(m.outfit, 48);
+      st.cndl = num(m.cndl, 9) | 0;
       st.hello = true;
+      this.save(ws, st, true);
       const roster = [];
-      for (const [ows, os] of this.p)
+      for (const [ows, os] of this.all())
         if (ows !== ws && os.hello) roster.push(this.pub(os));
       this.send(ws, { t: "roster", players: roster,
                       chat: this.env.LIVE_CHAT === "on",
@@ -232,9 +312,10 @@ export class LiveZone {
       // re-hellos after a hibernation wake re-announce too — join is an
       // idempotent upsert client-side
       this.bcast({ t: "join", p: this.pub(st) }, ws);
-      // hand back any committed-but-unclaimed swap this player dropped before
-      // acking (disconnect mid-trade) — the client re-applies idempotently
+      // hand back any committed-but-unclaimed swap/gift this player dropped
+      // before acking (disconnect mid-trade) — re-applied idempotently
       if (this.env.LIVE_TRADE === "on") this.recoverTrades(ws, st.id);
+      this.recoverGifts(ws, st.id);
       return;
     }
 
@@ -252,6 +333,7 @@ export class LiveZone {
         const dur = Math.min(5000, Math.max(60, num(m.dur, 5000) || 260));
         st.x = tx; st.y = ty; st.lvl = num(m.lvl, 40) | 0;
         if (m.clvl != null) st.clvl = num(m.clvl, 99) | 0;
+        this.save(ws, st);
         this.bcast({ t: "m", id: st.id, fx, fy, tx, ty, dur,
                      d8: str(m.d8, 10), lvl: st.lvl, clvl: st.clvl }, ws);
         return;
@@ -259,14 +341,29 @@ export class LiveZone {
       case "tp": {  // teleport/respawn/door — discontinuous, remotes snap
         st.x = num(m.x); st.y = num(m.y); st.lvl = num(m.lvl, 40) | 0;
         if (m.clvl != null) st.clvl = num(m.clvl, 99) | 0;
+        this.save(ws, st);
         this.bcast({ t: "tp", id: st.id, x: st.x, y: st.y,
                      d8: str(m.d8, 10), lvl: st.lvl, clvl: st.clvl }, ws);
         return;
       }
-      case "s": {   // appearance change
+      case "s": {   // appearance change (incl. the light they carry)
         st.character = m.character == null ? null : num(m.character, 999) | 0;
         st.outfit = str(m.outfit, 48);
-        this.bcast({ t: "s", id: st.id, character: st.character, outfit: st.outfit }, ws);
+        st.cndl = num(m.cndl, 9) | 0;
+        this.save(ws, st, true);
+        this.bcast({ t: "s", id: st.id, character: st.character, outfit: st.outfit,
+                     cndl: st.cndl }, ws);
+        return;
+      }
+      case "sp": {  // split selves: the sender's extra bodies (or null = whole again)
+        let b = null;
+        if (Array.isArray(m.b)) {
+          b = m.b.slice(0, 4).map(e => [num(e && e[0]), num(e && e[1]),
+            str(e && e[2], 10), num(e && e[3], 8) | 0]);
+        }
+        st.sp = b && b.length ? b : null;
+        this.save(ws, st, true);
+        this.bcast({ t: "sp", id: st.id, b: st.sp }, ws);
         return;
       }
       case "a": {   // action state: k=null means "stopped doing the thing"
@@ -292,6 +389,14 @@ export class LiveZone {
         this.bcast({ t: "n", id: st.id, k, v, e: num(m.e, 4e15) }, ws);
         return;
       }
+      case "E": {   // entity-sync batch (shared monsters & NPCs) — opaque relay.
+        // The clients define the op grammar (js/net/entsync.js); the DO only
+        // bounds it: an array, not too many ops, total size already capped by
+        // MAX_MSG_BYTES. Relayed to everyone near the sender, sender excluded.
+        if (!Array.isArray(m.a) || !m.a.length || m.a.length > 96) return;
+        this.bcastNear(st, { t: "E", id: st.id, a: m.a }, ENT_RADIUS, ws);
+        return;
+      }
       case "chat": {
         if (this.env.LIVE_CHAT !== "on")
           return this.send(ws, { t: "err", code: "chat-disabled" });
@@ -300,6 +405,26 @@ export class LiveZone {
         if (!text) return;
         // proximity only: heard within CHAT_RADIUS tiles of the speaker
         this.bcastNear(st, { t: "chat", id: st.id, name: st.name, text }, CHAT_RADIUS);
+        return;
+      }
+      case "fe": {  // feed another player: one food item, applied by the eater
+        const to = num(m.to, 1e12) | 0;
+        const item = str(m.item, 64);
+        if (!to || to === st.id || !item) return;
+        this.sendTo(to, { t: "fe", id: st.id, name: st.name, item });
+        return;
+      }
+      case "gv": {  // give items (one-sided escrow — see giveItems above)
+        const to = num(m.to, 1e12) | 0;
+        if (!to || to === st.id) return;
+        const items = itemList(m.items, 24);
+        if (!items || !items.length) return;
+        this.giveItems(st, to, items);
+        return;
+      }
+      case "gack": { // recipient applied the gift — retire the record
+        const gid = str(m.gid, 64);
+        if (gid) this.ackGift(st.id, gid);
         return;
       }
       case "tack": {   // "I applied that committed swap" — lets us drop the record
@@ -323,9 +448,8 @@ export class LiveZone {
           return;
         }
         if (m.t === "to") {   // offer: [[itemId, qty], ...] — small and shallow
-          if (!Array.isArray(m.items) || m.items.length > 24) return;
-          const items = m.items.map(it => [str(it && it[0], 64), Math.max(1, num(it && it[1], 1e6) | 0)])
-            .filter(it => it[0]);
+          const items = itemList(m.items, 24);
+          if (!items) return;
           const tr = this.getTrade(st.id, to);
           tr.offers[st.id] = items;
           tr.acc[st.id] = false; tr.acc[to] = false;   // any change voids both accepts
@@ -349,7 +473,9 @@ export class LiveZone {
   webSocketClose(ws) { this.gone(ws); }
   webSocketError(ws) { this.gone(ws); }
   gone(ws) {
-    const st = this.p.get(ws);
+    // read via attachment too: a socket that dies after a hibernation wake
+    // (before speaking again) still needs its leave broadcast
+    const st = this.p.get(ws) || this.state(ws);
     this.p.delete(ws);
     if (st && st.hello) this.bcast({ t: "leave", id: st.id });
   }

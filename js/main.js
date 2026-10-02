@@ -408,6 +408,8 @@ async function init() {
       // interpolation — deliberately OUTSIDE the cine gate: the rest of the
       // world keeps moving for everyone else while your cutscene plays
       if (typeof Live !== "undefined") Live.tick(dt);
+      if (typeof EntSync !== "undefined") EntSync.tick(); // shared monsters/NPCs: authority batches (js/net/entsync.js)
+      if (typeof Follow !== "undefined") Follow.tick(); // follow-a-player pathing (js/net/player-actions.js)
       if (typeof Hub !== "undefined") Hub.tick(dt); // global presence: online roster + DMs (js/net/hubsync.js)
       if (typeof tickPlaced === "function") tickPlaced(); // temporary placed decor withers
       if (!cine && !mpBlock && typeof Quests !== "undefined") Quests.tick(); // quest collect/reach objectives

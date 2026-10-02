@@ -2177,17 +2177,11 @@ const Tutorial = (() => {
     // job: after this, no rendering of the isle survives graduation at all.
     if (typeof world !== "undefined" && world && world.mapDropRect)
       world.mapDropRect(B.x0 - 24, B.y0 - 24, B.x1 + 24, B.y1 + 24);
-    // the crossing takes the night: advance the WORLD's clock (persisted,
-    // daynight.js dayPhase) so the player falls out of the sky into the
-    // NEXT morning over Newhaven, whatever the wall clock says
-    {
-      const dayMs = (typeof DAY_MS !== "undefined") ? DAY_MS : 64 * 60 * 1000;
-      const p = (typeof dayPhase === "function") ? dayPhase() : 0; // graduated → staged sky off, real clock
-      const MORNING = 8.5 / 24;                                    // ~08:30 Newhaven local
-      let d = MORNING - p;
-      if (d <= 0.02) d += 1;                                       // always the NEXT morning
-      player.timeShiftMs = (player.timeShiftMs || 0) + Math.round(d * dayMs);
-    }
+    // (The crossing used to shift player.timeShiftMs so graduation always
+    // landed in a Newhaven morning — removed: the shared world keeps ONE
+    // clock, a pure function of unix time, so every player sees the same
+    // sun. Graduates now arrive in whatever hour the world is actually in.)
+    player.timeShiftMs = 0;
     refreshBar(); // graduated → the journey bar comes down
     if (typeof saveGame === "function") saveGame();
     if (typeof uiDirty !== "undefined") uiDirty = true;

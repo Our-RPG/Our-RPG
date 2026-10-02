@@ -61,6 +61,11 @@ function updateMonsters(dt) {
       }
       continue;
     }
+    // multiplayer (js/net/entsync.js): a monster another player's client is
+    // simulating — the proximity AUTHORITY — only interpolates here. We still
+    // resolve its swings at US (the victim's own client always rolls the
+    // damage against itself), but no wander/chase/burn AI runs locally.
+    const entRemote = m._remoteUntil && now < m._remoteUntil;
     const distP = Math.max(Math.abs(m.x - player.x), Math.abs(m.y - player.y));
     // swim even while a horizontal step is in flight, but let far-away
     // swimmers idle (waterDepthAt's bank scan could touch ungenerated chunks)
@@ -68,7 +73,7 @@ function updateMonsters(dt) {
     // woven-spell afflictions (combat.js fusions): burning ticks damage on
     // a slow beat; chill and root act on movement below and in monMove.
     // A monster sealed in Stasis can't even burn.
-    if (m.fx && m.fx.burnUntil && now < m.fx.burnUntil && now >= (m.fx.burnNextAt || 0) &&
+    if (!entRemote && m.fx && m.fx.burnUntil && now < m.fx.burnUntil && now >= (m.fx.burnNextAt || 0) &&
         !(now < m.fx.stasisUntil)) {
       m.fx.burnNextAt = now + 1200;
       const bd = Math.min(m.fx.burnDmg || 1, Math.max(0, m.hp)); // don't overkill-splat
@@ -79,7 +84,7 @@ function updateMonsters(dt) {
     // NZ flying birds: the flight layer (gameplay/birdflight.js) owns any bird
     // that's on the wing or up a perch; a grounded flier falls through to the
     // ordinary wander AI below until its take-off timer comes due
-    if (typeof birdFlightTick === "function" && birdFlightTick(m, def, dt, distP)) continue;
+    if (!entRemote && typeof birdFlightTick === "function" && birdFlightTick(m, def, dt, distP)) continue;
     if (m.moving) {
       const mv = m.moving;
       mv.t += dt / mv.dur;
@@ -90,14 +95,40 @@ function updateMonsters(dt) {
       }
       continue;
     }
+    if (entRemote) {
+      // authority elsewhere drives movement/targeting; our only job is the
+      // monster's attack ON US when it's adjacent and its swing timer is due
+      if (m.target === player && distP <= 1 && now >= m.nextAtkAt &&
+          (!m.canSwim || m.swimY <= SWIM_ATK_Y)) monsterAttack(m);
+      continue;
+    }
     if (distP > 48) continue; // far-away monsters idle until you return
     const distS = Math.max(Math.abs(m.x - m.sx), Math.abs(m.y - m.sy));
-    // monsters live on the ground floor: a player up a storey is out of reach
-    const upstairs = (player.level | 0) > 0;
-    // a Vanished player (combat.js) walks unseen: no aggro can find them
-    if (def.aggro && !m.target && !upstairs && !(player.unseenUntil > now) &&
-        distP <= 4 && distS < 8 && def.lvl > 2 * combatLevel() && !peaceful) m.target = player;
+    // a remote target that logged off or left the zone evaporates — the chase
+    // breaks exactly like a line-of-sight loss (full leash heal, below)
+    if (m.target && m.target !== player &&
+        !(typeof Live !== "undefined" && Live.players.get(m.target.id) === m.target)) {
+      m.target = null; m.hp = monMaxHp(m.kind);
+    }
+    // aggro acquisition — every nearby player (the local one AND the remotes
+    // sharing the zone) is a candidate; among the eligible, the HIGHEST combat
+    // level draws its attention (ties break on id so every client agrees).
+    if (def.aggro && !m.target && distS < 8) {
+      let best = null;
+      for (const c of monCandidates()) {
+        if ((c.lvl | 0) > 0) continue;                       // upstairs is out of reach
+        if (c.local && player.unseenUntil > now) continue;   // a Vanished player walks unseen
+        if (Math.max(Math.abs(m.x - c.x), Math.abs(m.y - c.y)) > 4) continue;
+        if (def.lvl <= 2 * c.clvl) continue;                 // too seasoned to bother
+        if (c.local ? peaceful
+          : (world.inPeacefulZone && world.inPeacefulZone(c.x, c.y))) continue;
+        if (!best || c.clvl > best.clvl || (c.clvl === best.clvl && c.id < best.id)) best = c;
+      }
+      if (best) m.target = best.ent;
+    }
     if (m.target) {
+      const tgt = m.target;   // the local player, or a remote player's body
+      const tdist = Math.max(Math.abs(m.x - tgt.x), Math.abs(m.y - tgt.y));
       // The chase leash is time-based, not just distance-based: a monster
       // that's still being hurt (hit within the last 8s — combat.js stamps
       // m.hitAt) stays on the hunt however far from home it is, so a
@@ -105,20 +136,37 @@ function updateMonsters(dt) {
       // once it's had 8s clear of arrows does straying past 10 tiles from
       // its spawn break the chase (and heal it back up).
       const recentlyHit = m.hitAt && now - m.hitAt < 8000;
-      if ((distS > 10 && !recentlyHit) || upstairs) { m.target = null; m.hp = monMaxHp(m.kind); }
+      if ((distS > 10 && !recentlyHit) || (tgt.level | 0) > 0) { m.target = null; m.hp = monMaxHp(m.kind); }
       else if (m.fx && now < m.fx.stunUntil) {
         // petrified / in stasis: no step, no swing
       }
       else if (m.fx && now < m.fx.fleeUntil) {
-        // shadow-struck: it bolts away from the player instead of fighting
-        monStepToward(m, m.x + Math.sign(m.x - player.x) * 8, m.y + Math.sign(m.y - player.y) * 8);
+        // shadow-struck: it bolts away from its hunter instead of fighting
+        monStepToward(m, m.x + Math.sign(m.x - tgt.x) * 8, m.y + Math.sign(m.y - tgt.y) * 8);
       }
-      else if (distP <= 1) {
+      else if (tdist <= 1) {
         // a swimmer strikes from the surface: while it's still rising from the
         // deeps (swimTick pulls a hunter up) it holds its bite
-        if (now >= m.nextAtkAt && (!m.canSwim || m.swimY <= SWIM_ATK_Y)) monsterAttack(m);
+        if (now >= m.nextAtkAt && (!m.canSwim || m.swimY <= SWIM_ATK_Y)) {
+          // ATTACK TURN: of everyone in reach, the highest combat level takes
+          // the blow (user rule). The victim's OWN client rolls the damage —
+          // here we either strike the local player or just animate the swing
+          // at a remote (their client resolves it against their armour).
+          let best = null;
+          for (const c of monCandidates()) {
+            if ((c.lvl | 0) > 0) continue;
+            if (Math.max(Math.abs(m.x - c.x), Math.abs(m.y - c.y)) > 1) continue;
+            if (!best || c.clvl > best.clvl || (c.clvl === best.clvl && c.id < best.id)) best = c;
+          }
+          if (best && best.ent !== m.target) m.target = best.ent;
+          if (m.target === player) monsterAttack(m);
+          else {
+            m.nextAtkAt = now + MONSTERS[m.kind].atkTick;
+            m.lungeT = now;
+          }
+        }
       } else if (!(m.fx && now < m.fx.rootUntil)) { // rooted feet can't chase
-        monStepToward(m, player.x, player.y);
+        monStepToward(m, tgt.x, tgt.y);
       }
     } else if (m.fx && now < m.fx.fleeUntil) {
       // fleeing without a target (a flushed flightless bird, a routed calm
@@ -228,6 +276,21 @@ function dir8From(dx, dy) {
   if (dx < 0) return dy > 0 ? "south-west" : dy < 0 ? "north-west" : "west";
   return dy < 0 ? "north" : "south";
 }
+// Candidate victims for a monster: the local player plus (in multiplayer)
+// every remote player sharing the zone (net/livesync.js keeps their position
+// and combat level fresh). Offline / on Tūhura Isle this is just the player,
+// so single-player aggro behaves exactly as it always has.
+function monCandidates() {
+  const out = [{ ent: player, local: true,
+    id: (typeof Live !== "undefined" && Live.myId && Live.myId()) || 0,
+    clvl: combatLevel(), x: player.x, y: player.y, lvl: player.level | 0 }];
+  if (typeof Live !== "undefined" && Live.connected && Live.connected())
+    for (const rp of Live.players.values())
+      out.push({ ent: rp, local: false, id: rp.id, clvl: rp.clvl | 0,
+        x: rp.x, y: rp.y, lvl: rp.level | 0 });
+  return out;
+}
+
 // Callers (1):
 //  gameplay/monsters.js:50
 // find a live monster on a tile. Monsters only ever live on the ground floor

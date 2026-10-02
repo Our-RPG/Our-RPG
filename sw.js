@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v28"; // v28: world-map never-block rework — bundle + raw worker files (roadworker/features) must refresh together or region cells mismatch the new WORLDGEN_SIG
+const CACHE_VERSION = "taiao-v29"; // v29: multiplayer round — shared clock (timeShiftMs dropped), entity sync (shared monsters/NPCs), right-click player menu (trade/follow/give/feed), tcommit relay fix, split/candle sync
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

@@ -75,6 +75,11 @@ function targetsAt(x, y) {
     else if (live) { out.push(live); out.push(mon); }
     else out.push(mon);
   }
+  // remote players (multiplayer, net/livesync.js): right-click a fellow
+  // traveller for Follow / Trade / Give / Feed / Whisper (menu in
+  // buildTileMenu). Their current tile or the tile they're stepping onto.
+  const rpl = remotePlayerAt(x, y);
+  if (rpl) out.push({ kind: "rplayer", rp: rpl });
   // placed furniture & vessels (gameplay/placing.js). The vessel you're RIDING
   // becomes a "riding" target (click it to disembark) rather than being hidden.
   const pl = typeof placedAt === "function" && placedAt(x, y, player.level | 0);
@@ -96,9 +101,20 @@ function targetsAt(x, y) {
   return out;
 }
 
+// a remote player standing on (or mid-step onto) this tile, on our storey
+function remotePlayerAt(x, y) {
+  if (typeof Live === "undefined" || !Live.players || !Live.players.size) return null;
+  for (const rp of Live.players.values()) {
+    if ((rp.level | 0) !== (player.level | 0)) continue;
+    if ((rp.x === x && rp.y === y) || (rp.moving && rp.moving.tx === x && rp.moving.ty === y)) return rp;
+  }
+  return null;
+}
+
 // Callers (2):
 //  gameplay/input.js:71,118
 function hoverLabel(tg) {
+  if (tg.kind === "rplayer") return `Follow ${tg.rp.name} (lvl ${tg.rp.clvl || "?"})`;
   if (tg.kind === "livestock") return (typeof husbLabel === "function" && husbLabel(tg.mon)) || `Tend ${MONSTERS[tg.mon.kind].name}`;
   if (tg.kind === "monster") {
     const def = MONSTERS[tg.mon.kind];
@@ -299,6 +315,20 @@ function buildTileMenu(t) {
   const groundHere = groundItems.filter(g => g.x === t.x && g.y === t.y && (g.level | 0) === (player.level | 0));
   for (const tg of targets) {
     if (tg.kind === "ground") continue;   // handled together below (Take All + per-item)
+    // a fellow player: the full multiplayer menu. Follow is the default
+    // (left-click) action; trading is right-click driven (user req 2026-10-02
+    // — invites come from this menu, not a chat-side strip).
+    if (tg.kind === "rplayer") {
+      const rp = tg.rp;
+      items.push({ label: `Follow ${rp.name}`, fn: () => { if (window.Follow) Follow.start(rp.id); } });
+      if (typeof Live !== "undefined" && Live.tradeOn())
+        items.push({ label: `Trade with ${rp.name}`, fn: () => { if (window.LiveTrade) LiveTrade.invite(rp.id); } });
+      items.push({ label: `Give items to ${rp.name}…`, fn: () => { if (window.PlayerActions) PlayerActions.give(rp.id); } });
+      items.push({ label: `Feed ${rp.name}…`, fn: () => { if (window.PlayerActions) PlayerActions.feed(rp.id); } });
+      items.push({ label: `Whisper ${rp.name}`, fn: () => { if (window.LiveChat) LiveChat.compose("/w " + rp.name + " "); } });
+      items.push({ label: `Examine ${rp.name}`, fn: () => log(`${rp.name} — a fellow traveller, combat level ${rp.clvl || "?"}.`, "sys") });
+      continue;
+    }
     // livestock: one menu entry per unlocked husbandry action (or Feed when spent);
     // left-click runs the first entry. Then an Examine for the animal.
     if (tg.kind === "livestock" && typeof husbMenu === "function") {
