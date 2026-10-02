@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v31"; // v31: MAPBAKE_SIG re-key (map.js comment edit) — torn-v29 clients persisted broken map bakes/mips into IDB under the final sig, which v30 couldn't clear (sw bumps never touch IndexedDB); the re-key sweeps the poisoned store and the map re-bakes streamed.
+const CACHE_VERSION = "taiao-v32"; // v32: WORLDGEN_SIG re-key (chunks.js comment) — the REAL fix for the Newhaven 3D-ground vista. v31 only re-keyed MAPBAKE_SIG (map images); the torn-v29 window also persisted holed-ground CHUNKS into ioe-chunks-<live sig>, which reload broken forever (buildChunkMesh throws → far-LOD vista). Moving WORLDGEN_SIG sweeps that chunk-DATA store; chunks regenerate clean. Verified: poisoned chunk → vista → sig bump → clean paving.
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

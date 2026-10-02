@@ -211,6 +211,17 @@ function createWorldChunks(ctx) {
   // generation re-keys the cache on the next build, so persisted chunks can
   // never go stale against the code — no manual bump, ever. Stale
   // generations are swept below by enumeration.
+  //
+  // 2026-10-02 FORCED RE-KEY: a torn deploy served a mid-edit bundle under
+  // the live WORLDGEN_SIG window — clients persisted chunks with holed
+  // ground into ioe-chunks-<that sig>, and because the final good bundle
+  // shared the sig, buildChunkMesh kept throwing on the reloaded holes and
+  // Newhaven's north chunks fell back to the far-LOD vista forever (a sw
+  // bump refreshes CODE, never IndexedDB; the map.js MAPBAKE_SIG re-key only
+  // covered map IMAGES, not this chunk-DATA store). This comment moves
+  // WORLDGEN_SIG, so _sweepStaleIDB drops the poisoned store on next load
+  // and every chunk regenerates from the correct bundle (deterministic —
+  // identical terrain, no player state here; this store is a pure cache).
   const _IDB_NAME = 'ioe-chunks-' + (typeof WORLDGEN_SIG !== 'undefined' ? WORLDGEN_SIG : 'dev');
   // Sweep persisted caches from PREVIOUS generations of this store: any DB
   // sharing the prefix under a different name is dead weight — enumeration
