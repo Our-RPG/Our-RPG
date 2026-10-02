@@ -1,19 +1,22 @@
-// ===== Our RPG — player-to-player actions (follow / give / feed) =====
+// ===== Our RPG — player-to-player actions (follow / give / feed / commission)
 // The right-click half of multiplayer: input.js's context menu offers
-// Follow / Trade / Give / Feed / Whisper on any remote player's tile, and
-// this file supplies the machinery behind three of them:
+// Follow / Unfollow / Commission / Trade / Give / Feed / Whisper on any remote
+// player's tile (any of their split bodies too), and this file drives them:
 //
-//   Follow   client-side pathing: every ~400ms, path to one tile beside the
-//            target (their livesync body keeps x/y fresh). Walking somewhere
-//            yourself, starting any goal, or losing them (log-off, >80 tiles)
-//            breaks the follow.
-//   Give     a one-sided escrowed transfer: pick items (bank click grammar),
-//            the items leave your pack the moment you send, and the server
-//            (live.js gift escrow) re-delivers the gcommit on every hello
-//            until the recipient acks — a mid-give disconnect can't eat them.
-//            Applied idempotently by gift id, like trade commits.
-//   Feed     one food item, eaten by THEM: you lose the food, their client
-//            applies the heal/well-fed exactly as if they'd eaten it.
+//   Follow   STICKY client-side pathing: every body you command (the active
+//            one AND all your split selves) paths toward the leader and keeps
+//            doing so until you log out, the LEADER logs out, you pick
+//            "Unfollow", or you follow someone else. Your own walking does NOT
+//            end it (the spec: follow persists). The leader is notified.
+//   Commission  pay gold to be GUIDED somewhere: you escrow a travel price,
+//            pick a destination, and follow the leader to it. Reach it together
+//            and the whole price is released to the leader. Cancel partway
+//            (either side unfollows or logs out) and the leader is paid for the
+//            distance covered — refund = (remaining/original) × price, the rest
+//            to the leader. Escrow + settlement live in the LiveZone DO.
+//   Give     a one-sided escrowed transfer: pick items, they leave your pack at
+//            once, the server re-delivers the gift until the recipient acks.
+//   Feed     one food item, eaten by THEM (their client applies the heal).
 //
 // Inert offline/in DEV (no Live socket).
 "use strict";
@@ -22,61 +25,325 @@
   const DEV = typeof DEV_MODE !== "undefined" && DEV_MODE;
   const URL_ = typeof SERVER_URL !== "undefined" ? SERVER_URL : "";
   if (DEV || !URL_ || typeof Live === "undefined") {
-    window.Follow = { tick: () => {}, start: () => {}, stop: () => {}, target: () => null };
-    window.PlayerActions = { give: () => {}, feed: () => {} };
+    window.Follow = { tick: () => {}, start: () => {}, stop: () => {}, stepBody: () => {},
+      active: () => false, following: () => 0, target: () => null };
+    window.PlayerActions = { give: () => {}, feed: () => {}, commission: () => {} };
     return;
   }
 
   const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const say = (msg, cls) => { if (typeof log === "function") log(msg, cls || "sys"); };
   const itemName = id => (typeof ITEMS !== "undefined" && ITEMS[id] && ITEMS[id].name) || id;
+  const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
 
   // ---------------- follow ----------------
-  let fTarget = null;      // {id, name}
-  let fAt = 0;
+  // fTarget: { id, name, commission } — commission is null for a plain follow,
+  // else the active commission record { cid, price, dest:{x,y}, origDist }.
+  let fTarget = null;
+  const fRepathAt = new Map();   // body number -> next A* time (throttle per body)
 
-  function followStop(quiet) {
-    if (fTarget && !quiet) say("You stop following " + fTarget.name + ".");
-    fTarget = null;
-  }
-  function followStart(id) {
-    const rp = Live.players.get(id);
-    if (!rp) return;
-    fTarget = { id, name: rp.name };
-    say("You follow " + rp.name + ". (Walking somewhere yourself stops following.)");
-  }
-  function followTick() {
+  const followingId = () => (fTarget ? fTarget.id : 0);
+  const isFollowing = id => !!fTarget && fTarget.id === id;
+
+  // reasons: "manual" (Unfollow), "switch" (followed another), "lost" (leader
+  // gone/logged out), "arrived" (commission delivered — no settlement here)
+  function followStop(reason) {
     if (!fTarget) return;
-    const t = Date.now();
-    if (t < fAt) return;
-    fAt = t + 400;
+    const prev = fTarget;
+    fTarget = null;
+    fRepathAt.clear();
+    // a running commission settles (partial) on any ending that isn't delivery
+    if (prev.commission && reason !== "arrived")
+      Live.sendCommissionCancel(prev.commission.cid, commissionRemaining(prev));
+    if (reason !== "switch" && reason !== "arrived") Live.sendFollowNote(prev.id, false);
+    if (reason === "manual") say("You stop following " + prev.name + ".");
+    else if (reason === "lost") say(prev.name + " is gone — you stop following.", "warn");
+  }
+
+  function followStart(id, commission) {
+    const rp = Live.players.get(id);
+    if (!rp) { say("They're not nearby."); return; }
+    if (isFollowing(id) && !commission) { say("You're already following " + rp.name + "."); return; }
+    if (fTarget) followStop("switch");      // following someone new ends (and settles) the old one
+    fTarget = { id, name: rp.name, commission: commission || null };
+    fRepathAt.clear();
+    Live.sendFollowNote(id, true);
+    if (!commission) say("You now follow " + rp.name + ". Right-click them → Unfollow to stop.");
+  }
+
+  // path the CURRENT global `player` (the active body, or a split self the
+  // moment Split.tick swaps it in) one tile toward the leader. Throttled per
+  // body so a pack of selves doesn't flood A*.
+  function followStepBody() {
+    if (!fTarget || player.dying || player.forced || player.act) return;
+    if (player.queue && player.queue.length) return;          // its own queued work first
+    if (player.goal && player.goal._fromQueue) return;
     const rp = Live.players.get(fTarget.id);
-    if (!rp || !Live.connected()) { say("You've lost " + fTarget.name + "."); followStop(true); return; }
-    const d = Math.max(Math.abs(rp.x - player.x), Math.abs(rp.y - player.y));
-    if (d > 80) { say(rp.name + " is too far away — you stop following."); followStop(true); return; }
-    if (d <= 1) return;                       // right beside them — rest
-    if (player.forced || player.dying) return;
-    if (player.act) return;                   // mid-action: don't yank the body
+    if (!rp) return;                                          // leader out of zone — followTick decides
+    const key = player.num || 1;
+    const t = Date.now();
+    const walking = player.path && player.path.length;
+    if (t < (fRepathAt.get(key) || 0) && walking) return;
+    fRepathAt.set(key, t + 350);
+    if (cheb(rp.x, rp.y, player.x, player.y) <= 1) { if (walking) player.path = []; return; }
     const p = findPath(rp.x, rp.y, 1);
-    if (p) player.path = p;
+    if (p && p.length) player.path = p;
   }
-  // a deliberate walk or goal of your own breaks the follow (wrap-by-
-  // reassignment — this file loads after input.js/pathing.js in the bundle)
-  if (typeof walkTo === "function") {
-    const oWalk = walkTo;
-    walkTo = function (...a) { followStop(); return oWalk(...a); };
-  }
-  if (typeof setGoal === "function") {
-    const oGoal = setGoal;
-    setGoal = function (...a) { followStop(); return oGoal(...a); };
+
+  function followTick() {
+    commissionsLeaderTick();              // guide side runs even when we follow no one
+    if (!fTarget) return;
+    if (!Live.connected()) return;        // our own socket blip: pause, don't end
+    const rp = Live.players.get(fTarget.id);
+    if (!rp) {
+      // leader not in our zone: still online (crossed a boundary) → pause and
+      // wait for them to come back; truly offline → that's a logout, end+settle
+      const online = typeof Hub !== "undefined" && Hub.online && Hub.online.has(fTarget.id);
+      if (!online) followStop("lost");
+      return;
+    }
+    followStepBody();                     // the active body (ghosts are driven by Split.tick)
+    if (fTarget.commission) commissionTick(rp);
   }
 
   window.Follow = {
     tick: followTick,
     start: followStart,
-    stop: followStop,
+    stop: () => followStop("manual"),
+    stepBody: followStepBody,        // Split.tick calls this per swapped-in ghost
+    active: () => !!fTarget,
+    following: followingId,          // id of whoever we follow (0 = nobody)
+    isFollowing,
     target: () => fTarget,
   };
+
+  // ---------------- commission (pay-to-be-guided) ----------------
+  // Two sides. The FOLLOWER (payer) carries the live commission inside
+  // fTarget.commission and follows the guide. The GUIDE tracks each trip
+  // they've agreed to guide in leaderComms, watching for arrival and for the
+  // follower vanishing. Settlement is the LiveZone DO's: the follower escrowed
+  // the fee, the DO pays it out (whole fee on a both-arrived delivery, split
+  // by distance covered on a cancel) and re-delivers the coin payout until the
+  // recipient acks it.
+  const ARRIVE_R = 3;                  // "at the destination" tolerance (tiles)
+  const leaderComms = new Map();       // cid -> { followerId, name, dest, price, orig, lastRem, arrSent, progAt }
+  const genCid = () => (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID() : "c" + Date.now() + Math.floor(player.x) + "," + Math.floor(player.y);
+
+  // follower's distance from the destination (we ARE the follower here)
+  function commissionRemaining(ft) {
+    const c = ft && ft.commission;
+    return c ? cheb(player.x, player.y, c.dest.x, c.dest.y) : 0;
+  }
+
+  // follower-side per-tick (called from followTick while guiding us somewhere):
+  // ping progress to the escrow and, once we AND the guide stand at the
+  // destination, confirm arrival (the DO releases the fee once both confirm).
+  let _commProgAt = 0, _commArrSent = false;
+  function commissionTick(rp) {
+    const c = fTarget.commission;
+    const t = Date.now();
+    const rem = commissionRemaining(fTarget);
+    if (t >= _commProgAt) { _commProgAt = t + 2000; Live.sendCommissionProgress(c.cid, rem); }
+    if (!_commArrSent && rem <= ARRIVE_R && cheb(rp.x, rp.y, c.dest.x, c.dest.y) <= ARRIVE_R) {
+      _commArrSent = true;
+      Live.sendCommissionArrive(c.cid);
+      say("You've reached the destination with " + fTarget.name + " — the fee is released.", "gold");
+    }
+  }
+
+  // guide-side per-tick: for each trip we've agreed to lead, confirm arrival
+  // when both of us reach the spot, and cancel (settling our share) if the
+  // follower logs out / vanishes for good.
+  function commissionsLeaderTick() {
+    if (!leaderComms.size) return;
+    const t = Date.now();
+    for (const [cid, c] of leaderComms) {
+      const rp = Live.players.get(c.followerId);
+      if (!rp) {
+        const online = typeof Hub !== "undefined" && Hub.online && Hub.online.has(c.followerId);
+        if (!online) {        // follower gone for good — settle on the distance they'd covered
+          Live.sendCommissionCancel(cid, c.lastRem != null ? c.lastRem : c.orig);
+          leaderComms.delete(cid);
+        }
+        continue;
+      }
+      c.lastRem = cheb(rp.x, rp.y, c.dest.x, c.dest.y);
+      if (t >= (c.progAt || 0)) { c.progAt = t + 2000; Live.sendCommissionProgress(cid, c.lastRem); }
+      if (!c.arrSent && c.lastRem <= ARRIVE_R && cheb(player.x, player.y, c.dest.x, c.dest.y) <= ARRIVE_R) {
+        c.arrSent = true;
+        Live.sendCommissionArrive(cid);
+      }
+    }
+  }
+
+  // ---- commission UI: a small panel to set a fee + pick a destination ----
+  let commDraft = null;   // { leaderId, leaderName, price, dest }  (being composed)
+
+  const commCss = document.createElement("style");
+  commCss.textContent = `
+  #pcomm { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:340px; z-index:63; background:rgba(16,22,30,0.97); border:1px solid #46586a;
+    border-radius:10px; padding:14px; color:#e6eef6; display:none;
+    font:12px OpenDyslexic, Verdana, sans-serif; }
+  #pcomm.on { display:block; }
+  #pcomm h3 { margin:0 0 10px; font-size:14px; color:#ffd75e; }
+  #pcomm .pc-row { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:7px 0; }
+  #pcomm input { width:110px; box-sizing:border-box; background:rgba(10,14,20,0.8);
+    border:1px solid #3a4a5a; border-radius:5px; color:#fff; padding:4px 7px; font:inherit; }
+  #pcomm .pc-dest { color:#9fe6c0; }
+  #pcomm .pc-btns { display:flex; gap:8px; margin-top:12px; }
+  #pcomm button { flex:1; background:#24463a; color:#c9ffe0; border:1px solid #3a6a52;
+    border-radius:6px; padding:6px; cursor:pointer; font:inherit; }
+  #pcomm button.sec { background:#243246; border-color:#3a4a6a; color:#cfe0ff; }
+  #pcomm button:disabled { opacity:0.5; cursor:default; }
+  #pcomm .pc-note { color:#9fb7c9; font-size:11px; margin-top:6px; line-height:1.4; }`;
+  document.head.appendChild(commCss);
+
+  const commEl = document.createElement("div");
+  commEl.id = "pcomm";
+  commEl.innerHTML = `<h3></h3>
+    <div class="pc-row"><span>Travel fee (gold)</span><input class="pc-price" type="number" min="1" value="50"></div>
+    <div class="pc-row"><span>Destination</span><span class="pc-dest">— not set —</span></div>
+    <div class="pc-row"><span>Distance</span><span class="pc-dist">—</span></div>
+    <button class="sec pc-pick">Pick destination on the map</button>
+    <div class="pc-btns"><button class="pc-send" disabled>Send offer</button>
+      <button class="sec pc-cancel">Cancel</button></div>
+    <div class="pc-note"></div>`;
+  document.body.appendChild(commEl);
+  const commPrice = commEl.querySelector(".pc-price");
+  const commDestEl = commEl.querySelector(".pc-dest");
+  const commDistEl = commEl.querySelector(".pc-dist");
+  const commSend = commEl.querySelector(".pc-send");
+
+  function commRender() {
+    if (!commDraft) { commEl.classList.remove("on"); return; }
+    commEl.classList.add("on");
+    commEl.querySelector("h3").textContent = "Commission " + commDraft.leaderName + " to guide you";
+    if (commDraft.dest) {
+      commDestEl.textContent = commDraft.dest.x + ", " + commDraft.dest.y;
+      const d = cheb(player.x, player.y, commDraft.dest.x, commDraft.dest.y);
+      commDistEl.textContent = d + " tiles";
+      commSend.disabled = false;
+    } else {
+      commDestEl.textContent = "— not set —";
+      commDistEl.textContent = "—";
+      commSend.disabled = true;
+    }
+    commEl.querySelector(".pc-note").textContent =
+      "The fee is escrowed now. Reach the spot together and it's all theirs; cancel partway and they're paid for the distance covered.";
+  }
+
+  commEl.querySelector(".pc-cancel").onclick = () => { commDraft = null; commRender(); };
+  commEl.querySelector(".pc-pick").onclick = () => {
+    if (!commDraft) return;
+    commEl.classList.remove("on");
+    say("Click your destination on the map.", "sys");
+    if (typeof openWorldMap === "function") openWorldMap();
+    if (typeof WorldMapPick === "function")
+      WorldMapPick(({ x, y }) => { commDraft.dest = { x, y }; commRender(); });
+  };
+  commSend.onclick = () => {
+    if (!commDraft || !commDraft.dest) return;
+    const price = Math.max(1, commPrice.value | 0);
+    if (countOf("coins") < price) { say("You don't have " + price + " gold.", "warn"); return; }
+    const rp = Live.players.get(commDraft.leaderId);
+    if (!rp) { say("They're gone."); commDraft = null; commRender(); return; }
+    commDraft.price = price;
+    Live.sendCommissionOffer(commDraft.leaderId, price, commDraft.dest.x, commDraft.dest.y);
+    say("You offer " + rp.name + " " + price + " gold to guide you to " +
+      commDraft.dest.x + "," + commDraft.dest.y + ". Waiting for their answer…");
+    commEl.classList.remove("on");   // keep commDraft until they answer
+  };
+
+  // ---- receiving: follow notes ----
+  Live.onFollowNote(m => {
+    const who = m.name || Live.nameOf(m.id) || "Someone";
+    say(m.on ? who + " is now following you." : who + " has stopped following you.", "sys");
+  });
+
+  // ---- receiving: commission negotiation + payouts ----
+  const commPaid = () => { try { return new Set(JSON.parse(localStorage.getItem("taiao_comm_paid") || "[]")); } catch (e) { return new Set(); } };
+  const commPaidSave = s => { try { localStorage.setItem("taiao_comm_paid", JSON.stringify([...s].slice(-200))); } catch (e) {} };
+
+  Live.onComm(m => {
+    const who = m.name || Live.nameOf(m.id) || "Someone";
+    if (m.t === "cm") {              // we were offered a guiding job
+      commAskAccept(m);
+      return;
+    }
+    if (m.t === "cmno") {            // our offer was declined
+      say(who + " declined your travel offer.", "warn");
+      commDraft = null; commRender();
+      return;
+    }
+    if (m.t === "cmok") {            // our offer was accepted → escrow + start
+      if (!commDraft || commDraft.leaderId !== m.id || !commDraft.dest) return;
+      const price = commDraft.price | 0, dest = commDraft.dest;
+      if (countOf("coins") < price) { say("You can no longer afford that fee — commission cancelled.", "warn"); commDraft = null; return; }
+      removeItem("coins", price);                       // escrow the fee now
+      if (typeof uiDirty !== "undefined") uiDirty = true;
+      if (typeof saveGame === "function") saveGame();
+      const cid = genCid();
+      const orig = Math.max(1, cheb(player.x, player.y, dest.x, dest.y));
+      _commArrSent = false; _commProgAt = 0;
+      Live.sendCommissionStart(m.id, cid, price, dest.x, dest.y, orig);
+      // start following under this commission
+      followStart(m.id, { cid, price, dest, origDist: orig });
+      say("You pay " + price + " gold into escrow and set off after " + who + ".", "gold");
+      commDraft = null; commRender();
+      return;
+    }
+    if (m.t === "cmstart") {         // WE are the guide — record the trip
+      leaderComms.set(m.cid, { followerId: m.id, name: who, dest: { x: m.dx | 0, y: m.dy | 0 },
+        price: m.price | 0, orig: Math.max(1, m.dist | 0), lastRem: m.dist | 0, arrSent: false, progAt: 0 });
+      say(who + " is paying " + (m.price | 0) + " gold for you to guide them to " + (m.dx | 0) + "," + (m.dy | 0) + ".", "gold");
+      return;
+    }
+    if (m.t === "cmpay") {           // a settlement payout addressed to us
+      const applied = commPaid();
+      if (!applied.has(m.cid)) {
+        const coins = Math.max(0, m.coins | 0);
+        if (coins > 0) { addItem("coins", coins); if (typeof uiDirty !== "undefined") uiDirty = true; if (typeof saveGame === "function") saveGame(); }
+        applied.add(m.cid); commPaidSave(applied);
+        leaderComms.delete(m.cid);
+        if (m.why === "deliver" && coins > 0) say("Commission complete — you earned " + coins + " gold guiding " + "a traveller.", "gold");
+        else if (m.why === "cancel" && coins > 0) say("Commission ended early — " + coins + " gold settled to you.", "sys");
+      }
+      Live.sendCommissionPayAck(m.cid);
+      return;
+    }
+  });
+
+  // a yes/no prompt for an incoming guiding offer (reuses the invite styling)
+  function commAskAccept(m) {
+    const who = m.name || "Someone";
+    const price = m.price | 0, dx = m.dx | 0, dy = m.dy | 0;
+    const near = (typeof world !== "undefined" && world.villagesNearPt) ? world.villagesNearPt(dx, dy, 60) : null;
+    const place = (near && near[0] && near[0].name) ? near[0].name + " (" + dx + "," + dy + ")" : dx + "," + dy;
+    const el = document.createElement("div");
+    el.style.cssText = "position:fixed;left:50%;bottom:120px;transform:translateX(-50%);z-index:63;" +
+      "background:rgba(16,22,30,0.97);border:1px solid #46586a;border-radius:8px;padding:9px 13px;" +
+      "color:#e6eef6;display:flex;gap:10px;align-items:center;font:12px OpenDyslexic,Verdana,sans-serif";
+    const span = document.createElement("span");
+    span.textContent = `${who} offers ${price} gold to be guided to ${place}.`;
+    const yes = document.createElement("button");
+    yes.textContent = "Accept"; yes.style.cssText = "background:#24463a;color:#c9ffe0;border:1px solid #3a6a52;border-radius:5px;padding:3px 10px;cursor:pointer;font:inherit";
+    yes.onclick = () => { Live.sendCommissionAccept(m.id); el.remove(); say("You agree to guide " + who + " for " + price + " gold.", "sys"); };
+    const no = document.createElement("button");
+    no.textContent = "Decline"; no.style.cssText = "background:#46282a;color:#ffd0c9;border:1px solid #6a3a3e;border-radius:5px;padding:3px 10px;cursor:pointer;font:inherit";
+    no.onclick = () => { Live.sendCommissionDecline(m.id); el.remove(); };
+    el.append(span, yes, no);
+    document.body.appendChild(el);
+    setTimeout(() => { if (el.parentNode) { el.remove(); Live.sendCommissionDecline(m.id); } }, 30000);
+  }
+
+  function openCommission(id) {
+    const rp = Live.players.get(id);
+    if (!rp) { say("They're not nearby."); return; }
+    commDraft = { leaderId: id, leaderName: rp.name, price: 50, dest: null };
+    commRender();
+  }
 
   // ---------------- shared picker panel ----------------
   const css = document.createElement("style");
@@ -259,5 +526,6 @@
   window.PlayerActions = {
     give: id => openPanel("give", id),
     feed: id => openPanel("feed", id),
+    commission: id => openCommission(id),
   };
 })();

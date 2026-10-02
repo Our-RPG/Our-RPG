@@ -25,6 +25,15 @@
  *   chat / t*                 public chat and player-to-player trading (gated
  *                             by env LIVE_CHAT / LIVE_TRADE = "on")
  *   fe                        feeding another player (one food item, relayed)
+ *   fol                       follow notification (someone follows/unfollows you)
+ *   cm / cmok / cmno          commission negotiation: offer a fee to be guided,
+ *                             guide accepts/declines
+ *   cmstart / cmprog / cmarr / cmcancel / cmpay
+ *                             commission ESCROW: the follower escrows the fee,
+ *                             progress is tracked, and the DO pays it out — whole
+ *                             fee to the guide on a both-arrived delivery, split by
+ *                             distance covered on a cancel; payouts re-deliver until
+ *                             acked (cmpayack), like a gift
  *   gv / gcommit / gack       giving items: a one-sided escrow — the gift is
  *                             persisted BEFORE delivery and re-delivered on
  *                             reconnect until the recipient acks, so a drop
@@ -284,6 +293,81 @@ export class LiveZone {
     } catch (e) {}
   }
 
+  // ---- commission escrow (pay-to-be-guided) -------------------------------
+  // The follower deducts `price` coins the instant they start the commission
+  // (their save is the authority on their own purse, same trust model as
+  // trades/gifts). The DO holds the escrow and, at settlement, hands each
+  // party a coin payout (comm pay) they apply idempotently and ack — like a
+  // gift, re-delivered on every hello until acked. A commission can only ever
+  // pay out `price` total: full to the leader on a both-arrived delivery, or
+  // split by distance covered on a cancel.
+  //   comm:<cid>      = { cid, f, l, price, dx, dy, orig, rem, arrF, arrL, at }
+  //   cpay:<cid>:<uid>= { cid, uid, coins, at }   pending payout
+  async commStart(st, to, cid, price, dx, dy, dist) {
+    const orig = Math.max(1, dist | 0);
+    const rec = { cid, f: st.id, l: to, price: Math.max(0, price | 0),
+                  dx: dx | 0, dy: dy | 0, orig, rem: orig, arrF: false, arrL: false, at: Date.now() };
+    try { await this.ctx.storage.put("comm:" + cid, rec); } catch (e) {}
+    // tell the leader the trip is on (they track arrival + follower-gone)
+    this.sendTo(to, { t: "cmstart", id: st.id, name: st.name, cid,
+                      price: rec.price, dx: rec.dx, dy: rec.dy, dist: orig });
+  }
+  async commProgress(cid, rem) {
+    try {
+      const rec = await this.ctx.storage.get("comm:" + cid);
+      if (!rec) return;
+      rec.rem = Math.max(0, Math.min(rec.orig, rem | 0));
+      await this.ctx.storage.put("comm:" + cid, rec);
+    } catch (e) {}
+  }
+  async commArrive(uid, cid) {
+    try {
+      const rec = await this.ctx.storage.get("comm:" + cid);
+      if (!rec) return;
+      if (uid === rec.f) rec.arrF = true;
+      if (uid === rec.l) rec.arrL = true;
+      if (rec.arrF && rec.arrL) {                       // delivered — whole fee to the leader
+        await this.ctx.storage.delete("comm:" + cid);
+        await this.payout(rec.l, cid, rec.price, "deliver");
+        await this.payout(rec.f, cid, 0, "deliver");    // closes the follower's side (0 coins, just the note)
+      } else {
+        await this.ctx.storage.put("comm:" + cid, rec);
+      }
+    } catch (e) {}
+  }
+  async commCancel(cid, rem) {
+    try {
+      const rec = await this.ctx.storage.get("comm:" + cid);
+      if (!rec) return;
+      await this.ctx.storage.delete("comm:" + cid);
+      const r = Math.max(0, Math.min(rec.orig, rem | 0));
+      const refund = Math.round((r / rec.orig) * rec.price);   // distance NOT covered → back to follower
+      const lead = rec.price - refund;                          // distance covered → to the leader
+      await this.payout(rec.f, cid, refund, "cancel");
+      await this.payout(rec.l, cid, lead, "cancel");
+    } catch (e) {}
+  }
+  async payout(uid, cid, coins, why) {
+    const key = "cpay:" + cid + ":" + uid;
+    const rec = { cid, uid, coins: Math.max(0, coins | 0), why, at: Date.now() };
+    try { await this.ctx.storage.put(key, rec); } catch (e) {}
+    this.sendTo(uid, { t: "cmpay", cid, coins: rec.coins, why });
+  }
+  async ackPay(uid, cid) {
+    try { await this.ctx.storage.delete("cpay:" + cid + ":" + uid); } catch (e) {}
+  }
+  async recoverComms(ws, uid) {
+    try {
+      // re-deliver any unclaimed payouts addressed to us
+      const pays = await this.ctx.storage.list({ prefix: "cpay:" });
+      const stale = Date.now() - 24 * 3600e3;
+      for (const [k, rec] of pays) {
+        if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
+        if (rec.uid === uid) this.send(ws, { t: "cmpay", cid: rec.cid, coins: rec.coins, why: rec.why });
+      }
+    } catch (e) {}
+  }
+
   webSocketMessage(ws, msg) {
     if (typeof msg !== "string" || msg.length > MAX_MSG_BYTES) return;
     const st = this.state(ws);
@@ -325,6 +409,7 @@ export class LiveZone {
       // before acking (disconnect mid-trade) — re-applied idempotently
       if (this.env.LIVE_TRADE === "on") this.recoverTrades(ws, st.id);
       this.recoverGifts(ws, st.id);
+      this.recoverComms(ws, st.id);   // unclaimed commission payouts
       return;
     }
 
@@ -467,6 +552,40 @@ export class LiveZone {
         if (gid) this.ackGift(st.id, gid);
         return;
       }
+      case "fol": {  // follow notification — pure relay to the followed player
+        const to = num(m.to, 1e12) | 0;
+        if (!to || to === st.id) return;
+        this.sendTo(to, { t: "fol", id: st.id, name: st.name, on: !!m.on });
+        return;
+      }
+      case "cm": {   // commission offer — relay to the would-be guide
+        const to = num(m.to, 1e12) | 0;
+        if (!to || to === st.id) return;
+        this.sendTo(to, { t: "cm", id: st.id, name: st.name,
+          price: num(m.price, 1e9) | 0, dx: num(m.dx) | 0, dy: num(m.dy) | 0 });
+        return;
+      }
+      case "cmok": { // guide accepts — relay to the follower (who then escrows)
+        const to = num(m.to, 1e12) | 0;
+        if (to && to !== st.id) this.sendTo(to, { t: "cmok", id: st.id, name: st.name });
+        return;
+      }
+      case "cmno": { // guide declines
+        const to = num(m.to, 1e12) | 0;
+        if (to && to !== st.id) this.sendTo(to, { t: "cmno", id: st.id, name: st.name });
+        return;
+      }
+      case "cmstart": {  // follower escrowed the fee — open the commission record
+        const to = num(m.to, 1e12) | 0;
+        const cid = str(m.cid, 64);
+        if (!to || to === st.id || !cid) return;
+        this.commStart(st, to, cid, num(m.price, 1e9) | 0, num(m.dx) | 0, num(m.dy) | 0, num(m.dist, 1e7) | 0);
+        return;
+      }
+      case "cmprog": { const cid = str(m.cid, 64); if (cid) this.commProgress(cid, num(m.rem, 1e7) | 0); return; }
+      case "cmarr": { const cid = str(m.cid, 64); if (cid) this.commArrive(st.id, cid); return; }
+      case "cmcancel": { const cid = str(m.cid, 64); if (cid) this.commCancel(cid, num(m.rem, 1e7) | 0); return; }
+      case "cmpayack": { const cid = str(m.cid, 64); if (cid) this.ackPay(st.id, cid); return; }
       case "tack": {   // "I applied that committed swap" — lets us drop the record
         if (this.env.LIVE_TRADE !== "on") return;
         const tid = str(m.tid, 64);

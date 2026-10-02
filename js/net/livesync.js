@@ -60,6 +60,7 @@
   let myId = 0;
   const chatListeners = [], tradeListeners = [], rosterListeners = [];
   const entListeners = [], feedListeners = [], giftListeners = [];
+  const followListeners = [], commListeners = [];
   const fire = (fns, m) => { for (const fn of fns) { try { fn(m); } catch (e) {} } };
   // the light the local player carries, as a sync-able brightness tier
   const myCndl = () => (typeof candleInHand === "function" ? candleInHand() : 0) | 0;
@@ -267,6 +268,13 @@
         return;
       case "gcommit": // a gift addressed to us (escrowed server-side until gack)
         fire(giftListeners, m);
+        return;
+      case "fol":   // someone started/stopped following us
+        fire(followListeners, m);
+        return;
+      // commission (pay-to-be-guided) negotiation + escrow settlement
+      case "cm": case "cmok": case "cmno": case "cmstart": case "cmpay":
+        fire(commListeners, m);
         return;
       case "e": {   // someone's deed, made visible
         const rp = players.get(m.id); if (!rp) return;
@@ -536,6 +544,20 @@
     sendGive: (to, items) => send({ t: "gv", to, items }),
     onGift: fn => giftListeners.push(fn),
     sendGiftAck: gid => send({ t: "gack", gid }),
+    // follow notifications (net/player-actions.js)
+    sendFollowNote: (to, on) => send({ t: "fol", to: to | 0, on: !!on }),
+    onFollowNote: fn => followListeners.push(fn),
+    // commission (pay-to-be-guided) — negotiation + escrow settlement
+    sendCommissionOffer: (to, price, dx, dy) => send({ t: "cm", to: to | 0, price: price | 0, dx: dx | 0, dy: dy | 0 }),
+    sendCommissionAccept: to => send({ t: "cmok", to: to | 0 }),
+    sendCommissionDecline: to => send({ t: "cmno", to: to | 0 }),
+    sendCommissionStart: (to, cid, price, dx, dy, dist) =>
+      send({ t: "cmstart", to: to | 0, cid: String(cid), price: price | 0, dx: dx | 0, dy: dy | 0, dist: dist | 0 }),
+    sendCommissionProgress: (cid, rem) => send({ t: "cmprog", cid: String(cid), rem: rem | 0 }),
+    sendCommissionArrive: cid => send({ t: "cmarr", cid: String(cid) }),
+    sendCommissionCancel: (cid, rem) => send({ t: "cmcancel", cid: String(cid), rem: rem | 0 }),
+    sendCommissionPayAck: cid => send({ t: "cmpayack", cid: String(cid) }),
+    onComm: fn => commListeners.push(fn),
     onChat: fn => chatListeners.push(fn),
     onTrade: fn => tradeListeners.push(fn),
     onRoster: fn => rosterListeners.push(fn),

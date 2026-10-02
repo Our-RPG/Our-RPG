@@ -2152,7 +2152,22 @@ wmEl.addEventListener("wheel", e => {
   wmScheduleDraw();
 }, { passive: false });
 wmEl.addEventListener("mousedown", e => { wm.drag = { x: e.clientX, y: e.clientY, cx: wm.cx, cy: wm.cy, moved: false }; });
-window.addEventListener("mouseup", () => { wm.drag = null; });
+let wmLastMoved = false;
+window.addEventListener("mouseup", () => { wmLastMoved = !!(wm.drag && wm.drag.moved); wm.drag = null; });
+
+// one-shot destination picker (net/player-actions.js commission flow): the
+// next non-drag click on the map returns its game-tile coords, then clears.
+let wmPickCb = null;
+window.WorldMapPick = fn => { wmPickCb = fn; };
+wmCanvas.addEventListener("click", e => {
+  if (!wmPickCb || wmLastMoved) return;
+  const r = wmCanvas.getBoundingClientRect();
+  const wx = Math.round((e.clientX - r.left - wmCanvas.clientWidth / 2) / wm.zoom + wm.cx);
+  const wy = Math.round((e.clientY - r.top - wmCanvas.clientHeight / 2) / wm.zoom + wm.cy);
+  const cb = wmPickCb; wmPickCb = null;
+  closeWorldMap();
+  try { cb({ x: wx, y: wy }); } catch (err) {}
+});
 // cheat-mode teleport is DOUBLE-click on the map (single click / drag just pans),
 // so an accidental click never yanks you across the world
 wmCanvas.addEventListener("dblclick", e => {

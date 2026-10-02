@@ -508,15 +508,20 @@ var Split = (() => {
       const active = take();
       let fallen = null;
       ghost = true;
+      // multiplayer follow (net/player-actions.js): while a follow is active
+      // every self trails the leader too, so a split player moves as a group —
+      // force-tick otherwise-idle bodies so Follow can give them a path
+      const following = typeof Follow !== "undefined" && Follow.active && Follow.active();
       try {
         for (const b of arr) {
-          if (!needsTick(b)) continue;
+          if (!needsTick(b) && !following) continue;
           // a ghost that died last frame is ABSORBED, never respawned — catch
           // it here, before stepPlayer's dying branch would wake it in town
           if (b.dying) { (fallen = fallen || []).push(b); continue; }
           put(b);
           try {
             if (idleNow() && player.queue.length) pursueTask(player.queue.shift());
+            else if (following) Follow.stepBody();   // trail the leader (throttled per body)
             stepPlayer(dt);
             updateAction();
           } finally {

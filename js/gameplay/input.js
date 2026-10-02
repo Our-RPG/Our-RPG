@@ -326,7 +326,12 @@ function buildTileMenu(t) {
     // — invites come from this menu, not a chat-side strip).
     if (tg.kind === "rplayer") {
       const rp = tg.rp;
-      items.push({ label: `Follow ${rp.name}`, fn: () => { if (window.Follow) Follow.start(rp.id); } });
+      const following = typeof Follow !== "undefined" && Follow.isFollowing && Follow.isFollowing(rp.id);
+      if (following)
+        items.push({ label: `Unfollow ${rp.name}`, fn: () => { if (window.Follow) Follow.stop(); } });
+      else
+        items.push({ label: `Follow ${rp.name}`, fn: () => { if (window.Follow) Follow.start(rp.id); } });
+      items.push({ label: `Commission ${rp.name} to guide me…`, fn: () => { if (window.PlayerActions) PlayerActions.commission(rp.id); } });
       if (typeof Live !== "undefined" && Live.tradeOn())
         items.push({ label: `Trade with ${rp.name}`, fn: () => { if (window.LiveTrade) LiveTrade.invite(rp.id); } });
       items.push({ label: `Give items to ${rp.name}…`, fn: () => { if (window.PlayerActions) PlayerActions.give(rp.id); } });
