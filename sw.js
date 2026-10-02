@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v32"; // v32: WORLDGEN_SIG re-key (chunks.js comment) — the REAL fix for the Newhaven 3D-ground vista. v31 only re-keyed MAPBAKE_SIG (map images); the torn-v29 window also persisted holed-ground CHUNKS into ioe-chunks-<live sig>, which reload broken forever (buildChunkMesh throws → far-LOD vista). Moving WORLDGEN_SIG sweeps that chunk-DATA store; chunks regenerate clean. Verified: poisoned chunk → vista → sig bump → clean paving.
+const CACHE_VERSION = "taiao-v33"; // v33: SELF-HEALING chunk cache (chunks.js _chunkGroundValid) so the vista bug can never persist again — a holed-ground chunk is refused on persist AND dropped on hydrate (then regenerated), independent of any sig. v32 was the one-time cleanup; v33 is the permanent guard. (sig bumps because chunks.js changed, but the fix no longer RELIES on sig bumps.)
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

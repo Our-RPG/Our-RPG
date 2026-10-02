@@ -276,8 +276,28 @@ function createWorldChunks(ctx) {
       }
     }).catch(() => { /* cache miss is fine */ });
   }
+  // Structural validity of a chunk's persisted ground: length matches and
+  // EVERY cell is a non-empty string tile key (genChunk's terrain loop sets
+  // every cell to biomeGround(...), always a string — a null/undefined entry
+  // can only be corruption). A holed-ground chunk makes buildChunkMesh throw
+  // (render3d.js) and the tile falls to the far-LOD vista; if such a chunk is
+  // ever persisted it reloads broken FOREVER (keyed by the live WORLDGEN_SIG
+  // — the 2026-10-02 torn-deploy incident, see memory/bundle-loader-checklist).
+  // So we refuse to persist garbage AND refuse to hydrate it: self-healing,
+  // no sig bump needed. This store is a pure regeneration cache, so dropping a
+  // bad record just means getChunk() rebuilds it clean from current code.
+  const _CHUNK_N = CHUNK * CHUNK;
+  function _chunkGroundValid(g) {
+    if (!g || g.length !== _CHUNK_N) return false;
+    for (let i = 0; i < _CHUNK_N; i++) if (typeof g[i] !== "string" || !g[i]) return false;
+    return true;
+  }
   function _persistChunk(cx, cy, ch) {
     if (_inIsletZone(cx, cy)) return; // character-dependent geometry — never cache
+    if (!_chunkGroundValid(ch.ground)) { // never write a holed chunk to IDB
+      console.warn("chunks: refusing to persist invalid chunk", cx, cy);
+      return;
+    }
     _openDB().then(db => {
       const tx = db.transaction('c', 'readwrite');
       tx.objectStore('c').put({
@@ -306,14 +326,22 @@ function createWorldChunks(ctx) {
         // never clobber a chunk that was generated (or hydrated) while this
         // async read was in flight — it may already hold live runtime state
         if (dt && !chunks.has(key)) {
-          const hyd = {
-            cx: ccx, cy: ccy,
-            ground: dt.g, decor: dt.d, blocked: new Uint8Array(dt.b),
-            nodes: dt.n, spawnDefs: dt.s, buildings: dt.bl, labels: dt.la,
-            activated: false,
-          };
-          chunks.set(key, hyd);
-          deriveNpcs(hyd); // shopkeepers exist for cached chunks too
+          if (!_chunkGroundValid(dt.g)) {
+            // poisoned / corrupt record (e.g. a torn-deploy mid-edit bundle):
+            // drop it so getChunk() regenerates this chunk clean on demand,
+            // instead of hydrating holed ground that renders as the vista
+            try { _openDB().then(d2 => d2.transaction('c', 'readwrite').objectStore('c').delete(_ck(ccx, ccy))).catch(() => {}); } catch (e2) { /* best effort */ }
+            console.warn("chunks: dropped invalid cached chunk", key);
+          } else {
+            const hyd = {
+              cx: ccx, cy: ccy,
+              ground: dt.g, decor: dt.d, blocked: new Uint8Array(dt.b),
+              nodes: dt.n, spawnDefs: dt.s, buildings: dt.bl, labels: dt.la,
+              activated: false,
+            };
+            chunks.set(key, hyd);
+            deriveNpcs(hyd); // shopkeepers exist for cached chunks too
+          }
         }
         _hyd++;
         if ((_hyd & 7) === 0 && typeof window !== "undefined" && window.__boot)
