@@ -68,7 +68,7 @@ ALLOWED_ORIGINS = "https://our-rpg.com,https://html.itch.zone,http://localhost:8
 # NPC dialogue engine (closed-source service; see ~/npc-engine/server/README.md).
 # Empty = feature off: /api/npc/chat answers {reply:null,off:true} and clients
 # fall back to the canned bank. Secret pair: `wrangler secret put NPC_ENGINE_KEY`.
-NPC_ENGINE_URL = "http://npc.our-rpg.com:8080"
+NPC_ENGINE_URL = "https://npc.our-rpg.com"
 # WebAuthn relying-party fallback id (used only when a request carries no
 # Origin header; with one, rpIdFor() derives the RP id per-origin from the
 # allowlist above — our-rpg.com passkeys and itch passkeys coexist).
