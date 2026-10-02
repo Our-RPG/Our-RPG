@@ -101,12 +101,18 @@ function targetsAt(x, y) {
   return out;
 }
 
-// a remote player standing on (or mid-step onto) this tile, on our storey
+// a remote player standing on (or mid-step onto) this tile, on our storey —
+// OR any of their split selves (every body of a split player is clickable;
+// the menu targets the owning account, so the action is the same whichever
+// body you click).
 function remotePlayerAt(x, y) {
   if (typeof Live === "undefined" || !Live.players || !Live.players.size) return null;
+  const lv = player.level | 0;
   for (const rp of Live.players.values()) {
-    if ((rp.level | 0) !== (player.level | 0)) continue;
-    if ((rp.x === x && rp.y === y) || (rp.moving && rp.moving.tx === x && rp.moving.ty === y)) return rp;
+    if ((rp.level | 0) === lv &&
+        ((rp.x === x && rp.y === y) || (rp.moving && rp.moving.tx === x && rp.moving.ty === y))) return rp;
+    if (rp.sp) for (const b of rp.sp)
+      if ((b.level | 0) === lv && b.tx === x && b.ty === y) return rp;
   }
   return null;
 }

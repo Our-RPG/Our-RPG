@@ -6097,8 +6097,15 @@ void main() {
           m.material = charMat;
           setCharUV(m.geometry, rp.character * CHAR_DIRS.length + rdi);
         }
-        const rx = rp.px != null ? WX(rp.px) : rp.x + 0.5;
-        const ry = rp.py != null ? WX(rp.py) : rp.y + 0.5;
+        let rx = rp.px != null ? WX(rp.px) : rp.x + 0.5;
+        let ry = rp.py != null ? WX(rp.py) : rp.y + 0.5;
+        // their attack lunge (net fx): the same 200ms shove toward the target
+        // the local player's body makes when it swings/shoots/casts
+        if (now - (rp.lungeT || -9999) < 200 && rp.lungeDir) {
+          const lp = 1 - (now - rp.lungeT) / 200;
+          rx += rp.lungeDir[0] * 0.18 * lp;
+          ry += rp.lungeDir[1] * 0.18 * lp;
+        }
         m.userData.lift = rp.moving ? Math.abs(Math.sin(now / 90 + rp.id)) * 0.08 : 0;
         const rSt = (typeof CHAR_STATS !== "undefined" && CHAR_STATS[rp.character]) || null;
         const rH = rSt ? rSt.h : 1, rW = rSt ? rSt.w : 1;
@@ -7088,12 +7095,30 @@ void main() {
           (rp.level | 0) * STOREY_H + 0.15;
         const p = project(rp.px, rp.py, rhh);
         if (p.behind) continue;
+        // their health bar — shown while hurt or fighting, like a monster's,
+        // so a blow landing on them (net fx) reads at a glance
+        if (rp.mhp && rp.hp != null && (rp.hp < rp.mhp || rp.act === "combat"))
+          barAt(p.x, p.y - 2 * uiK, rp.hp / rp.mhp);
         octx.fillStyle = "#a8ffc9";                    // green = a fellow player
-        octx.fillText(rp.name + (rp.clvl ? " (lvl " + rp.clvl + ")" : ""), p.x, p.y - 6 * uiK);
+        octx.fillText(rp.name + (rp.clvl ? " (lvl " + rp.clvl + ")" : ""), p.x, p.y - 10 * uiK);
         // what they're doing right now, at a glance
         if (rp.act)
           octx.fillText(rp.act === "gather" ? "⛏" : rp.act === "combat" ? "⚔" : "🔨",
-            p.x, p.y - 20 * uiK);
+            p.x, p.y - 24 * uiK);
+        // their SPLIT SELVES: each ghost carries OUR username and its own
+        // combat level (split halves xp), plus its current-action indicator —
+        // so every body of a split player is labelled on every screen
+        if (rp.sp) for (const b of rp.sp) {
+          if (Math.abs(b.x - player.x) > _ovr || Math.abs(b.y - player.y) > _ovr) continue;
+          const ghh = CHAR_SCALE * (rSt ? rSt.h : 1) + liftPx(b.px, b.py) + (b.level | 0) * STOREY_H + 0.15;
+          const gp = project(b.px, b.py, ghh);
+          if (gp.behind) continue;
+          octx.fillStyle = "#9fe6c0";
+          octx.fillText(rp.name + (b.clvl ? " (lvl " + b.clvl + ")" : ""), gp.x, gp.y - 10 * uiK);
+          if (b.act)
+            octx.fillText(b.act === "gather" ? "⛏" : b.act === "combat" ? "⚔" : "🔨",
+              gp.x, gp.y - 24 * uiK);
+        }
         // their public-chat line as an overhead bubble (once chat is live)
         if (rp._say && TL < rp._say.until) {
           octx.font = "bold 12px OpenDyslexic, Verdana";

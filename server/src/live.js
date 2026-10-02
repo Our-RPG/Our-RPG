@@ -8,7 +8,12 @@
  *                             the exact interpolation) and teleports
  *   s / a                     appearance (outfit/character/carried light) and
  *                             action state
- *   sp                        split selves — the sender's extra bodies
+ *   sp                        split selves — each extra body's tile, facing,
+ *                             own combat level and action
+ *   fx                        player visual combat events (lunge / hit+health /
+ *                             heal / floating xp / projectile) — ephemeral,
+ *                             proximity-relayed so every nearby screen sees the
+ *                             same swings, hitsplats, arrows and xp as the owner
  *   e                         discrete deeds: kill, shop buy/sell
  *   n                         instant node/decor depletion (a VISUAL courier —
  *                             the RegionLedger stays the authority; its pull
@@ -50,6 +55,10 @@ const CHAT_RADIUS = 80;
 // entity-sync batches reach everyone who could possibly see the entities the
 // sender is simulating (sim radius 48 + a generous view margin)
 const ENT_RADIUS = 140;
+// player visual events (lunge/hit/heal/float/projectile) reach everyone who
+// could see the player — same generous view margin as entity sync
+const FX_RADIUS = 140;
+const FX_KINDS = new Set(["lg", "ht", "hp", "fl", "pj"]);
 
 const num = (v, lim = 1e7) => {
   const n = Number(v);
@@ -355,11 +364,12 @@ export class LiveZone {
                      cndl: st.cndl }, ws);
         return;
       }
-      case "sp": {  // split selves: the sender's extra bodies (or null = whole again)
+      case "sp": {  // split selves: [x,y,d8,storey,clvl,actCode] per extra body
         let b = null;
         if (Array.isArray(m.b)) {
           b = m.b.slice(0, 4).map(e => [num(e && e[0]), num(e && e[1]),
-            str(e && e[2], 10), num(e && e[3], 8) | 0]);
+            str(e && e[2], 10), num(e && e[3], 8) | 0,
+            num(e && e[4], 99) | 0, str(e && e[5], 1)]);
         }
         st.sp = b && b.length ? b : null;
         this.save(ws, st, true);
@@ -370,6 +380,36 @@ export class LiveZone {
         const k = m.k && ACT_KINDS.has(m.k) ? m.k : null;
         st.act = k;
         this.bcast({ t: "a", id: st.id, k }, ws);
+        return;
+      }
+      case "fx": {  // player visual combat event (lunge / hit / heal / float /
+                    // projectile) — ephemeral, proximity-relayed, never stored.
+        const k = str(m.k, 2);
+        if (!FX_KINDS.has(k)) return;
+        const out = { t: "fx", id: st.id, k };
+        if (m.hp != null) out.hp = num(m.hp, 1e6) | 0;
+        if (m.mhp != null) out.mhp = num(m.mhp, 1e6) | 0;
+        if (k === "lg" && Array.isArray(m.d))
+          out.d = [Math.max(-1, Math.min(1, num(m.d[0], 2) | 0)), Math.max(-1, Math.min(1, num(m.d[1], 2) | 0))];
+        if (k === "ht") out.v = num(m.v, 1e6) | 0;
+        if (k === "fl") {
+          out.s = str(m.s, 48).replace(/[\x00-\x1f\x7f]/g, " ");
+          if (m.c) out.c = str(m.c, 12);
+          if (m.z) out.z = num(m.z, 64) | 0;
+        }
+        if (k === "pj") {
+          const p = m.p;
+          if (!p || typeof p !== "object") return;
+          try { if (JSON.stringify(p).length > 320) return; } catch (e) { return; }
+          out.p = { kind: str(p.kind, 8), x0: num(p.x0), y0: num(p.y0),
+            x1: num(p.x1), y1: num(p.y1), dur: num(p.dur, 5000) };
+          if (p.h0 != null) out.p.h0 = num(p.h0, 1e4);
+          if (p.h1 != null) out.p.h1 = num(p.h1, 1e4);
+          if (p.peak != null) out.p.peak = num(p.peak, 1e4);
+          if (p.hitT != null) out.p.hitT = num(p.hitT, 2);
+          if (p.col) out.p.col = str(p.col, 12);
+        }
+        this.bcastNear(st, out, FX_RADIUS, ws);
         return;
       }
       case "e": {   // discrete deed — a visible moment, not an authority claim
