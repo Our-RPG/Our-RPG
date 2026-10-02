@@ -33,6 +33,8 @@ const P = {
   floorDepth: 10,      // nominal shelf depth of a standing-floor item
   chargesMax: 2.2,     // charges never exceed 2.2× the neutral anchor
   dailyDrawFrac: 0.35, // one account may draw ≤ this × operating cash / day
+  commPerTile: 1.8,    // commission baseline market rate — coins per tile guided
+  commMin: 5,          // suggested travel fee never dips below this (short hops)
 };
 
 const clamp = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
@@ -108,6 +110,19 @@ function dayCap(townKey, item) { return Math.max(20, Math.round(4 * baselineDema
 // Target stock from believed demand; serverTarget uses ledger-only floor 0.
 function targetStock(floorQty, emaOut, base, days) {
   return Math.max(1, floorQty + Math.max(emaOut, base) * (days || P.daysOfSupply));
+}
+
+// ---- commission (pay-to-be-guided) market rate --------------------------
+// The suggested travel fee for guiding someone `dist` tiles. ratePerTile is
+// the live observed market average (coins/tile) the LiveZone DO tracks across
+// delivered commissions; when it has none yet (fresh zone / offline) the
+// caller passes 0 and we fall back to the commPerTile baseline. A short-hop
+// floor keeps tiny trips from suggesting ~0. Pure — the caller shows it as a
+// pre-filled suggestion the player can revise.
+function commissionSuggest(dist, ratePerTile) {
+  const d = Math.max(1, dist | 0);
+  const rate = ratePerTile > 0 ? ratePerTile : P.commPerTile;
+  return Math.max(P.commMin, Math.round(rate * d));
 }
 
 // ---- the shared quote --------------------------------------------------
@@ -207,6 +222,6 @@ root.EconCore = {
   P, fnv, clamp, shopParams,
   operatingCash, reserveOf, tillCapOf, dailyDrawCap,
   baselineDemand, decay, bump, dayCap, targetStock,
-  quote, quoteSellLot,
+  quote, quoteSellLot, commissionSuggest,
 };
 })(typeof globalThis !== "undefined" ? globalThis : self);

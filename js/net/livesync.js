@@ -60,7 +60,8 @@
   let myId = 0;
   const chatListeners = [], tradeListeners = [], rosterListeners = [];
   const entListeners = [], feedListeners = [], giftListeners = [];
-  const followListeners = [], commListeners = [];
+  const followListeners = [], commListeners = [], hitchListeners = [];
+  let commRate = 0;   // average coins/tile the DO reports (0 = none yet → formula)
   const fire = (fns, m) => { for (const fn of fns) { try { fn(m); } catch (e) {} } };
   // the light the local player carries, as a sync-able brightness tier
   const myCndl = () => (typeof candleInHand === "function" ? candleInHand() : 0) | 0;
@@ -275,6 +276,13 @@
       // commission (pay-to-be-guided) negotiation + escrow settlement
       case "cm": case "cmok": case "cmno": case "cmstart": case "cmpay":
         fire(commListeners, m);
+        return;
+      case "commrate":   // the zone's average travel rate (coins/tile)
+        commRate = +m.r > 0 ? +m.r : 0;
+        return;
+      // hitchhiking: public roadside offers + a driver's pickup
+      case "hh": case "hhcancel": case "hhpick":
+        fire(hitchListeners, m);
         return;
       case "e": {   // someone's deed, made visible
         const rp = players.get(m.id); if (!rp) return;
@@ -558,6 +566,13 @@
     sendCommissionCancel: (cid, rem) => send({ t: "cmcancel", cid: String(cid), rem: rem | 0 }),
     sendCommissionPayAck: cid => send({ t: "cmpayack", cid: String(cid) }),
     onComm: fn => commListeners.push(fn),
+    commRate: () => commRate,     // avg coins/tile (0 = unknown → use the formula)
+    // hitchhiking (public roadside offers): broadcast an offer, withdraw it,
+    // or (as a driver) pick up a hitchhiker
+    sendHitch: (price, dx, dy) => send({ t: "hh", price: price | 0, dx: dx | 0, dy: dy | 0 }),
+    sendHitchCancel: () => send({ t: "hhcancel" }),
+    sendHitchPick: to => send({ t: "hhpick", to: to | 0 }),
+    onHitch: fn => hitchListeners.push(fn),
     onChat: fn => chatListeners.push(fn),
     onTrade: fn => tradeListeners.push(fn),
     onRoster: fn => rosterListeners.push(fn),

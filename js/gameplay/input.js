@@ -332,6 +332,11 @@ function buildTileMenu(t) {
       else
         items.push({ label: `Follow ${rp.name}`, fn: () => { if (window.Follow) Follow.start(rp.id); } });
       items.push({ label: `Commission ${rp.name} to guide me…`, fn: () => { if (window.PlayerActions) PlayerActions.commission(rp.id); } });
+      // a player with their thumb out (hitchhiking): offer to pick them up — same
+      // escrow as a commission, they follow you to their posted destination.
+      if (rp._hitch && rp._hitch.until > Date.now())
+        items.push({ label: `Pick up ${rp.name} (hitchhiking → ${rp._hitch.price}g)`,
+          fn: () => { if (window.PlayerActions) PlayerActions.pickUp(rp.id); } });
       if (typeof Live !== "undefined" && Live.tradeOn())
         items.push({ label: `Trade with ${rp.name}`, fn: () => { if (window.LiveTrade) LiveTrade.invite(rp.id); } });
       items.push({ label: `Give items to ${rp.name}…`, fn: () => { if (window.PlayerActions) PlayerActions.give(rp.id); } });
@@ -512,6 +517,15 @@ function buildTileMenu(t) {
         : `A fine wax candle burns atop a ${standName || "sturdy"} stand — set out by the lamplighters at dusk and gathered in again at dawn.`;
       items.push({ label: `Examine ${cs.inside ? "candle" : "candle stand"}`, fn: () => log(dex, "sys") });
     }
+  }
+  // standing on your own tile, online: offer to hitchhike (post a public lift
+  // request) — or stop, if you're already thumbing it. Only when by a road.
+  if (typeof Hitch !== "undefined" && t.x === (player.x | 0) && t.y === (player.y | 0)
+      && typeof Live !== "undefined" && Live.connected && Live.connected()) {
+    if (Hitch.active())
+      items.push({ label: "Stop hitchhiking", fn: () => Hitch.stop() });
+    else
+      items.push({ label: "Hitchhike from here…", fn: () => Hitch.toggle() });
   }
   items.push({ label: "Walk here", fn: () => walkTo(t.x, t.y) });
   return items;

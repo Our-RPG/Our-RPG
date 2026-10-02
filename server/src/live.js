@@ -68,6 +68,9 @@ const ENT_RADIUS = 140;
 // could see the player — same generous view margin as entity sync
 const FX_RADIUS = 140;
 const FX_KINDS = new Set(["lg", "ht", "hp", "fl", "pj"]);
+// a roadside hitchhiking offer reaches a bit past chat range, so a driver
+// trotting down the road spots a thumb out before they're on top of them
+const HH_RADIUS = 110;
 
 const num = (v, lim = 1e7) => {
   const n = Number(v);
@@ -301,11 +304,21 @@ export class LiveZone {
   // gift, re-delivered on every hello until acked. A commission can only ever
   // pay out `price` total: full to the leader on a both-arrived delivery, or
   // split by distance covered on a cancel.
-  //   comm:<cid>      = { cid, f, l, price, dx, dy, orig, rem, arrF, arrL, at }
-  //   cpay:<cid>:<uid>= { cid, uid, coins, at }   pending payout
+  // The escrow is a JOINT account, not a loose amount: the record names BOTH
+  // parties (f = follower/payer, l = leader/guide) and the coin it holds, and
+  // nothing may be drawn from it until the contract completes (both arrive) or
+  // breaks (either logs off / withdraws / dies — all surface here as a cancel).
+  //   comm:<cid>      = { cid, f, l, fn, ln, price, dx, dy, orig, rem, arrF, arrL, at }
+  //   cpay:<cid>:<uid>= { cid, uid, coins, why, other, at }   pending payout
+  //   commrate        = { r, at }   light EMA of coins/tile across deliveries
+  nameById(id) {
+    for (const [, s] of this.all()) if (s.hello && s.id === id) return s.name || "";
+    return "";
+  }
   async commStart(st, to, cid, price, dx, dy, dist) {
     const orig = Math.max(1, dist | 0);
-    const rec = { cid, f: st.id, l: to, price: Math.max(0, price | 0),
+    const rec = { cid, f: st.id, l: to, fn: st.name, ln: this.nameById(to),
+                  price: Math.max(0, price | 0),
                   dx: dx | 0, dy: dy | 0, orig, rem: orig, arrF: false, arrL: false, at: Date.now() };
     try { await this.ctx.storage.put("comm:" + cid, rec); } catch (e) {}
     // tell the leader the trip is on (they track arrival + follower-gone)
@@ -328,8 +341,9 @@ export class LiveZone {
       if (uid === rec.l) rec.arrL = true;
       if (rec.arrF && rec.arrL) {                       // delivered — whole fee to the leader
         await this.ctx.storage.delete("comm:" + cid);
-        await this.payout(rec.l, cid, rec.price, "deliver");
-        await this.payout(rec.f, cid, 0, "deliver");    // closes the follower's side (0 coins, just the note)
+        await this.bumpCommRate(rec.price / rec.orig);  // a real trade feeds the market rate
+        await this.payout(rec.l, cid, rec.price, "deliver", rec.fn);
+        await this.payout(rec.f, cid, 0, "deliver", rec.ln); // closes the follower's side (0 coins, just the note)
       } else {
         await this.ctx.storage.put("comm:" + cid, rec);
       }
@@ -343,15 +357,31 @@ export class LiveZone {
       const r = Math.max(0, Math.min(rec.orig, rem | 0));
       const refund = Math.round((r / rec.orig) * rec.price);   // distance NOT covered → back to follower
       const lead = rec.price - refund;                          // distance covered → to the leader
-      await this.payout(rec.f, cid, refund, "cancel");
-      await this.payout(rec.l, cid, lead, "cancel");
+      await this.payout(rec.f, cid, refund, "cancel", rec.ln);
+      await this.payout(rec.l, cid, lead, "cancel", rec.fn);
     } catch (e) {}
   }
-  async payout(uid, cid, coins, why) {
+  async payout(uid, cid, coins, why, other) {
     const key = "cpay:" + cid + ":" + uid;
-    const rec = { cid, uid, coins: Math.max(0, coins | 0), why, at: Date.now() };
+    const rec = { cid, uid, coins: Math.max(0, coins | 0), why, other: other || "", at: Date.now() };
     try { await this.ctx.storage.put(key, rec); } catch (e) {}
-    this.sendTo(uid, { t: "cmpay", cid, coins: rec.coins, why });
+    this.sendTo(uid, { t: "cmpay", cid, coins: rec.coins, why, other: rec.other });
+  }
+  // light EMA of coins-per-tile across delivered commissions — the "average
+  // market rate" the offer panel pre-fills (served at hello via sendCommRate).
+  async bumpCommRate(perTile) {
+    if (!(perTile > 0)) return;
+    try {
+      const rec = await this.ctx.storage.get("commrate");
+      const prev = rec && rec.r > 0 ? rec.r : perTile;
+      await this.ctx.storage.put("commrate", { r: prev * 0.8 + perTile * 0.2, at: Date.now() });
+    } catch (e) {}
+  }
+  async sendCommRate(ws) {
+    try {
+      const rec = await this.ctx.storage.get("commrate");
+      this.send(ws, { t: "commrate", r: rec && rec.r > 0 ? rec.r : 0 });
+    } catch (e) {}
   }
   async ackPay(uid, cid) {
     try { await this.ctx.storage.delete("cpay:" + cid + ":" + uid); } catch (e) {}
@@ -363,7 +393,7 @@ export class LiveZone {
       const stale = Date.now() - 24 * 3600e3;
       for (const [k, rec] of pays) {
         if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
-        if (rec.uid === uid) this.send(ws, { t: "cmpay", cid: rec.cid, coins: rec.coins, why: rec.why });
+        if (rec.uid === uid) this.send(ws, { t: "cmpay", cid: rec.cid, coins: rec.coins, why: rec.why, other: rec.other || "" });
       }
     } catch (e) {}
   }
@@ -410,6 +440,7 @@ export class LiveZone {
       if (this.env.LIVE_TRADE === "on") this.recoverTrades(ws, st.id);
       this.recoverGifts(ws, st.id);
       this.recoverComms(ws, st.id);   // unclaimed commission payouts
+      this.sendCommRate(ws);          // current average travel rate (coins/tile)
       return;
     }
 
@@ -586,6 +617,20 @@ export class LiveZone {
       case "cmarr": { const cid = str(m.cid, 64); if (cid) this.commArrive(st.id, cid); return; }
       case "cmcancel": { const cid = str(m.cid, 64); if (cid) this.commCancel(cid, num(m.rem, 1e7) | 0); return; }
       case "cmpayack": { const cid = str(m.cid, 64); if (cid) this.ackPay(st.id, cid); return; }
+      case "hh": {   // public hitchhiking offer — proximity-broadcast to drivers
+        this.bcastNear(st, { t: "hh", id: st.id, name: st.name,
+          dx: num(m.dx) | 0, dy: num(m.dy) | 0, price: num(m.price, 1e9) | 0 }, HH_RADIUS, ws);
+        return;
+      }
+      case "hhcancel": {  // thumb down — tell nearby drivers to drop the listing
+        this.bcastNear(st, { t: "hhcancel", id: st.id }, HH_RADIUS, ws);
+        return;
+      }
+      case "hhpick": {    // a driver accepts a roadside offer — relay to the hitchhiker
+        const to = num(m.to, 1e12) | 0;
+        if (to && to !== st.id) this.sendTo(to, { t: "hhpick", id: st.id, name: st.name });
+        return;
+      }
       case "tack": {   // "I applied that committed swap" — lets us drop the record
         if (this.env.LIVE_TRADE !== "on") return;
         const tid = str(m.tid, 64);

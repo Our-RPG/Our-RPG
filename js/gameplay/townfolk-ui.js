@@ -165,20 +165,83 @@
     try { return currentSettlement(); } catch (e) { return null; }
   }
 
+  // integer tile key (no per-probe string alloc — this is what made the flood
+  // cheap enough to run on click). Safe for |y| < 50000, which covers every
+  // world coordinate (15000²-tile blocks, centres well within ±7500).
+  const EK = (x, y) => x * 100003 + y;
+
+  // ONE bounded flood-fill from the player, using findPath's exact neighbour
+  // rules (8-connected, diagonal-corner + terrace-step checks, warm chunks
+  // only). Returns the Set of EK(x,y) tiles the player can stand on — so the
+  // whole roster's reachability costs a single pass instead of a findPath per
+  // NPC (the old way ran A* up to 9000 iters for every unreachable NPC, which
+  // made a big city's menu take seconds to open). Cached by player tile, so
+  // reopening the menu without moving is instant.
+  let _reach = null; // { k, set }
+  function reachableFrom(cur) {
+    if (typeof passable !== "function" || typeof world === "undefined" || !world || !world.chunks) return null;
+    const sx = player.x, sy = player.y;
+    const ck = sx + ":" + sy + ":" + (player.level | 0);
+    if (_reach && _reach.k === ck) return _reach.set;
+    const CS = world.CHUNK || 32;
+    const warm = (x, y) => world.chunks.has(Math.floor(x / CS) + "," + Math.floor(y / CS));
+    const memo = new Map();
+    const passOk = (x, y) => {
+      const k = EK(x, y);
+      let v = memo.get(k);
+      if (v === undefined) { v = warm(x, y) && passable(x, y); memo.set(k, v); }
+      return v;
+    };
+    const climbOK = (typeof stepClimbOK === "function") ? stepClimbOK : () => true;
+    // bound the flood to findPath's 80-tile reach of the player AND the town
+    // footprint (+margin) so it never spills far into open wilderness.
+    const cx = cur.v.x, cy = cur.v.y, RB = cur.v.R + 3;
+    const inBounds = (x, y) => Math.max(Math.abs(x - sx), Math.abs(y - sy)) <= 80
+      && Math.max(Math.abs(x - cx), Math.abs(y - cy)) <= RB;
+    const seen = new Set([EK(sx, sy)]);
+    const qx = [sx], qy = [sy];
+    let head = 0, guard = 0;
+    while (head < qx.length && guard++ < 60000) {
+      const x = qx[head], y = qy[head]; head++;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = x + dx, ny = y + dy, nk = EK(nx, ny);
+        if (seen.has(nk) || !inBounds(nx, ny) || !passOk(nx, ny)) continue;
+        if (dx && dy && (!passOk(nx, y) || !passOk(x, ny))) continue; // no corner-cutting
+        if (!climbOK(x, y, nx, ny)) continue;                         // terraces
+        seen.add(nk);
+        qx.push(nx); qy.push(ny);
+      }
+    }
+    _reach = { k: ck, set: seen };
+    return seen;
+  }
+  // reach-1: can the player stand on any tile adjacent to (or on) the NPC?
+  // Mirrors findPath(n.x, n.y, 1) !== null exactly — including its 80-tile
+  // click cap, so the menu never offers an action that would then fail with
+  // "You can't reach that."
+  function reachNpc(seen, n) {
+    if (Math.max(Math.abs(n.x - player.x), Math.abs(n.y - player.y)) > 80) return false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++)
+      if (seen.has(EK(n.x + dx, n.y + dy))) return true;
+    return false;
+  }
+
   // every NPC inside the settlement footprint that we can actually walk to,
   // deduped and sorted (shops/services first, then townsfolk, alpha within).
   function roster(cur) {
     if (!cur || typeof world === "undefined" || !world || !Array.isArray(world.npcs)) return [];
     const v = cur.v, R2 = v.R * v.R;
-    const seen = new Set(), out = [];
+    const reach = reachableFrom(cur);     // null = couldn't compute → don't filter
+    const dedupe = new Set(), out = [];
     for (const n of world.npcs) {
       if (!n || n.name == null) continue;
       const dx = n.x - v.x, dy = n.y - v.y;
       if (dx * dx + dy * dy >= R2) continue;            // outside this settlement
       const key = n.name + "@" + n.x + "," + n.y + "," + (n.level | 0);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (typeof findPath === "function" && findPath(n.x, n.y, 1) === null) continue; // no walkable path
+      if (dedupe.has(key)) continue;
+      dedupe.add(key);
+      if (reach && !reachNpc(reach, n)) continue;       // no walkable path
       out.push(n);
     }
     const rank = n => (n.trader || n.banker) ? 0 : 1;

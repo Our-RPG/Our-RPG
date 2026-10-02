@@ -27,7 +27,8 @@
   if (DEV || !URL_ || typeof Live === "undefined") {
     window.Follow = { tick: () => {}, start: () => {}, stop: () => {}, stepBody: () => {},
       active: () => false, following: () => 0, target: () => null };
-    window.PlayerActions = { give: () => {}, feed: () => {}, commission: () => {} };
+    window.PlayerActions = { give: () => {}, feed: () => {}, commission: () => {}, pickUp: () => {} };
+    window.Hitch = { toggle: () => {}, active: () => false, offerFor: () => null };
     return;
   }
 
@@ -46,7 +47,9 @@
   const isFollowing = id => !!fTarget && fTarget.id === id;
 
   // reasons: "manual" (Unfollow), "switch" (followed another), "lost" (leader
-  // gone/logged out), "arrived" (commission delivered — no settlement here)
+  // gone/logged out), "died" (we were slain mid-trip), "arrived" (commission
+  // delivered — no settlement here). Every reason but "arrived" is a BROKEN
+  // contract: the escrow settles for the distance covered.
   function followStop(reason) {
     if (!fTarget) return;
     const prev = fTarget;
@@ -56,8 +59,10 @@
     if (prev.commission && reason !== "arrived")
       Live.sendCommissionCancel(prev.commission.cid, commissionRemaining(prev));
     if (reason !== "switch" && reason !== "arrived") Live.sendFollowNote(prev.id, false);
-    if (reason === "manual") say("You stop following " + prev.name + ".");
+    if (reason === "manual") say("You stop following " + prev.name + "." +
+      (prev.commission ? " The commission settles for the distance covered." : ""));
     else if (reason === "lost") say(prev.name + " is gone — you stop following.", "warn");
+    else if (reason === "died" && prev.commission) say("You were slain mid-journey — your commission settles for the distance covered.", "warn");
   }
 
   function followStart(id, commission) {
@@ -92,7 +97,9 @@
 
   function followTick() {
     commissionsLeaderTick();              // guide side runs even when we follow no one
+    hitchTick();                          // our own roadside offer, if any
     if (!fTarget) return;
+    if (player.dying) { followStop("died"); return; }   // death breaks the contract + settles
     if (!Live.connected()) return;        // our own socket blip: pause, don't end
     const rp = Live.players.get(fTarget.id);
     if (!rp) {
@@ -130,6 +137,35 @@
   const genCid = () => (typeof crypto !== "undefined" && crypto.randomUUID)
     ? crypto.randomUUID() : "c" + Date.now() + Math.floor(player.x) + "," + Math.floor(player.y);
 
+  // the suggested travel fee: the zone's average market rate (coins/tile, from
+  // the DO) across the Chebyshev distance, or the econ-core baseline when the
+  // zone hasn't reported a rate yet. Null if the shared engine isn't loaded.
+  function suggestFee(dest) {
+    if (!dest || typeof EconCore === "undefined" || !EconCore.commissionSuggest) return null;
+    const d = cheb(player.x, player.y, dest.x, dest.y);
+    const rate = (Live.commRate && Live.commRate()) || 0;
+    return EconCore.commissionSuggest(d, rate);
+  }
+
+  // open the escrow + start following: shared by an accepted direct offer
+  // (cmok) and an accepted roadside pickup (hhpick). The fee leaves our purse
+  // NOW into the joint escrow; the DO holds it until we arrive together or the
+  // contract breaks. Returns false (and says why) if we can't afford it.
+  function beginCommission(leaderId, leaderName, price, dest) {
+    if (!dest) return false;
+    price = Math.max(1, price | 0);
+    if (countOf("coins") < price) { say("You can no longer afford the " + price + " gold fee — commission cancelled.", "warn"); return false; }
+    removeItem("coins", price);                       // escrow the fee now
+    if (typeof uiDirty !== "undefined") uiDirty = true;
+    if (typeof saveGame === "function") saveGame();
+    const cid = genCid();
+    const orig = Math.max(1, cheb(player.x, player.y, dest.x, dest.y));
+    _commArrSent = false; _commProgAt = 0;
+    Live.sendCommissionStart(leaderId, cid, price, dest.x, dest.y, orig);
+    followStart(leaderId, { cid, price, dest, origDist: orig });
+    return true;
+  }
+
   // follower's distance from the destination (we ARE the follower here)
   function commissionRemaining(ft) {
     const c = ft && ft.commission;
@@ -157,6 +193,12 @@
   // follower logs out / vanishes for good.
   function commissionsLeaderTick() {
     if (!leaderComms.size) return;
+    if (player.dying) {        // the guide fell — every trip they're leading breaks + settles
+      for (const [cid, c] of leaderComms)
+        Live.sendCommissionCancel(cid, c.lastRem != null ? c.lastRem : c.orig);
+      leaderComms.clear();
+      return;
+    }
     const t = Date.now();
     for (const [cid, c] of leaderComms) {
       const rp = Live.players.get(c.followerId);
@@ -204,6 +246,7 @@
   commEl.id = "pcomm";
   commEl.innerHTML = `<h3></h3>
     <div class="pc-row"><span>Travel fee (gold)</span><input class="pc-price" type="number" min="1" value="50"></div>
+    <div class="pc-row"><span>Suggested (market rate)</span><span class="pc-sug" title="Click to use">—</span></div>
     <div class="pc-row"><span>Destination</span><span class="pc-dest">— not set —</span></div>
     <div class="pc-row"><span>Distance</span><span class="pc-dist">—</span></div>
     <button class="sec pc-pick">Pick destination on the map</button>
@@ -212,26 +255,36 @@
     <div class="pc-note"></div>`;
   document.body.appendChild(commEl);
   const commPrice = commEl.querySelector(".pc-price");
+  const commSugEl = commEl.querySelector(".pc-sug");
   const commDestEl = commEl.querySelector(".pc-dest");
   const commDistEl = commEl.querySelector(".pc-dist");
   const commSend = commEl.querySelector(".pc-send");
+  commSugEl.style.cssText = "color:#ffd75e;cursor:pointer;text-decoration:underline dotted";
+  commSugEl.onclick = () => { const s = commDraft && suggestFee(commDraft.dest); if (s) commPrice.value = s; };
 
   function commRender() {
     if (!commDraft) { commEl.classList.remove("on"); return; }
+    const hitch = !!commDraft.hitch;
     commEl.classList.add("on");
-    commEl.querySelector("h3").textContent = "Commission " + commDraft.leaderName + " to guide you";
+    commEl.querySelector("h3").textContent = hitch
+      ? "Hitchhike — post a public lift request"
+      : "Commission " + commDraft.leaderName + " to guide you";
     if (commDraft.dest) {
       commDestEl.textContent = commDraft.dest.x + ", " + commDraft.dest.y;
-      const d = cheb(player.x, player.y, commDraft.dest.x, commDraft.dest.y);
-      commDistEl.textContent = d + " tiles";
+      commDistEl.textContent = cheb(player.x, player.y, commDraft.dest.x, commDraft.dest.y) + " tiles";
+      const s = suggestFee(commDraft.dest);
+      commSugEl.textContent = s ? s + " g" : "—";
       commSend.disabled = false;
     } else {
       commDestEl.textContent = "— not set —";
       commDistEl.textContent = "—";
+      commSugEl.textContent = "—";
       commSend.disabled = true;
     }
-    commEl.querySelector(".pc-note").textContent =
-      "The fee is escrowed now. Reach the spot together and it's all theirs; cancel partway and they're paid for the distance covered.";
+    commSend.textContent = hitch ? "Post offer" : "Send offer";
+    commEl.querySelector(".pc-note").textContent = hitch
+      ? "Stand by the road, thumb out — any passing traveller can pick you up. The fee is escrowed the moment a driver accepts."
+      : "The fee is escrowed now. Reach the spot together and it's all theirs; cancel partway and they're paid for the distance covered.";
   }
 
   commEl.querySelector(".pc-cancel").onclick = () => { commDraft = null; commRender(); };
@@ -241,12 +294,23 @@
     say("Click your destination on the map.", "sys");
     if (typeof openWorldMap === "function") openWorldMap();
     if (typeof WorldMapPick === "function")
-      WorldMapPick(({ x, y }) => { commDraft.dest = { x, y }; commRender(); });
+      WorldMapPick(({ x, y }) => {
+        commDraft.dest = { x, y };
+        const s = suggestFee(commDraft.dest);   // pre-fill the market suggestion (revisable)
+        if (s) commPrice.value = s;
+        commRender();
+      });
   };
   commSend.onclick = () => {
     if (!commDraft || !commDraft.dest) return;
     const price = Math.max(1, commPrice.value | 0);
     if (countOf("coins") < price) { say("You don't have " + price + " gold.", "warn"); return; }
+    if (commDraft.hitch) {               // post a public roadside offer
+      if (!nearRoad()) { say("You need to be on or beside a road to hitchhike.", "warn"); return; }
+      startHitch(price, commDraft.dest);
+      commDraft = null; commRender();
+      return;
+    }
     const rp = Live.players.get(commDraft.leaderId);
     if (!rp) { say("They're gone."); commDraft = null; commRender(); return; }
     commDraft.price = price;
@@ -279,18 +343,8 @@
     }
     if (m.t === "cmok") {            // our offer was accepted → escrow + start
       if (!commDraft || commDraft.leaderId !== m.id || !commDraft.dest) return;
-      const price = commDraft.price | 0, dest = commDraft.dest;
-      if (countOf("coins") < price) { say("You can no longer afford that fee — commission cancelled.", "warn"); commDraft = null; return; }
-      removeItem("coins", price);                       // escrow the fee now
-      if (typeof uiDirty !== "undefined") uiDirty = true;
-      if (typeof saveGame === "function") saveGame();
-      const cid = genCid();
-      const orig = Math.max(1, cheb(player.x, player.y, dest.x, dest.y));
-      _commArrSent = false; _commProgAt = 0;
-      Live.sendCommissionStart(m.id, cid, price, dest.x, dest.y, orig);
-      // start following under this commission
-      followStart(m.id, { cid, price, dest, origDist: orig });
-      say("You pay " + price + " gold into escrow and set off after " + who + ".", "gold");
+      if (beginCommission(m.id, who, commDraft.price | 0, commDraft.dest))
+        say("You pay " + (commDraft.price | 0) + " gold into escrow and set off after " + who + ".", "gold");
       commDraft = null; commRender();
       return;
     }
@@ -307,8 +361,9 @@
         if (coins > 0) { addItem("coins", coins); if (typeof uiDirty !== "undefined") uiDirty = true; if (typeof saveGame === "function") saveGame(); }
         applied.add(m.cid); commPaidSave(applied);
         leaderComms.delete(m.cid);
-        if (m.why === "deliver" && coins > 0) say("Commission complete — you earned " + coins + " gold guiding " + "a traveller.", "gold");
-        else if (m.why === "cancel" && coins > 0) say("Commission ended early — " + coins + " gold settled to you.", "sys");
+        const other = m.other ? esc(String(m.other)) : "a traveller";
+        if (m.why === "deliver" && coins > 0) say("Commission complete — you earned " + coins + " gold guiding " + other + ".", "gold");
+        else if (m.why === "cancel" && coins > 0) say("Commission ended early — " + coins + " gold settled from your trip with " + other + ".", "sys");
       }
       Live.sendCommissionPayAck(m.cid);
       return;
@@ -342,8 +397,183 @@
     const rp = Live.players.get(id);
     if (!rp) { say("They're not nearby."); return; }
     commDraft = { leaderId: id, leaderName: rp.name, price: 50, dest: null };
+    commPrice.value = 50;
     commRender();
   }
+
+  // ---------------- hitchhiking (public roadside lift requests) ----------------
+  // Stand on or beside a road, post a PUBLIC lift offer (destination + fee),
+  // and any passing player can pick you up. A pickup runs the very same escrow
+  // as a direct commission — you (the hitchhiker) are the follower/payer, the
+  // driver is the leader/guide. We re-broadcast the offer every few seconds so
+  // newly-arrived drivers see it, and withdraw it the moment we step off the
+  // road, get picked up, or die.
+  let hitch = null;                       // { dx, dy, price, bcastAt }  (OUR offer)
+  const hitchOffers = new Map();          // drivers' view: hitchhikerId -> { id, name, dx, dy, price, until }
+
+  const onRoadTile = (x, y) => {
+    if (typeof world === "undefined") return false;
+    const g = String(world.getGround ? world.getGround(x, y) || "" : "");
+    const d = String(world.getDecor ? world.getDecor(x, y) || "" : "");
+    return g.startsWith("dirt#") || d.startsWith("stone_bridge");
+  };
+  const nearRoad = () => {
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        if (onRoadTile((player.x | 0) + dx, (player.y | 0) + dy)) return true;
+    return false;
+  };
+  const placeLabel = (x, y) => {
+    const near = (typeof world !== "undefined" && world.villagesNearPt) ? world.villagesNearPt(x, y, 60) : null;
+    return (near && near[0] && near[0].name) ? near[0].name : x + "," + y;
+  };
+
+  function hitchBroadcast(force) {
+    if (!hitch) return;
+    const t = Date.now();
+    if (!force && t < hitch.bcastAt) return;
+    hitch.bcastAt = t + 4000;             // re-advertise roughly every 4s
+    Live.sendHitch(hitch.price, hitch.dx, hitch.dy);
+  }
+  function startHitch(price, dest) {
+    hitch = { dx: dest.x, dy: dest.y, price: Math.max(1, price | 0), bcastAt: 0 };
+    say("You stand by the road, thumb out — bound for " + placeLabel(dest.x, dest.y) +
+      " for " + hitch.price + " gold. Anyone passing can pick you up.", "sys");
+    hitchBroadcast(true);
+    renderMyHitch();
+  }
+  function stopHitch(silent) {
+    if (!hitch) return;
+    hitch = null;
+    Live.sendHitchCancel();
+    renderMyHitch();
+    if (!silent) say("You lower your thumb and stop hitchhiking.", "sys");
+  }
+  function openHitch() {
+    if (hitch) { stopHitch(false); return; }       // toggle off
+    if (typeof Live === "undefined" || !Live.connected()) { say("You need to be online to hitchhike.", "warn"); return; }
+    if (!nearRoad()) { say("Stand on or beside a road to hitchhike.", "warn"); return; }
+    const base = (typeof EconCore !== "undefined" && EconCore.P) ? EconCore.P.commMin : 10;
+    commDraft = { hitch: true, leaderId: null, leaderName: null, price: base, dest: null };
+    commPrice.value = base;
+    commRender();
+  }
+
+  function clearOffer(id) {
+    hitchOffers.delete(id);
+    const rp = Live.players.get(id);
+    if (rp) rp._hitch = null;
+    renderHitchPanel();
+  }
+  function pickUp(id) {
+    const rp = Live.players.get(id), o = hitchOffers.get(id);
+    if (!o && !(rp && rp._hitch)) { say("They're not hitchhiking."); return; }
+    if (fTarget) { say("Stop what you're guiding first.", "warn"); return; }
+    Live.sendHitchPick(id);
+    say("You pull over for " + ((rp && rp.name) || (o && o.name) || "the traveller") +
+      " — waiting for them to climb aboard.", "sys");
+  }
+
+  // driver-side per-tick housekeeping + our own re-broadcast (from followTick)
+  function hitchTick() {
+    if (hitchOffers.size) {
+      const t = Date.now();
+      let changed = false;
+      for (const [id, o] of hitchOffers)
+        if (o.until < t || !Live.players.get(id)) {
+          hitchOffers.delete(id);
+          const rp = Live.players.get(id); if (rp) rp._hitch = null;
+          changed = true;
+        }
+      if (changed) renderHitchPanel();
+    }
+    if (!hitch) return;
+    if (fTarget || player.dying) { stopHitch(true); return; }
+    if (!nearRoad()) { say("You step away from the road — your lift request ends.", "warn"); stopHitch(true); return; }
+    hitchBroadcast(false);
+  }
+
+  Live.onHitch(m => {
+    const me = Live.myId ? Live.myId() : 0;
+    if (m.t === "hh") {                   // a nearby player wants a lift
+      if (m.id === me) return;
+      const rp = Live.players.get(m.id);
+      const name = m.name || (rp && rp.name) || "A traveller";
+      const until = Date.now() + 9000;    // offers expire ~9s after the last ping (re-ping is ~4s)
+      const o = { id: m.id, name, dx: m.dx | 0, dy: m.dy | 0, price: m.price | 0, until };
+      if (rp) rp._hitch = { dx: o.dx, dy: o.dy, price: o.price, until };
+      hitchOffers.set(m.id, o);
+      renderHitchPanel();
+      return;
+    }
+    if (m.t === "hhcancel") { clearOffer(m.id); return; }
+    if (m.t === "hhpick") {               // a driver accepted OUR roadside offer
+      if (!hitch || fTarget) return;      // not hitching, or already aboard
+      const who = m.name || Live.nameOf(m.id) || "A traveller";
+      const dest = { x: hitch.dx, y: hitch.dy }, price = hitch.price | 0;
+      if (beginCommission(m.id, who, price, dest))
+        say(who + " pulls over — you climb aboard, " + price + " gold into escrow, bound for " +
+          placeLabel(dest.x, dest.y) + ".", "gold");
+      stopHitch(true);                    // following now; drop the thumb silently
+      return;
+    }
+  });
+
+  // ---- hitch UI: a driver's "nearby hitchhikers" list + our own banner ----
+  const hitchCss = document.createElement("style");
+  hitchCss.textContent = `
+  #phitch { position:fixed; right:12px; bottom:120px; z-index:61; width:240px;
+    background:rgba(16,22,30,0.95); border:1px solid #46586a; border-radius:9px;
+    padding:8px 10px; color:#e6eef6; display:none; font:12px OpenDyslexic, Verdana, sans-serif; }
+  #phitch.on { display:block; }
+  #phitch .hp-h { color:#ffd75e; font-size:12px; margin-bottom:6px; }
+  #phitch .hp-row { display:flex; gap:8px; align-items:center; justify-content:space-between; margin:4px 0; }
+  #phitch .hp-row span { flex:1; line-height:1.3; }
+  #phitch .hp-row button { background:#24463a; color:#c9ffe0; border:1px solid #3a6a52;
+    border-radius:5px; padding:3px 8px; cursor:pointer; font:inherit; white-space:nowrap; }
+  #phmine { position:fixed; left:50%; bottom:92px; transform:translateX(-50%); z-index:61;
+    background:rgba(28,34,22,0.95); border:1px solid #6a6a3a; border-radius:7px; padding:5px 12px;
+    color:#f2ffcf; display:none; cursor:pointer; font:12px OpenDyslexic, Verdana, sans-serif; }
+  #phmine.on { display:block; }`;
+  document.head.appendChild(hitchCss);
+
+  const hpanel = document.createElement("div");
+  hpanel.id = "phitch";
+  document.body.appendChild(hpanel);
+  const mine = document.createElement("div");
+  mine.id = "phmine";
+  mine.onclick = () => stopHitch(false);
+  document.body.appendChild(mine);
+
+  function renderMyHitch() {
+    if (!hitch) { mine.classList.remove("on"); return; }
+    mine.textContent = "🫱 Hitchhiking → " + placeLabel(hitch.dx, hitch.dy) + " · " + hitch.price + "g  (click to stop)";
+    mine.classList.add("on");
+  }
+  function renderHitchPanel() {
+    const guiding = new Set([...leaderComms.values()].map(c => c.followerId));
+    const list = [...hitchOffers.values()].filter(o => Live.players.get(o.id) && !guiding.has(o.id));
+    if (!list.length || hitch) { hpanel.classList.remove("on"); hpanel.innerHTML = ""; return; }
+    hpanel.innerHTML = `<div class="hp-h">🫱 Hitchhikers nearby</div>`;
+    for (const o of list) {
+      const row = document.createElement("div");
+      row.className = "hp-row";
+      const span = document.createElement("span");
+      span.textContent = o.name + " → " + placeLabel(o.dx, o.dy) + " · " + o.price + "g";
+      const b = document.createElement("button");
+      b.textContent = "Pick up";
+      b.onclick = () => pickUp(o.id);
+      row.append(span, b);
+      hpanel.appendChild(row);
+    }
+    hpanel.classList.add("on");
+  }
+
+  window.Hitch = {
+    toggle: openHitch, start: openHitch, stop: () => stopHitch(false),
+    active: () => !!hitch, tick: hitchTick,
+    offerFor: id => hitchOffers.get(id) || null,
+  };
 
   // ---------------- shared picker panel ----------------
   const css = document.createElement("style");
@@ -527,5 +757,6 @@
     give: id => openPanel("give", id),
     feed: id => openPanel("feed", id),
     commission: id => openCommission(id),
+    pickUp: id => pickUp(id),
   };
 })();
