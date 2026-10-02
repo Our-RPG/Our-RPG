@@ -172,24 +172,65 @@
 
   // ONE bounded flood-fill from the player, using findPath's exact neighbour
   // rules (8-connected, diagonal-corner + terrace-step checks, warm chunks
-  // only). Returns the Set of EK(x,y) tiles the player can stand on — so the
+  // only). Produces the Set of EK(x,y) tiles the player can stand on — so the
   // whole roster's reachability costs a single pass instead of a findPath per
-  // NPC (the old way ran A* up to 9000 iters for every unreachable NPC, which
-  // made a big city's menu take seconds to open). Cached by player tile, so
-  // reopening the menu without moving is instant.
-  let _reach = null; // { k, set }
-  function reachableFrom(cur) {
+  // NPC (the old way ran A* up to 9000 iters for every unreachable NPC).
+  //
+  // In a big city the flood touches ~20k tiles (~1-2s of passable() queries),
+  // so it is RESUMABLE and precomputed in the BACKGROUND, a few ms per animation
+  // frame (_tickFlood), while the player is in town. By the time the menu is
+  // opened the result is usually already cached → the open is instant. If it
+  // isn't finished yet, reachableFrom() finishes the remainder synchronously.
+  // Keyed by player tile (moving restarts it); passable() memoised per town so
+  // a restart after a few steps is cheap.
+  const perfNow = (typeof performance !== "undefined" && performance.now) ? () => performance.now() : () => 0;
+  let _reach = null;           // completed: { k, set }
+  let _flood = null;           // in-progress resumable state, or null
+  let _rafOn = false;
+  const _passMemo = new Map();  // EK(x,y) -> walkable? reused across floods in one town
+  let _passVill = "";           // settlement the passable memo belongs to
+  // how many of THIS settlement's chunks are currently warm. A flood over a
+  // half-warm town is invalidated once more of it loads (else the cached set
+  // misses NPCs that spawn in chunks warmed after the flood). Scoped to the
+  // town footprint — unlike world.chunks.size, distant chunk streaming doesn't
+  // churn it, so once the town has settled the background precompute completes
+  // and stays cached.
+  function _warmStamp(cur) {
+    if (!cur || typeof world === "undefined" || !world || !world.chunks) return 0;
+    const CS = world.CHUNK || 32, v = cur.v;
+    // only the chunks the flood can actually touch — player±80 ∩ town±R. In a
+    // big city the far edges sit outside the player's view radius and flicker
+    // warm/cold; counting them would churn the key forever and the background
+    // precompute would never settle. Near-player chunks stay warm once you're
+    // standing there, so this stabilises.
+    const lox = Math.max(player.x - 80, v.x - v.R), hix = Math.min(player.x + 80, v.x + v.R);
+    const loy = Math.max(player.y - 80, v.y - v.R), hiy = Math.min(player.y + 80, v.y + v.R);
+    const c0x = Math.floor(lox / CS), c1x = Math.floor(hix / CS);
+    const c0y = Math.floor(loy / CS), c1y = Math.floor(hiy / CS);
+    let n = 0;
+    for (let cx = c0x; cx <= c1x; cx++) for (let cy = c0y; cy <= c1y; cy++)
+      if (world.chunks.has(cx + "," + cy)) n++;
+    return n;
+  }
+  // cache key = player tile + the town's warm stamp (passable() stays memoised
+  // per town, so a re-flood after the stamp changes is cheap).
+  const _ckOf = (cur) => player.x + ":" + player.y + ":" + (player.level | 0) + ":" + _warmStamp(cur);
+
+  function _startFlood(cur) {
     if (typeof passable !== "function" || typeof world === "undefined" || !world || !world.chunks) return null;
+    const villId = cur.v.x + "," + cur.v.y;
+    if (villId !== _passVill || _passMemo.size > 262144) { _passMemo.clear(); _passVill = villId; }
     const sx = player.x, sy = player.y;
-    const ck = sx + ":" + sy + ":" + (player.level | 0);
-    if (_reach && _reach.k === ck) return _reach.set;
     const CS = world.CHUNK || 32;
     const warm = (x, y) => world.chunks.has(Math.floor(x / CS) + "," + Math.floor(y / CS));
-    const memo = new Map();
     const passOk = (x, y) => {
       const k = EK(x, y);
-      let v = memo.get(k);
-      if (v === undefined) { v = warm(x, y) && passable(x, y); memo.set(k, v); }
+      let v = _passMemo.get(k);
+      if (v === undefined) {
+        if (!warm(x, y)) return false;   // cold chunk: unwalkable for now, but
+        v = passable(x, y);              // DON'T cache — it may warm in later;
+        _passMemo.set(k, v);             // only stable (warm) results are memoised
+      }
       return v;
     };
     const climbOK = (typeof stepClimbOK === "function") ? stepClimbOK : () => true;
@@ -198,23 +239,57 @@
     const cx = cur.v.x, cy = cur.v.y, RB = cur.v.R + 3;
     const inBounds = (x, y) => Math.max(Math.abs(x - sx), Math.abs(y - sy)) <= 80
       && Math.max(Math.abs(x - cx), Math.abs(y - cy)) <= RB;
-    const seen = new Set([EK(sx, sy)]);
-    const qx = [sx], qy = [sy];
-    let head = 0, guard = 0;
-    while (head < qx.length && guard++ < 60000) {
-      const x = qx[head], y = qy[head]; head++;
+    return { k: _ckOf(cur), seen: new Set([EK(sx, sy)]), qx: [sx], qy: [sy],
+      head: 0, guard: 0, passOk, climbOK, inBounds };
+  }
+  // expand until the queue drains, the guard trips, or the time budget is spent
+  // (deadline = perfNow()+ms; Infinity to finish now). Returns true when done.
+  function _runFlood(f, deadline) {
+    const { seen, qx, qy, passOk, climbOK, inBounds } = f;
+    let budgetCheck = 0;
+    while (f.head < qx.length) {
+      if (f.guard++ >= 60000) break;
+      const x = qx[f.head], y = qy[f.head]; f.head++;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         if (!dx && !dy) continue;
         const nx = x + dx, ny = y + dy, nk = EK(nx, ny);
         if (seen.has(nk) || !inBounds(nx, ny) || !passOk(nx, ny)) continue;
         if (dx && dy && (!passOk(nx, y) || !passOk(x, ny))) continue; // no corner-cutting
         if (!climbOK(x, y, nx, ny)) continue;                         // terraces
-        seen.add(nk);
-        qx.push(nx); qy.push(ny);
+        seen.add(nk); qx.push(nx); qy.push(ny);
       }
+      if ((++budgetCheck & 255) === 0 && perfNow() >= deadline) return false; // yield
     }
-    _reach = { k: ck, set: seen };
-    return seen;
+    _reach = { k: f.k, set: seen };
+    return true;
+  }
+  // background nibble: advance the flood ~5ms/frame, re-scheduling until done
+  function _tickFlood() {
+    _rafOn = false;
+    const cur = here();
+    const ck = _ckOf(cur);
+    if (!cur || (_reach && _reach.k === ck)) { _flood = null; return; }
+    if (!_flood || _flood.k !== ck) _flood = _startFlood(cur);
+    if (!_flood) return;
+    if (!_runFlood(_flood, perfNow() + 5)) _scheduleFlood(); // not done → keep going
+    else _flood = null;
+  }
+  function _scheduleFlood() {
+    if (_rafOn || typeof requestAnimationFrame !== "function") return;
+    _rafOn = true; requestAnimationFrame(_tickFlood);
+  }
+
+  // used by render(): return the reachable set, finishing any in-progress flood
+  // synchronously so the menu is always correct the instant it opens.
+  function reachableFrom(cur) {
+    const ck = _ckOf(cur);
+    if (_reach && _reach.k === ck) return _reach.set;
+    if (!_flood || _flood.k !== ck) _flood = _startFlood(cur);
+    if (!_flood) return null; // deps missing → caller skips reachability filter
+    _runFlood(_flood, Infinity);
+    const set = (_reach && _reach.k === ck) ? _reach.set : _flood.seen;
+    _flood = null;
+    return set;
   }
   // reach-1: can the player stand on any tile adjacent to (or on) the NPC?
   // Mirrors findPath(n.x, n.y, 1) !== null exactly — including its 80-tile
@@ -350,13 +425,15 @@
 
   // show/hide the button as the player enters/leaves settlements; refresh the
   // name live. Cheap — currentSettlement() is a small cached lookup. The heavy
-  // findPath roster only runs on open/refresh, never on this poll.
+  // reachability flood runs in the background (precomputed here) so the menu
+  // opens instantly; it never runs on this poll's critical path.
   function tick() {
     const cur = here();
     topBtn.classList.toggle("on", !!cur);
     if (cur) {
       whereEl.textContent = cur.v.name || "Settlement";
       pinEl.textContent = cur.v.kind === "city" ? "\u{1F3D9}️" : "\u{1F3D8}️"; // 🏙️ / 🏘️
+      if (!(_reach && _reach.k === _ckOf(cur))) _scheduleFlood();   // warm reachability ahead of a click
     } else if (dialog.classList.contains("on")) {
       dialog.classList.remove("on");   // walked out of town with the panel open
     }
