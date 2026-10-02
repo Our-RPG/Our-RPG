@@ -34,7 +34,9 @@ const RESERVED = new Set(["admin", "taiao", "moderator", "curator", "system", "k
 
 export async function register(req, env) {
   const ip = clientIp(req);
-  if (!await rateLimit(env, `reg:${ip}`, 5, 3600)) return err("Too many signups from this address — try later.", 429);
+  // TEMPORARILY raised 5 -> 500 while debugging a signup report (2026-10-01)
+  // — revert to 5 once confirmed fixed. See memory/project notes.
+  if (!await rateLimit(env, `reg:${ip}`, 500, 3600)) return err("Too many signups from this address — try later.", 429);
   const b = await readJson(req);
   if (!b) return err("Bad request body.");
   const { username, password, email, turnstile } = b;
