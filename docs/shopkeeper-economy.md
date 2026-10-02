@@ -646,3 +646,91 @@ server integration to 30 (fail-soft, admin write/clear/clamps, tag-loosened
 refusal, roller seed/expire/cap), plus a headless shock pass (5 checks:
 63-coin shocked shield vs 33 calm, glyph, keeper line, import premium) and
 the standing offline-parity pass.
+
+## 20. Finite-shelf redesign (2026-10-03) — one stock, symmetric bid/ask
+
+The Phase 1–3 model had two seams that made the shop feel wrong:
+
+1. **The standing floor was INFINITE.** Buying a staple never moved its price
+   (the nominal `floorDepth` shelf never depleted), while selling onto the
+   player-stock shelf always did. Buy-then-sell was therefore asymmetric: the
+   buy left the price flat, the sell cratered it, and the dumped units sat on
+   the shelf keeping it cratered. "Buy 100, sell 100 back" ended far below the
+   starting price.
+2. **Buy and sell priced off DIFFERENT formulas** (charges = value×surplusMult
+   vs pays = value×demandMult×0.5×…), so even ignoring stock the two sides of
+   the counter never met.
+
+The redesign makes the shelf a **single finite stock** and prices both sides
+off **one scarcity mid** with a fixed spread. This intentionally **retires the
+old neutral-parity-with-legacy invariant** (§17) — the whole point is that
+prices now behave differently — but keeps the shared-state, pure-function,
+server-is-a-dumb-ledger architecture.
+
+* **One finite stock per (town, item)** = the shopkeeper's own opening
+  inventory + everything players have sold in. New table `shop_stock(town,
+  item, qty)` (migration `0013_shop_stock.sql`). Seeded ONCE, deterministically
+  (`EconCore.openingStock`, so an untouched shelf the client prices and the
+  seed the worker writes agree sight unseen); thereafter it only moves on real
+  trades — **purchases deplete it, player sells replenish it, and NOTHING
+  auto-restocks it.** Row existence == seeded, so a bought-out item stays at 0
+  until a player sells more. `shop_units` is kept but is now **cosmetic only**
+  (maker/quality/provenance for the "stocked by Rowan" line); it no longer
+  drives price.
+* **Opening stock = the comfortable level = the neutral-price point.**
+  `openingStock = max(minOpen, round(target × openMult))` with `openMult 1.5`,
+  `minOpen 12` — roughly 1–4 weeks of the town's believed demand (≈12–60 units
+  for staples). The scarcity ratio is `comfort/stock` (not `target/stock`), so
+  an untouched shelf reads ratio 1 and prices at `value × localMult`; rising
+  demand lifts `comfort`, so a once-comfortable shelf reads "short" as the town
+  wants more.
+* **One mid, symmetric straddle.** `mid = value × localMult ×
+  clamp((comfort/stock)^expStock, pLo, pHi)`; `charges = round(mid×(1+h))`,
+  `pays = round(mid×(1−h))` with `halfSpread h = 0.06` ⇒ a ~12% round-trip
+  margin (the shop's cut). `localMult` is the town's standing appetite for the
+  KIND of good as ONE factor (demand premium >1, local surplus 0.9, else 1),
+  applied to the mid so a demanded good is dearer to buy AND better-paid to
+  sell — replacing the old demandMult/surplusMult split that only ever moved
+  one side.
+* **The walk is one unit at a time, with a buy=pre-removal / sell=post-add
+  convention** (`EconCore.quoteLot(view, till, qty, side, mult, params, opts)`).
+  The unit at shelf-position `p` is bought when stock IS `p` and sold when
+  adding it MAKES stock `p`; so buying N then selling the same N back trades
+  the identical positions {s−N+1…s}, and because `ask(p) > bid(p)` at every
+  position the shelf (and price) land **exactly** where they began — the only
+  loss is the spread. Never a crater, and `bid < ask` at every stock level
+  means no buy-low-sell-high loop (the old `charges×0.9` guard is gone, made
+  redundant by the spread). The client buy path (`marketDoBuy`) and sell path
+  share this one function, so they're symmetric by construction.
+* **The till caps QUANTITY, not price.** Liquidity is reported for the mood
+  line but no longer multiplies the per-unit price (that was another asymmetry:
+  a sell drained the till and depressed the next quote). A coin-short or
+  big-ticket-limited till simply buys back fewer units (`tillShort` /
+  `bigTicket`); the per-unit price stays symmetric. The old sell-refusal wall
+  (`refuseAt × target`) is gone — a glutted shelf still buys, at the `pLo`
+  floor price — so players can always keep a town restocked (only
+  `MAX_TOWN_ITEM_QTY` caps the shelf).
+* **UI:** every buy line shows its finite count ("15 in stock"); a depleted
+  line greys out as "sold out (a player must sell some here before it returns)"
+  and isn't clickable. `▲/▼` trend reads straight off the quote's ratio.
+* **Offline / DEV / logged-out:** no shared ledger, so the shelf shows its
+  deterministic `openingStock` and prices neutral; the curve still walks within
+  a session but nothing persists (the shared finite economy is a multiplayer
+  feature, as before).
+
+Tuning knobs all live in `EconCore.P` (`halfSpread`, `openMult`, `minOpen`,
+`expStock`, `pLo/pHi`, `daysOfSupply`). Set `halfSpread 0` for exactly-free
+round trips; raise `openMult`/`minOpen` for deeper shelves (less scarcity).
+
+Verified (`scratchpad/econ-roundtrip-test.mjs`): round trip restores shelf +
+price with loss ≤ spread and NEVER a profit; opening prices at neutral fair
+value; finite depletion + player-only replenish; scarce shelves pay AND charge
+more; `bid < ask` across the whole curve; a modest till caps sell-back quantity
+not price. Headless (`scratchpad/market-smoke.mjs`): the shop UI boots and
+renders finite stock counts, a walked buy executes, zero runtime errors.
+
+**Deploy (pending, user-run):** apply migration `0013_shop_stock.sql` via
+`wrangler d1 execute taiao --remote --file=migrations/0013_shop_stock.sql`
+(NEVER `d1 migrations apply`), deploy the worker, and rebuild+deploy the site
+(`tools/build_ourrpg_site.sh` then `wrangler pages deploy dist/site`). The repo
+`dist/bundle.js` is rebuilt (local `SERVER_URL=""` variant).

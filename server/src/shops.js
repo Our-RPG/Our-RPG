@@ -77,6 +77,39 @@ const SHOCK_EVENTS = [
 ];
 const between = ([lo, hi]) => lo + Math.random() * (hi - lo);
 
+// ---- the finite shelf -----------------------------------------------------
+// ONE stock count per (town, item): the shopkeeper's own opening inventory
+// plus everything players have sold in. Seeded ONCE, deterministically
+// (Econ.openingStock, so the client's untouched-shelf price and the worker's
+// seed agree sight unseen); thereafter it only moves on real trades —
+// purchases deplete it, player sells replenish it — and NOTHING auto-restocks
+// it. Row existence == seeded, so a bought-out item stays at 0 until a player
+// sells more. Deltas are applied with a race-safe clamped UPDATE, like the till.
+
+// FAIL-SOFT (like town_mods): while migration 0013 is unapplied the shelf
+// reads/writes degrade to "no persistence" (every shelf reads its deterministic
+// opening stock) instead of 500ing the shop API, so deploy order never matters.
+async function getShelf(env, town, item, t, pp) {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT qty FROM shop_stock WHERE town = ? AND item = ?").bind(town, item).first();
+    if (row) return row.qty;
+    const open = Econ.openingStock(town, item, pp);
+    await env.DB.prepare(
+      `INSERT INTO shop_stock (town, item, qty, updated_at) VALUES (?,?,?,?)
+       ON CONFLICT(town, item) DO NOTHING`).bind(town, item, open, t).run();
+    return open;
+  } catch (e) { return Econ.openingStock(town, item, pp); }
+}
+async function moveShelf(env, town, item, delta, t) {
+  try {
+    await env.DB.prepare(
+      `UPDATE shop_stock SET qty = MAX(0, MIN(?, qty + ?)), updated_at = ?
+       WHERE town = ? AND item = ?`
+    ).bind(MAX_TOWN_ITEM_QTY, Math.round(delta), t, town, item).run();
+  } catch (e) { /* table not yet migrated — stock simply doesn't persist */ }
+}
+
 // ---- the till -------------------------------------------------------------
 
 async function getTill(env, town, t, pp) {
@@ -159,7 +192,11 @@ function believe(flow, town, item, qty, dir) {
 }
 
 /* GET /api/shop/stock?town=cx,cy
- * → {items: {id: {qty, units:[{maker, q, rank, qty}]}},
+ * → {items: {id: {qty, units:[{maker, q, rank, qty}]}},  player-sold provenance
+ *    stock: {id: qty},                the FINITE shelf count per item (shop's
+ *                                     own + player-sold); untouched items are
+ *                                     absent — the client seeds them from
+ *                                     EconCore.openingStock and prices neutral
  *    flow:  {id: {in, out}},          demand/supply beliefs, decayed to now
  *    till:  {cash, operating},        the town's shared coin
  *    now}
@@ -179,6 +216,10 @@ export async function stock(req, env, url) {
     if (it.units.length < MAX_UNITS_LISTED)
       it.units.push({ maker: r.maker, q: r.quality, rank: r.maker_rank, qty: r.qty });
   }
+  const shelfRows = await env.DB.prepare(
+    "SELECT item, qty FROM shop_stock WHERE town = ?").bind(town).all();
+  const shelf = {};
+  for (const r of shelfRows.results) shelf[r.item] = r.qty;
   const flowRows = await env.DB.prepare(
     "SELECT item, ema_in, ema_out, updated_at FROM shop_flow WHERE town = ?"
   ).bind(town).all();
@@ -193,17 +234,19 @@ export async function stock(req, env, url) {
   const operating = tillRow ? tillRow.operating : Econ.operatingCash(town, Econ.shopParams(town));
   const till = { cash: tillRow ? tillRow.cash : operating, operating };
   const mods = await getMods(env, town, t);
-  return json({ ok: true, town, items, flow, till, mods, now: t }, 200, CACHE);
+  return json({ ok: true, town, items, stock: shelf, flow, till, mods, now: t }, 200, CACHE);
 }
 
 /* POST /api/shop/trade
  * {town, sells:[{item, qty, paid?, q?, maker?, skill?}], buys:[{item, qty, paid?}]}
  * `paid` is the line's total coins as the client priced it (shared econ-core
- * quote × personal modifiers). Sells append to the shelf (merging batches by
- * maker+quality) and DRAIN the till; buys decrement oldest-first and REFILL
- * it. The worker reports what the ledger/till actually covered — the
- * remainder was floor stock or an over-draw the shared state won't fund.
- * Lines without `paid` (older clients) move goods but no till cash. */
+ * quote × personal modifiers). Sells GROW the finite shelf (shop_stock) and a
+ * provenance batch (shop_units), and DRAIN the till; buys SHRINK the shelf and
+ * REFILL the till. The shelf is the single stock the price moves along, so a
+ * buy-then-sell round trip lands it — and the price — exactly where it began.
+ * The worker reports the shelf count after settling and what the till covered
+ * (an over-draw the shared cash won't fund stays with the player; the client
+ * reconciles). Lines without `paid` (older clients) move goods but no cash. */
 export async function trade(req, env) {
   const user = await authUser(req, env);
   if (!user) return err("Not logged in.", 401);
@@ -216,7 +259,6 @@ export async function trade(req, env) {
   const pp = Econ.shopParams(town);          // the town trader's temperament
   const till = await getTill(env, town, t, pp);
   const reserve = Econ.reserveOf(till.operating, pp.reserveRatio);
-  const mods = await getMods(env, town, t);  // active supply shocks by tag
   let cashAvail = till.cash;            // in-memory during this request
   let tillDelta = 0;
   const flows = new Map();              // item -> flow (loaded once, saved once)
@@ -224,25 +266,27 @@ export async function trade(req, env) {
     if (!flows.has(item)) flows.set(item, await getFlow(env, town, item, t));
     return flows.get(item);
   };
+  const shelves = new Map();            // item -> current finite shelf (seeded once)
+  const shelfDelta = new Map();         // item -> net change to apply (race-safe)
+  const shelfFor = async item => {
+    if (!shelves.has(item)) shelves.set(item, await getShelf(env, town, item, t, pp));
+    return shelves.get(item);
+  };
+  const moveLocal = (item, d) => {
+    shelves.set(item, Math.max(0, (shelves.get(item) || 0) + d));
+    shelfDelta.set(item, (shelfDelta.get(item) || 0) + d);
+  };
 
   for (const line of (Array.isArray(b.sells) ? b.sells : []).slice(0, MAX_LINES)) {
     const item = cleanItem(line?.item);
     const qty = Math.min(MAX_QTY, Math.floor(Number(line?.qty) || 0));
     if (!item || qty <= 0) continue;
-    const have = await env.DB.prepare(
-      "SELECT COALESCE(SUM(qty),0) AS n FROM shop_units WHERE town = ? AND item = ?"
-    ).bind(town, item).first();
+    const have = await shelfFor(item);
     const flow = await flowFor(item);
-    // refusal backstop (the client enforces the real curve incl. its floor):
-    // the shelf already holds several times what this town believes it
-    // moves. The line's client-supplied tag picks up any active shock's
-    // demand mult so imports stay welcome for a shortage's whole life —
-    // clamped-trust: at worst it raises the qty ceiling, never the price.
-    const shock = mods[cleanTag(line.tag)] || null;
-    const target = Econ.targetStock(0, flow.out,
-      Econ.baselineDemand(town, item) * (shock ? shock.demand : 1), pp.daysOfSupply);
-    const refuse = (have?.n || 0) >= Math.max(24, pp.refuseAt * target);
-    const room = refuse ? 0 : Math.max(0, MAX_TOWN_ITEM_QTY - (have?.n || 0));
+    // the shop always buys (a glutted shelf just pays the floor price — the
+    // client walked the curve and knows); the only cap is the shelf's hard
+    // ceiling, so players can always keep a town restocked.
+    const room = Math.max(0, MAX_TOWN_ITEM_QTY - have);
     let add = Math.min(qty, room);
     // the till only funds what it can afford AND what this account may still
     // draw today — goods beyond that stay with the player (client reconciles).
@@ -263,6 +307,7 @@ export async function trade(req, env) {
     if (add <= 0) { sold[item] = (sold[item] || 0); paidOut[item] = (paidOut[item] || 0); continue; }
     cashAvail -= pay; tillDelta -= pay;
     believe(flow, town, item, add, "in");
+    moveLocal(item, add);                 // the sold goods join the finite shelf
     const maker = String(line.maker || user.username).slice(0, 40);
     const quality = Number.isFinite(line.q) ? Math.max(0, Math.min(100, Math.round(line.q))) : null;
     const rank = await makerRank(env, user.id, line.skill);
@@ -287,36 +332,42 @@ export async function trade(req, env) {
     const item = cleanItem(line?.item);
     let want = Math.min(MAX_QTY, Math.floor(Number(line?.qty) || 0));
     if (!item || want <= 0) continue;
-    // the FULL purchase (floor stock included — the shopkeeper's own shelf
-    // earning coin) refills the till and feeds demand beliefs; the ledger
-    // walk below only covers the player-stocked units
-    tillDelta += coins(line.paid);
-    believe(await flowFor(item), town, item, want, "out");
+    // a purchase can only take what's actually on the finite shelf
+    const have = await shelfFor(item);
+    const got = Math.min(want, have);
+    if (got <= 0) { bought[item] = 0; continue; }
+    moveLocal(item, -got);               // the shelf shrinks
+    // refill the till for the coin actually spent (client-priced, scaled to
+    // what the shelf covered) and feed the demand belief with real sales
+    tillDelta += Math.round(coins(line.paid) * got / want);
+    believe(await flowFor(item), town, item, got, "out");
+    // keep provenance tidy: retire the oldest player-sold batches first
+    // (cosmetic only — the opening stock lives in shop_stock, not here)
+    let dec = got;
     const batches = await env.DB.prepare(
       "SELECT id, qty FROM shop_units WHERE town = ? AND item = ? AND qty > 0 ORDER BY sold_at"
     ).bind(town, item).all();
-    let got = 0;
     for (const batch of batches.results) {
-      if (!want) break;
-      const take = Math.min(want, batch.qty);
+      if (!dec) break;
+      const take = Math.min(dec, batch.qty);
       await env.DB.prepare("UPDATE shop_units SET qty = qty - ? WHERE id = ?")
         .bind(take, batch.id).run();
-      want -= take; got += take;
+      dec -= take;
     }
     bought[item] = got;
   }
 
   if (tillDelta !== 0) await moveTill(env, town, tillDelta, till.operating, reserve, t);
+  for (const [item, d] of shelfDelta) if (d !== 0) await moveShelf(env, town, item, d, t);
   for (const [item, flow] of flows) await putFlow(env, town, item, flow, t);
 
-  // Refreshed counts for every item the trade touched.
+  // Refreshed counts (the authoritative finite shelf) for every touched item.
   const touched = [...new Set([...Object.keys(sold), ...Object.keys(bought)])];
   const stockNow = {}, flowNow = {};
   for (const item of touched) {
     const row = await env.DB.prepare(
-      "SELECT COALESCE(SUM(qty),0) AS n FROM shop_units WHERE town = ? AND item = ? AND qty > 0"
-    ).bind(town, item).first();
-    stockNow[item] = row?.n || 0;
+      "SELECT qty FROM shop_stock WHERE town = ? AND item = ?").bind(town, item).first();
+    stockNow[item] = row ? row.qty : (shelves.get(item) || 0);
     const f = flows.get(item);
     if (f) flowNow[item] = { in: f.in, out: f.out };
   }

@@ -20,6 +20,7 @@
   const QUEUE_KEY = "taiao_tradequeue_v1";
   const STOCK_TTL = 90e3;
   const noop = { ensureStock: () => null, qty: () => 0, units: () => [], items: () => ({}),
+    stockCount: () => null, setStock: () => {},
     flow: () => null, till: () => null, mods: () => ({}), noteSell: () => {}, noteBuy: () => {},
     status: () => ({ enabled: false }) };
   if (DEV) { window.ShopSync = noop; return; }
@@ -37,7 +38,7 @@
     if (!town || !live()) return null;
     let s = stocks.get(town);
     if (!s || (!s.fetching && Date.now() - s.at > STOCK_TTL)) {
-      s = s || { items: null, flow: null, till: null, mods: null, at: 0 };
+      s = s || { items: null, flow: null, till: null, mods: null, stock: null, stockOpt: {}, at: 0 };
       s.fetching = true;
       stocks.set(town, s);
       Server.call("/api/shop/stock?town=" + encodeURIComponent(town)).then(r => {
@@ -45,6 +46,10 @@
         if (!r || !r.ok) return;
         s.items = r.items || {}; s.flow = r.flow || {}; s.till = r.till || null;
         s.mods = r.mods || {};
+        // authoritative finite shelf counts (shop's own + player-sold); a
+        // fresh fetch is ground truth, so stale optimistic overrides are dropped
+        s.stock = r.stock || {};
+        s.stockOpt = {};
         s.at = Date.now();
         // repaint an open market so player stock appears without a reopen
         try {
@@ -59,6 +64,25 @@
   const qty = (town, id) => (entry(town, id) || {}).qty || 0;
   const units = (town, id) => (entry(town, id) || {}).units || [];
   const items = town => { const s = stocks.get(town); return (s && s.items) || {}; };
+
+  // The single finite shelf count for an item: the shopkeeper's own stock plus
+  // whatever players have sold in. Optimistic overrides (set by market.js the
+  // instant a trade commits) win until the next server sync replaces them.
+  // Returns null when the shelf has never been touched — market.js then falls
+  // back to EconCore.openingStock (the deterministic opening the worker seeds).
+  function stockCount(town, id) {
+    const s = stocks.get(town);
+    if (!s) return null;
+    if (s.stockOpt && Object.prototype.hasOwnProperty.call(s.stockOpt, id)) return s.stockOpt[id];
+    if (s.stock && Object.prototype.hasOwnProperty.call(s.stock, id)) return s.stock[id];
+    return null;
+  }
+  // market.js knows the exact post-trade shelf (it walked the curve), so it
+  // reports the remaining count here for instant, correct UI between flushes.
+  function setStock(town, id, v) {
+    const s = stocks.get(town);
+    if (s) (s.stockOpt || (s.stockOpt = {}))[id] = Math.max(0, v | 0);
+  }
 
   // Demand/supply beliefs, decayed to now (EconCore closed-form — the same
   // decay the worker applies, so both sides read the same number).
@@ -137,9 +161,15 @@
         if (!r || !r.ok) break;              // kept queued; retried later
         queue.shift();
         const s = stocks.get(l.town);
-        if (s && s.items && r.stock)
-          for (const [id, n] of Object.entries(r.stock))
-            (s.items[id] ||= { qty: 0, units: [] }).qty = n;
+        // r.stock = authoritative finite shelf counts after the trade settled;
+        // adopt them and drop the now-reconciled optimistic overrides
+        if (s && r.stock) {
+          s.stock = s.stock || {};
+          for (const [id, n] of Object.entries(r.stock)) {
+            s.stock[id] = n;
+            if (s.stockOpt) delete s.stockOpt[id];
+          }
+        }
         if (s && r.till) s.till = r.till;
         if (s && r.flow) { s.flow = s.flow || {}; Object.assign(s.flow, r.flow); }
       }
@@ -150,7 +180,7 @@
   addEventListener("beforeunload", persistQueue);
 
   window.ShopSync = {
-    ensureStock, qty, units, items, flow, till, mods, noteSell, noteBuy,
+    ensureStock, qty, units, items, stockCount, setStock, flow, till, mods, noteSell, noteBuy,
     status: () => ({ enabled: true, live: live(), queued: queue.length }),
   };
 })();

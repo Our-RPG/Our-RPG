@@ -146,25 +146,48 @@ function addRep(n) {
 }
 function repMult() { return 1 + Math.min(repTier().sellCap, reputation() * 0.0008); }
 function demandMult(profile, id) { return profile.demand[itemTag(id)] || 0.85; }
-// ---- the living till (docs/shopkeeper-economy.md) ----
-// Every quote flows through the shared EconCore engine over this town's
-// synced state (shelf qty, demand beliefs, till cash — js/net/shopsync.js).
-// Logged out or DEV the state is neutral and EconCore reproduces the legacy
-// prices exactly: pays = value×0.5×demand, charges = value×(0.9|1.15).
+// The town's standing appetite for this KIND of good, as ONE signal fed to
+// the shared mid price: a place that demands it pays its premium (>1) and
+// also charges that premium to buy; a local surplus is cheap both ways
+// (0.9); everything else is neutral (1). This single factor replaces the old
+// split where demandMult lifted only the sell price and surplusMult only the
+// buy price — that asymmetry was one reason a round trip never broke even.
+function localMult(profile, id) {
+  const tag = itemTag(id);
+  if (profile.demand[tag]) return profile.demand[tag];
+  return (profile.surplusTags.includes(tag) || (profile.stock || []).includes(id)) ? 0.9 : 1;
+}
+// ---- the living shelf (docs/shopkeeper-economy.md) ----
+// Every quote flows through the shared EconCore engine over this town's synced
+// state: a single FINITE stock count per item (shop's own opening stock +
+// whatever players have sold in), the town's demand beliefs, and the till
+// cash (js/net/shopsync.js). Buying lowers the count and lifts the price;
+// selling raises it and lowers the price — symmetrically, so a round trip
+// returns to where it began. Logged out / DEV there is no shared ledger, so
+// the shelf shows its deterministic opening stock and prices stay neutral.
+function shelfStock(id, carried) {
+  const town = activeMarket ? activeMarket.townKey : null;
+  if (!town) return carried ? EconCore.openingStock("0,0", id, econParams()) : 0;
+  if (typeof ShopSync !== "undefined") {
+    const s = ShopSync.stockCount(town, id);
+    if (s != null) return s;                       // server/optimistic truth
+  }
+  // untouched shelf: the deterministic opening stock the worker will seed
+  return carried ? EconCore.openingStock(town, id, econParams()) : 0;
+}
 function econViewFor(profile, id, stocked) {
   const town = activeMarket ? activeMarket.townKey : null;
   const synced = typeof ShopSync !== "undefined" && town;
   const f = synced ? ShopSync.flow(town, id) : null;
+  const carried = stocked !== undefined ? stocked
+    : !!(activeMarket && activeMarket.stockSet && activeMarket.stockSet.has(id));
   // active supply shock for this item's tag (Phase 3): shrinks/gluts the
-  // standing shelf and heats/cools believed demand — pricing emerges
+  // shelf and heats/cools believed demand — scarcity pricing emerges
   const mod = synced ? ShopSync.mods(town)[itemTag(id)] : null;
   return {
     value: ITEMS[id].value || 1,
-    demandMult: demandMult(profile, id),
-    surplusMult: (profile.surplusTags.includes(itemTag(id)) || (profile.stock || []).includes(id)) ? 0.9 : 1.15,
-    stocked: stocked !== undefined ? stocked
-      : !!(activeMarket && activeMarket.stockSet && activeMarket.stockSet.has(id)),
-    playerQty: synced ? ShopSync.qty(town, id) : 0,
+    localMult: localMult(profile, id),
+    stock: shelfStock(id, carried),
     emaOut: f ? f.out : 0,
     base: town ? EconCore.baselineDemand(town, id) : 1,
     floorMult: mod ? mod.floor : 1,
@@ -181,30 +204,29 @@ function econParams() {
   return activeMarket.params || (activeMarket.params = EconCore.shopParams(activeMarket.townKey));
 }
 // what the town pays you (per-player quality/rep/specialist factors ride on
-// the shared quote; `lot` walks the bulk curve — the shelf fills and the
-// till drains every 5 units, so dumping taper is priced before you commit).
-// The charges×0.9 guard on quality-less goods kills sell-buy-back loops.
+// the shared bid price; `lot` walks the bulk curve — the shelf fills every 5
+// units, so the dumping taper is priced before you commit). The bid always
+// sits below the ask by the spread, so there is no sell-buy-back loop.
 function marketSellQuote(profile, id, q, premium) {
   const mult = (q != null ? 0.6 + 0.8 * (q / 100) : 1) * (premium || 1) * repMult();
   const view = econViewFor(profile, id);
   const till = econTill();   // null until the town has synced (or offline/DEV)
   const params = econParams();
   const first = EconCore.quote(view, till, params);
-  const maxUnit = q == null ? Math.max(1, Math.round(first.charges * 0.9)) : Infinity;
-  const unit = Math.min(maxUnit, Math.max(1, Math.round(first.pays * mult)));
+  // the real first-unit bid (post-add convention), so the label matches what
+  // the lot actually pays and the buy-back returns to the same price
+  const probe = EconCore.quoteLot(view, till, 1, "sell", mult, params);
+  const unit = probe.unitFirst || Math.max(1, Math.round(first.pays * mult));
+  const reserve = till ? EconCore.reserveOf(till.operating, params ? params.reserveRatio : undefined) : 0;
+  const broke = !!till && (till.cash - reserve) < unit;   // till can't cover even one
   return {
-    // the taper/refusal economics only bite on a live shared market — with
-    // no synced ledger there is nothing to saturate, so offline sells stay
-    // flat-priced exactly like the legacy game
-    refused: till ? first.refused || (first.pays < 1 && first.liquidity > 0.2) : false,
-    broke: till ? !first.refused && first.pays < 1 && first.liquidity <= 0.2 : false,
+    refused: false,                 // a glutted shelf still buys (at the floor price)
+    broke,
     liquidity: first.liquidity,
     need: first.stockNeed,
-    tapered: !!till,
+    tapered: true,                  // bulk lots always walk the scarcity curve
     unit,
-    lot: n => till
-      ? EconCore.quoteSellLot(view, till, n, mult, maxUnit, params)
-      : { accepted: n, paid: unit * n, unitFirst: unit, refused: false, tillShort: false },
+    lot: n => EconCore.quoteLot(view, till, n, "sell", mult, params),
   };
 }
 function marketSellPrice(profile, id, q) { return marketSellQuote(profile, id, q).unit; }
@@ -243,19 +265,56 @@ function marketMoodLine(profile, shopkeeper) {
   else if (liq <= 0.25) log(`${shopkeeper}: Coin's tight this week — I'll be paying low until the shelves move.`, "sys");
   else if (liq >= 1.1) log(`${shopkeeper}: Business is good — I'm buying, if you're selling.`, "sys");
 }
-// what the town charges you to buy one unit (cheaper if it's a local
-// surplus, dearer as the shelf runs dry or demand runs hot)
+// what the town charges you for the NEXT unit (dearer as the shelf runs dry
+// or the town's demand runs hot, cheaper when it's glutted or a local surplus)
 function marketBuyPrice(profile, id, stocked) {
   const sq = EconCore.quote(econViewFor(profile, id, stocked), econTill(), econParams());
   return Math.max(1, Math.round(sq.charges * (1 - repTier().buyDisc)));
 }
-// trend glyph vs the neutral anchor — only meaningful on a live market
-function priceTrend(profile, id, price) {
-  if (!econTill()) return null;
-  const surplus = profile.surplusTags.includes(itemTag(id)) || (profile.stock || []).includes(id);
-  const neutral = Math.max(1, Math.round((ITEMS[id].value || 1) * (surplus ? 0.9 : 1.15) * (1 - repTier().buyDisc)));
-  if (price > neutral * 1.04) return { glyph: "▲", note: "prices up — shelves short or demand hot" };
-  if (price < neutral * 0.96) return { glyph: "▼", note: "prices down — well stocked" };
+// pack room for buying `id`, in units: a non-stacking item needs one free slot
+// each (addItem silently drops overflow past full), a stacking one is unbounded
+// as long as it already has a stack or there's a slot to start one.
+function buyableSpace(id) {
+  const def = ITEMS[id];
+  const free = player.inv.filter(s => !s).length;
+  if (def && def.stack) return (free > 0 || player.inv.some(s => s && s.id === id)) ? Infinity : 0;
+  return free;
+}
+// Buy up to `want` units, WALKING the scarcity curve as the shelf empties
+// (every unit repriced), bounded by the shelf, the player's coins and pack
+// space. Uses the SAME EconCore.quoteLot walk as selling, so buying N then
+// selling N straight back returns the shelf — and the price — to where it
+// began. Decrements the shared shelf + refills the till through ShopSync.
+function marketDoBuy(profile, id, want) {
+  const def = ITEMS[id];
+  if (!def || !(want > 0)) return 0;
+  const town = activeMarket ? activeMarket.townKey : null;
+  const view = econViewFor(profile, id, true);
+  const params = econParams();
+  const mult = 1 - repTier().buyDisc;
+  const space = buyableSpace(id);
+  if (space <= 0) { log("Your inventory is full.", "warn"); return 0; }
+  if (!(view.stock > 0)) { log(`${def.name} is sold out here — someone has to sell more first.`, "warn"); return 0; }
+  const lot = EconCore.quoteLot(view, econTill(), want, "buy", mult, params,
+    { budget: countItem("coins"), space });
+  if (lot.accepted <= 0) { log(lot.noSpace ? "Your inventory is full." : "You don't have enough coins.", "warn"); return 0; }
+  removeItem("coins", lot.paid); addItem(id, lot.accepted);
+  sfx("coins", 0.7);
+  log(`You buy ${lot.accepted > 1 ? lot.accepted + " × " : ""}${def.name} for ${lot.paid} coins.`);
+  if (town && typeof ShopSync !== "undefined") {
+    ShopSync.noteBuy(town, id, lot.accepted, lot.paid);
+    ShopSync.setStock(town, id, Math.max(0, (view.stock || 0) - lot.accepted));
+  }
+  if (typeof Tele !== "undefined") Tele.ev("buy", id, Math.round(lot.paid / lot.accepted), lot.accepted);
+  uiDirty = true;
+  return lot.accepted;
+}
+// trend glyph vs the neutral fair value — the shelf's scarcity, read straight
+// off the shared quote's ratio (comfort/stock): >1 short & dear, <1 well-stocked.
+function priceTrend(profile, id) {
+  const q = EconCore.quote(econViewFor(profile, id, true), econTill(), econParams());
+  if (q.ratio > 1.06) return { glyph: "▲", note: "prices up — shelf short or demand hot" };
+  if (q.ratio < 0.94) return { glyph: "▼", note: "prices down — well stocked" };
   return null;
 }
 // Merchants only stock the early seed tiers; higher-level seeds must be found
@@ -545,50 +604,48 @@ function renderMarket() {
   document.getElementById("trade-title").textContent = general
     ? `${profile.label} — trade & contracts (Rep ${reputation()} · ${repTier().title})`
     : `${type.name} (Rep ${reputation()} · ${repTier().title})`;
-  // BUY
+  // BUY — the shelf is ONE finite count per item: the shopkeeper's own opening
+  // stock plus whatever players have sold in. Buying walks the scarcity curve
+  // and depletes the shelf; a sold-out line waits for a player to restock it.
   const grid = document.getElementById("shopgrid");
   grid.innerHTML = "";
-  const buyNote = (id, got, price) => {   // Phase-2 ledger: purchases decrement player stock
-    if (got && typeof ShopSync !== "undefined") ShopSync.noteBuy(townKey, id, got, got * price);
-  };
   const baseIds = general ? marketStock(profile) : shopStockFor(typeKey);
-  activeMarket.stockSet = new Set(baseIds);   // standing-floor flag for quotes
+  activeMarket.stockSet = new Set(baseIds);   // "this shop carries it" flag for quotes
   const shopkeeper = (activeMarket.npc && activeMarket.npc.name) || type.name;
   marketMoodLine(profile, shopkeeper);
-  for (const id of baseIds) {
-    const def = ITEMS[id], price = marketBuyPrice(profile, id, true);
+  // every id to show: carried staples first, then player-sold goods this shop
+  // deals in (exotic restocks beyond its usual shelf), de-duplicated.
+  const sold = typeof ShopSync !== "undefined" ? ShopSync.items(townKey) : {};
+  const shelfIds = [...baseIds];
+  for (const id of Object.keys(sold))
+    if (!activeMarket.stockSet.has(id) && ITEMS[id] && sold[id].qty > 0 && type.buys(id, ITEMS[id]))
+      shelfIds.push(id);
+  for (const id of shelfIds) {
+    const def = ITEMS[id]; if (!def) continue;
+    const carried = activeMarket.stockSet.has(id);
+    const stock = shelfStock(id, carried);
+    const price = marketBuyPrice(profile, id, carried);
     const reqNote = def.wieldReq ? ` (Melee ${def.wieldReq})`
       : def.wearReq ? ` (Defence ${def.wearReq})`
       : def.rangeReq ? ` (Archery ${def.rangeReq})` : "";
-    // player-stocked units of a staple ride on top of the standing floor
-    const ps = typeof ShopSync !== "undefined" ? ShopSync.qty(townKey, id) : 0;
-    const psNote = ps ? ` — ${ps} restocked by players` : "";
-    const tr = priceTrend(profile, id, price);
-    const d = slotEl(def.icon, undefined, `${def.name}${reqNote} — ${price} coins${tr ? ` (${tr.note})` : ""}${psNote}`);
-    const pr = document.createElement("span"); pr.className = "price"; pr.textContent = (tr ? tr.glyph : "") + price; d.appendChild(pr);
-    d.onclick = e => { buyNote(id, tradeBuy(id, price, e.shiftKey ? 5 : 1), price); renderMarket(); };
-    d.oncontextmenu = e => amountMenu(e, "Buy", "max", n => { buyNote(id, tradeBuy(id, price, n), price); renderMarket(); });
-    grid.appendChild(d);
-  }
-  // Phase 2, the no-trading economy on the shelf: goods OTHER PLAYERS sold
-  // here, beyond the computed base stock, buyable while they last — with the
-  // maker's name attached. Only what this shop would deal in appears.
-  if (typeof ShopSync !== "undefined") {
-    const listed = new Set(baseIds);
-    for (const [id, info] of Object.entries(ShopSync.items(townKey))) {
-      const def = ITEMS[id];
-      if (listed.has(id) || !def || !(info.qty > 0) || !type.buys(id, def)) continue;
-      const price = marketBuyPrice(profile, id, false);
-      const makers = (info.units || []).map(u => u.maker).filter(Boolean);
-      const by = makers.length ? `stocked by ${makers[0]}${makers.length > 1 ? " and others" : ""}` : "player-stocked";
-      const tr = priceTrend(profile, id, price);
-      const d = slotEl(def.icon, info.qty, `${def.name} — ${price} coins${tr ? ` (${tr.note})` : ""} — ${by}, ${info.qty} left`);
-      const pr = document.createElement("span"); pr.className = "price demand"; pr.textContent = (tr ? tr.glyph : "") + price; d.appendChild(pr);
-      const buyLtd = n => { buyNote(id, tradeBuy(id, price, Math.min(n, info.qty)), price); renderMarket(); };
-      d.onclick = e => buyLtd(e.shiftKey ? 5 : 1);
-      d.oncontextmenu = e => amountMenu(e, "Buy", "max", buyLtd);
-      grid.appendChild(d);
+    const info = sold[id];
+    const makers = info ? (info.units || []).map(u => u.maker).filter(Boolean) : [];
+    const byNote = makers.length ? ` — stocked by ${makers[0]}${makers.length > 1 ? " and others" : ""}` : "";
+    const tr = priceTrend(profile, id);
+    const out = !(stock > 0);
+    const d = slotEl(def.icon, stock, out
+      ? `${def.name}${reqNote} — sold out (a player must sell some here before it returns)`
+      : `${def.name}${reqNote} — ${price} coins${tr ? ` (${tr.note})` : ""} — ${stock} in stock${byNote}`);
+    if (out) d.classList.add("soldout");
+    const pr = document.createElement("span");
+    pr.className = "price" + (carried ? "" : " demand");
+    pr.textContent = out ? "—" : (tr ? tr.glyph : "") + price;
+    d.appendChild(pr);
+    if (!out) {
+      d.onclick = e => { if (marketDoBuy(profile, id, e.shiftKey ? 5 : 1)) renderMarket(); };
+      d.oncontextmenu = e => amountMenu(e, "Buy", "max", n => { if (marketDoBuy(profile, id, n)) renderMarket(); });
     }
+    grid.appendChild(d);
   }
   // CONTRACTS — only the general store posts town contracts
   let cbox = document.getElementById("contractlist");
@@ -670,14 +727,17 @@ function renderMarket() {
           : "Coin's short until I shift some stock — come back in a day or two."}`, "warn");
         return;
       }
+      const preStock = shelfStock(s.id, activeMarket.stockSet.has(s.id));
       removeItem(s.id, lot.accepted); addItem("coins", lot.paid);
       // Phase-2 ledger: the goods go onto this town's shelf, provenance
       // attached, for other players to find; `paid` drains the shared till
-      // (js/net/shopsync.js)
+      // (js/net/shopsync.js). The shelf grows by what was accepted — so if you
+      // now buy them straight back, the price returns to exactly where it was.
       if (typeof ShopSync !== "undefined") {
         const ev = s.prov && typeof provRegistry !== "undefined" ? provRegistry[s.prov] : null;
         ShopSync.noteSell(townKey, s.id, lot.accepted, s.q != null ? s.q : null,
           ev && ev.producer || null, ev && ev.skill || null, lot.paid, itemTag(s.id));
+        ShopSync.setStock(townKey, s.id, preStock + lot.accepted);
       }
       sfx("coins", 0.7);
       if (typeof Tele !== "undefined") Tele.ev("sell", s.id, Math.round(lot.paid / lot.accepted), lot.accepted);

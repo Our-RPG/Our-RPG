@@ -20,19 +20,29 @@
 (function (root) {
 
 const P = {
-  payBase: 0.5,        // neutral payout anchor — matches legacy value×0.5
-  spreadMin: 0.15,     // hard bid-ask floor: pays ≤ charges×(1−this), always
-  daysOfSupply: 7,     // stock the shop wants, in days of believed demand
+  // ---- the bid/ask spread (the shopkeeper's margin) --------------------
+  // Both sides of the counter quote one fair MID price built from scarcity;
+  // the shop buys a touch below it and sells a touch above. Because buy and
+  // sell straddle the SAME mid at the SAME stock level, buying N units then
+  // selling them straight back returns the shelf — and therefore the price —
+  // to exactly where it started: the only coin lost is this spread (the
+  // shop's cut), never a cratered price. ask = mid×(1+h), bid = mid×(1−h).
+  halfSpread: 0.06,    // ⇒ ~12% round-trip margin (h). Set 0 for free round trips.
+  spreadMin: 0.10,     // hard floor after per-player mults: pays ≤ charges×(1−this)
+  // ---- scarcity curve --------------------------------------------------
+  daysOfSupply: 7,     // target (neutral-price) stock = believed demand × this
+  openMult: 1.5,       // opening shelf = target × this (comfortable starting stock)
+  minOpen: 12,         // every carried staple opens with at least this many units
+  expStock: 0.55,      // scarcity exponent: price = mid × (target/stock)^this
+  pLo: 0.45,           // glut floor on the scarcity multiplier (overstocked)
+  pHi: 2.4,            // scarcity ceiling (near sold-out)
+  // ---- the till (finite cash) ------------------------------------------
   reserveRatio: 0.25,  // till fraction the shopkeeper won't spend
   tillCapMult: 4,      // till never grows past 4× operating cash
-  expStock: 0.45,      // charges' stock-pressure exponent
-  expDemand: 0.35,     // charges' demand-pressure exponent
-  tauDays: 3,          // EMA time constant (wall-clock days, exp decay)
-  chunk: 5,            // bulk sells reprice every 5 units (bank-click grammar)
-  refuseAt: 3,         // shop refuses buying past 3× target stock
-  floorDepth: 10,      // nominal shelf depth of a standing-floor item
-  chargesMax: 2.2,     // charges never exceed 2.2× the neutral anchor
   dailyDrawFrac: 0.35, // one account may draw ≤ this × operating cash / day
+  // ---- misc ------------------------------------------------------------
+  tauDays: 3,          // EMA time constant (wall-clock days, exp decay)
+  chunk: 5,            // bulk trades reprice every 5 units (bank-click grammar)
   commPerTile: 1.8,    // commission baseline market rate — coins per tile guided
   commMin: 5,          // suggested travel fee never dips below this (short hops)
 };
@@ -107,9 +117,23 @@ function bump(v, qty) { return v + qty / P.tauDays; }
 // stock always moves, but beliefs saturate at a few times baseline demand).
 function dayCap(townKey, item) { return Math.max(20, Math.round(4 * baselineDemand(townKey, item))); }
 
-// Target stock from believed demand; serverTarget uses ledger-only floor 0.
+// Target stock from believed demand — the level at which the shelf prices at
+// its neutral fair value (scarcity multiplier == 1). floorQty is legacy (now
+// always 0); both client and server pass the same args so targets agree.
 function targetStock(floorQty, emaOut, base, days) {
   return Math.max(1, floorQty + Math.max(emaOut, base) * (days || P.daysOfSupply));
+}
+
+// The shopkeeper's OPENING inventory of an item they stock — deterministic so
+// the client (showing an untouched shelf) and the worker (seeding the ledger
+// on first trade) always agree sight unseen. A comfortable buffer above the
+// neutral target: normal buying barely moves the price; only bulk-buying
+// clears the shelf and drives real scarcity. Stock only ever replenishes from
+// here via players SELLING — nothing auto-restocks it.
+function openingStock(townKey, item, params) {
+  const days = params ? params.daysOfSupply : P.daysOfSupply;
+  const target = targetStock(0, 0, baselineDemand(townKey, item), days);
+  return Math.max(P.minOpen, Math.round(target * P.openMult));
 }
 
 // ---- commission (pay-to-be-guided) market rate --------------------------
@@ -126,102 +150,130 @@ function commissionSuggest(dist, ratePerTile) {
 }
 
 // ---- the shared quote --------------------------------------------------
-// view: { value, demandMult, surplusMult, stocked, playerQty, emaOut, emaIn,
-//         base }        (base = baselineDemand(town,item); stocked = standing
-//                        floor item → nominal floorDepth shelf presence)
-// till: { cash, operating } or null (offline / logged out → neutral).
+// ONE finite shelf, priced on scarcity, with a symmetric bid/ask straddle.
+//
+// view: { value, localMult, stock, base, emaOut, floorMult, baseMult }
+//   value     — the item's base coin value
+//   localMult — the town's standing appetite for this KIND of good (>1 a
+//               place that wants it, <1 a local surplus, 1 neutral). Applied
+//               to the MID, so a demanded good is both dearer to buy AND
+//               better-paid when sold — one coherent local-market signal.
+//   stock     — units currently on the shelf (shop's own + player-sold); the
+//               single number both buy and sell prices move along.
+//   base      — baselineDemand(town,item); emaOut — believed units/day bought.
+//   floorMult/baseMult — Phase-3 supply shocks (shrink the shelf / heat need).
+// till: { cash, operating } or null (offline / logged out). The till limits
+//   how much the shop can PAY OUT (sell side), never the per-unit price.
 // params: shopParams(townKey), or omitted for the fixed defaults.
-// Returns integer coin prices plus the factors, for UI legibility.
+//
+// At stock == target the scarcity multiplier is 1 and the shelf prices at its
+// neutral fair value. Buying lowers stock → price rises; selling raises stock
+// → price falls. Both sides read the same mid, so a buy-then-sell round trip
+// at one stock level nets exactly the spread (2·halfSpread) — never a crater.
 function quote(view, till, params) {
   const days = params ? params.daysOfSupply : P.daysOfSupply;
   const resRatio = params ? params.reserveRatio : P.reserveRatio;
   const expStock = params ? params.expStock : P.expStock;
-  const refuseAt = params ? params.refuseAt : P.refuseAt;
   const value = Math.max(1, view.value || 1);
-  const floorQty = view.stocked ? P.floorDepth : 0;
-  // Supply shocks (Phase 3): floorMult shrinks (or gluts) what's actually
-  // ON the shelf, baseMult heats (or cools) what the town believes it
-  // needs — while the NEUTRAL reference below stays unmodified, so the
-  // pressure ratio moves and scarcity pricing EMERGES. Player imports
-  // refill invEff and walk the ratio back down: the arbitrage self-closes.
-  const floorMult = view.floorMult > 0 ? view.floorMult : 1;
-  const baseMult = view.baseMult > 0 ? view.baseMult : 1;
-  const invEff = Math.max(0, floorQty * floorMult + (view.playerQty || 0));
+  const localMult = view.localMult > 0 ? view.localMult : 1;
+  const floorMult = view.floorMult > 0 ? view.floorMult : 1;  // shock: shrink shelf
+  const baseMult = view.baseMult > 0 ? view.baseMult : 1;     // shock: heat demand
   const base = Math.max(0.1, view.base || 0.5);
   const emaOut = Math.max(0, view.emaOut || 0);
 
-  // Pressure ratio built to be EXACTLY 1 in the neutral state (mults = 1),
-  // so offline and untouched towns price precisely like the legacy
-  // formulas — personality included (days scales both targets alike).
-  const live = targetStock(floorQty, emaOut, base * baseMult, days) / Math.max(invEff, 1);
-  const neutral = targetStock(floorQty, 0, base, days) / Math.max(floorQty, 1);
-  const ratio = live / neutral;
+  const target = targetStock(0, emaOut, base * baseMult, days);
+  // the comfortably-stocked level — a buffer above the bare 1-week target, and
+  // the point at which the shelf prices at its neutral fair value. It is also
+  // exactly the opening stock (openingStock below), so an untouched shelf
+  // reads ratio 1 and prices at value×localMult. Rising demand lifts it, so a
+  // shelf that was comfortable becomes "short" as the town wants more.
+  const comfort = Math.max(P.minOpen, Math.round(target * P.openMult));
+  const stock = Math.max(0, (view.stock || 0) * floorMult);
+  // scarcity ratio: comfort/stock. >1 shelf is short (price up), <1 glut (down).
+  const ratio = comfort / Math.max(stock, 1);
+  const pressure = clamp(Math.pow(ratio, expStock), P.pLo, P.pHi);
+  const mid = value * localMult * pressure;
 
-  const stockPressure = clamp(Math.pow(ratio, expStock), 0.55, 1.9);
-  // Demand only ever RAISES charges above the anchor (staples stay stable
-  // for new players); slack demand already lowers pays through stockNeed.
-  const demandPressure = clamp(Math.pow(Math.max(emaOut, base) / base, P.expDemand), 1, 1.5);
-  const stockNeed = clamp(ratio, 0.10, 1.5);
+  const h = P.halfSpread;
+  const charges = Math.max(1, Math.round(mid * (1 + h)));      // shop sells (ask)
+  let pays = Math.max(0, Math.round(mid * (1 - h)));           // shop buys  (bid)
+  pays = Math.min(pays, Math.round(charges * (1 - P.spreadMin))); // safety: bid < ask
+  // till health, for flavour/mood only — deliberately NOT a price factor, so
+  // draining the till on a sell can't asymmetrically depress the next quote.
   const liquidity = till
     ? clamp((till.cash - reserveOf(till.operating, resRatio)) /
-            Math.max(1, till.operating - reserveOf(till.operating, resRatio)), 0.15, 1.25)
+            Math.max(1, till.operating - reserveOf(till.operating, resRatio)), 0, 1.25)
     : 1;
 
-  const anchor = value * (view.surplusMult || 1);
-  const charges = Math.max(1, Math.round(
-    Math.min(anchor * P.chargesMax, anchor * stockPressure * demandPressure)));
-  const refused = invEff >= refuseAt * targetStock(floorQty, emaOut, base * baseMult, days);
-  const pays = refused ? 0 : Math.max(0, Math.round(Math.min(
-    charges * (1 - P.spreadMin),
-    value * (view.demandMult || 1) * P.payBase * stockNeed * liquidity)));
-
-  return { pays, charges, refused, stockNeed, liquidity, ratio };
+  // stockNeed > 1 ⇒ shelf below its comfortable level ⇒ shop wants more
+  // (drives the "bring me X" contracts and the market-mood line).
+  return { pays, charges, mid, target: comfort, stock, ratio, pressure, liquidity,
+           stockNeed: ratio, refused: false };
 }
 
-// ---- bulk sell walk ------------------------------------------------------
-// Reprice every `chunk` units as the shelf fills and the till drains, so a
-// 100-fish dump walks DOWN the curve in one deterministic pass. `mult` is
-// the per-player factor (quality × reputation × specialist premium) applied
-// to each chunk's shared price; the till pays the player's actual price.
-// `maxUnit` caps every chunk's unit (the buy-back-loop guard for goods with
-// no quality of their own). Returns { accepted, paid, unitFirst, refused,
-// tillShort }.
-// The big-ticket rule (params.bigTicketFrac) caps one lot's total draw at a
-// personality-sized share of the spendable till, so a single expensive line
-// can't eat the coin faster staples need (25-coin floor keeps small trades
-// alive at tiny tills).
-function quoteSellLot(view, till, qty, mult, maxUnit, params) {
+// ---- the unified bulk walk ----------------------------------------------
+// Walk `qty` units through the curve ONE unit at a time, moving the shelf as we
+// go, so a big lot is priced before the player commits. The convention that
+// makes buying and selling exactly inverse: the unit at shelf-position `p`
+// (present whenever stock ≥ p) is bought when stock IS p and sold when adding
+// it MAKES stock p — i.e. a buy prices at the pre-removal stock, a sell at the
+// post-add stock. Buying N then selling the same N back therefore trades the
+// identical physical positions {s−N+1 … s}; at each, ask(p) > bid(p) by the
+// spread, so the shelf (and price) land exactly where they began and the only
+// loss is the shop's margin — never a cratered price, never a free profit.
+//
+// `mult` is the per-player factor (quality × reputation × specialist premium /
+// buy discount). `opts` (buy): {budget} coins the player has, {space} units of
+// pack room — the walk stops at either (noFunds / noSpace). Sells are bounded
+// by the till (can't pay below reserve → tillShort; one line can't tie up more
+// than params.bigTicketFrac of the spendable till → bigTicket). Buys are bounded
+// by the shelf (outOfStock). Returns { accepted, paid, unitFirst, tillShort,
+// bigTicket, outOfStock, noFunds, noSpace, refused } — `paid` is total coin.
+function quoteLot(view, till, qty, side, mult, params, opts) {
   mult = mult > 0 ? mult : 1;
-  if (!(maxUnit > 0)) maxUnit = Infinity;
+  const buy = side === "buy";
+  const budget = opts && opts.budget != null ? opts.budget : Infinity;
+  const space = opts && opts.space != null ? opts.space : Infinity;
   let cash = till ? till.cash : Infinity;
   const floor = till ? reserveOf(till.operating, params && params.reserveRatio) : 0;
-  const lineCap = till
+  const lineCap = (!buy && till)
     ? Math.max(25, Math.round((params ? params.bigTicketFrac : 1) * (till.cash - floor)))
     : Infinity;
-  let pq = view.playerQty || 0, accepted = 0, paid = 0, unitFirst = 0;
-  let refused = false, tillShort = false, bigTicket = false;
+  let stock = Math.max(0, view.stock || 0);
+  let accepted = 0, paid = 0, unitFirst = 0;
+  let tillShort = false, bigTicket = false, outOfStock = false, noFunds = false, noSpace = false;
   while (accepted < qty) {
-    const q = quote({ ...view, playerQty: pq }, till ? { cash, operating: till.operating } : null, params);
-    if (q.refused) { refused = true; break; }
-    // pays rounding to zero is the shelf saturating — unless the till is
-    // scraping its reserve, in which case it's the coin that ran out
-    if (q.pays < 1) { if (q.liquidity <= 0.2) tillShort = true; else refused = true; break; }
-    const unit = Math.min(maxUnit, Math.max(1, Math.round(q.pays * mult)));
-    if (!unitFirst) unitFirst = unit;
-    let take = Math.min(P.chunk, qty - accepted);
-    if (paid + unit * take > lineCap) take = Math.floor((lineCap - paid) / unit);
-    if (take <= 0) { bigTicket = true; break; }
-    if (cash - floor < unit * take) take = Math.floor((cash - floor) / unit);
-    if (take <= 0) { tillShort = true; break; }
-    paid += unit * take; accepted += take; pq += take; cash -= unit * take;
+    if (buy) {
+      if (stock <= 0) { outOfStock = true; break; }
+      if (accepted >= space) { noSpace = true; break; }
+      const unit = Math.max(1, Math.round(
+        quote({ ...view, stock }, till ? { cash, operating: till.operating } : null, params).charges * mult));
+      if (paid + unit > budget) { noFunds = true; break; }
+      if (!unitFirst) unitFirst = unit;
+      paid += unit; accepted++; stock--;
+    } else {
+      const unit = Math.max(1, Math.round(
+        quote({ ...view, stock: stock + 1 }, till ? { cash, operating: till.operating } : null, params).pays * mult));
+      if (!unitFirst) unitFirst = unit;
+      if (paid + unit > lineCap) { bigTicket = true; break; }
+      if (cash - floor < unit) { tillShort = true; break; }
+      paid += unit; accepted++; stock++; cash -= unit;
+    }
   }
-  return { accepted, paid, unitFirst, refused, tillShort, bigTicket };
+  return { accepted, paid, unitFirst, tillShort, bigTicket, outOfStock, noFunds, noSpace, refused: false };
+}
+// Back-compat thin wrappers (older callers / tests).
+function quoteSellLot(view, till, qty, mult, _maxUnit, params) {
+  return quoteLot(view, till, qty, "sell", mult, params);
+}
+function quoteBuyLot(view, till, qty, mult, params, opts) {
+  return quoteLot(view, till, qty, "buy", mult, params, opts);
 }
 
 root.EconCore = {
   P, fnv, clamp, shopParams,
   operatingCash, reserveOf, tillCapOf, dailyDrawCap,
-  baselineDemand, decay, bump, dayCap, targetStock,
-  quote, quoteSellLot, commissionSuggest,
+  baselineDemand, decay, bump, dayCap, targetStock, openingStock,
+  quote, quoteLot, quoteSellLot, quoteBuyLot, commissionSuggest,
 };
 })(typeof globalThis !== "undefined" ? globalThis : self);

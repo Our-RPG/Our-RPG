@@ -222,6 +222,19 @@ CREATE TABLE IF NOT EXISTS shop_units (
 );
 CREATE INDEX IF NOT EXISTS idx_units_town_item ON shop_units(town, item, sold_at);
 
+-- The finite shopkeeper shelf (migration 0013): ONE stock count per (town,
+-- item) = the shop's own opening stock + everything players sold in. The
+-- single number the buy AND sell price move along, so a buy-then-sell round
+-- trip returns both to where they began. Seeded once (EconCore.openingStock),
+-- then only moved by trades; nothing auto-restocks it.
+CREATE TABLE IF NOT EXISTS shop_stock (
+  town        TEXT NOT NULL,
+  item        TEXT NOT NULL,
+  qty         INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (town, item)
+);
+
 -- The living till (docs/shopkeeper-economy.md): one shared cash balance per
 -- town ('shop' column reserved for a Phase-2 per-shopkeeper split), seeded
 -- deterministically on first trade. Player sells drain it, buys refill it,
