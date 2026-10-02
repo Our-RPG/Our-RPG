@@ -1,0 +1,303 @@
+// ----------------------------------------------------------------------------
+// Townfolk directory — a one-click roster of everyone you can reach in the
+// city/village you're standing in.
+//
+// When the player is inside a settlement (daynight.js currentSettlement), a
+// button appears top-right just UNDER the multiplayer "Online" pill, labelled
+// with the settlement's name. Clicking it opens an overlay listing every NPC in
+// the settlement footprint that the player currently has a walkable path to
+// (gameplay/pathing.js findPath). Each NPC shows its FULL right-click menu —
+// the very same {label, fn} entries buildTileMenu produces (gameplay/input.js:
+// hoverLabel + doTarget), so clicking an action walks the player to the NPC and
+// performs it (Talk / Trade / Examine) exactly as a right-click would. Each
+// shopkeeper carries a goods glyph (what they trade in); bankers a bank glyph.
+//
+// Self-contained IIFE in the social-ui.js mould: injects its own <style>, owns
+// its button + overlay, and polls currentSettlement() to show/hide. Works in
+// every build (unlike social-ui.js, which is multiplayer-only).
+// ----------------------------------------------------------------------------
+(function () {
+  "use strict";
+
+  // goods glyph per shop type (mirrors market.js SHOP_TYPES keys). The title
+  // attribute spells it out; the glyph is the at-a-glance "what do they sell".
+  const SHOP_SYM = {
+    general: "\u{1F6D2}",      // 🛒 general store
+    woodcutter: "\u{1FA93}",   // 🪓 axes / timber
+    mining: "⛏️",     // ⛏️ picks / ores
+    fishmonger: "\u{1F41F}",   // 🐟 rods / fish
+    armoury: "\u{1F6E1}️", // 🛡️ armour
+    weaponsmith: "⚔️", // ⚔️ weapons
+    seedsman: "\u{1F331}",     // 🌱 seeds / produce
+    herbalist: "\u{1F33F}",    // 🌿 herbs / potions
+    jeweller: "\u{1F48E}",     // 💎 gems / luxury
+    clothier: "\u{1F9F5}",     // 🧵 cloth / leather
+    provisioner: "\u{1F35E}",  // 🍞 food / drink
+    timberwright: "\u{1FAB5}", // 🪵 boards / beams
+    runeseller: "\u{1F52E}",   // 🔮 runes
+    dream: "\u{1F4A4}",        // 💤 dream pedlar
+  };
+
+  function shopName(npc) {
+    if (typeof SHOP_TYPES !== "undefined" && SHOP_TYPES[npc.shopType]) return SHOP_TYPES[npc.shopType].name;
+    return "Merchant";
+  }
+
+  // --- NPC portrait: a front-facing (south, frame 0) 2D thumbnail -----------
+  // Two NPC appearances, same as the renderer: a "mix" roster character (its
+  // billboard atlas strip in MIX_SHEETS, frame math from MIX_NPCS.list — see
+  // objedit.js drawMixFrame), or the legacy layered villager (npc.spr / the
+  // VILLAGER_LOOKS[look] layer stack composited from the shared sheets in IMGS
+  // via sprRect). Images may not be decoded yet, so each painter redraws on the
+  // relevant image's load event.
+  const PX = 52;
+  const _mixImgs = {};
+  function paintMix(cv, def) {
+    if (typeof MIX_SHEETS === "undefined") return;
+    const ctx = cv.getContext("2d");
+    let img = _mixImgs[def.sheet];
+    if (!img) { img = new Image(); img.src = MIX_SHEETS[def.sheet]; _mixImgs[def.sheet] = img; }
+    if (!img.complete || !img.naturalWidth) { img.addEventListener("load", () => paintMix(cv, def), { once: true }); return; }
+    ctx.clearRect(0, 0, PX, PX);
+    ctx.imageSmoothingEnabled = false;
+    const s = Math.min(PX / def.fw, PX / def.fh), dw = def.fw * s, dh = def.fh * s;
+    ctx.drawImage(img, def.ax, def.ay, def.fw, def.fh, (PX - dw) / 2, (PX - dh) / 2, dw, dh);
+  }
+  function paintLegacy(cv, layers) {
+    if (typeof sprRect !== "function" || typeof IMGS === "undefined") return;
+    const ctx = cv.getContext("2d");
+    ctx.clearRect(0, 0, PX, PX);
+    ctx.imageSmoothingEnabled = false;
+    for (const layer of layers) {
+      const key = Array.isArray(layer) ? layer[0] : layer;
+      const r = sprRect(key);
+      if (!r) continue;
+      const img = IMGS[r.sheet];
+      if (!img) continue;
+      if (!img.complete || !img.naturalWidth) { img.addEventListener("load", () => paintLegacy(cv, layers), { once: true }); continue; }
+      ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, PX, PX); // villager layers are single front-facing cells
+    }
+  }
+  // returns a <canvas> portrait, or null if this NPC has no resolvable sprite
+  function portraitEl(npc) {
+    const cv = document.createElement("canvas");
+    cv.width = PX; cv.height = PX; cv.className = "tf-por";
+    let def = null;
+    if (npc.mix && typeof MIX_NPCS !== "undefined" && MIX_NPCS.list)
+      def = MIX_NPCS.list.find(d => d.key === npc.mix);
+    if (def) { paintMix(cv, def); return cv; }
+    const layers = (npc.spr && npc.spr.length) ? npc.spr
+      : (typeof VILLAGER_LOOKS !== "undefined" ? VILLAGER_LOOKS[npc.look | 0] : null);
+    if (layers && layers.length) { paintLegacy(cv, layers); return cv; }
+    return null;
+  }
+
+  // --- styling (mirrors #online-top / #online-dialog in js/net/social-ui.js) --
+  const css = document.createElement("style");
+  css.textContent = `
+#townfolk-top { position:fixed; top:40px; right:340px; z-index:50; display:none;
+  align-items:center; gap:6px; max-width:240px; background:rgba(20,26,34,0.92);
+  color:#cfe4ff; border:1px solid #3a4a5a; border-radius:8px; padding:5px 11px;
+  cursor:pointer; font:12px OpenDyslexic, Verdana, sans-serif; }
+#townfolk-top.on { display:inline-flex; }
+#townfolk-top:hover { background:rgba(40,52,66,0.96); color:#fff; }
+#townfolk-top .tf-pin { flex:0 0 auto; }
+#townfolk-top .tf-where { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#townfolk-dialog { position:fixed; inset:0; z-index:70; display:none;
+  background:rgba(6,9,13,0.6); align-items:center; justify-content:center;
+  font:14px OpenDyslexic, Verdana, sans-serif; }
+#townfolk-dialog.on { display:flex; }
+#townfolk-dialog .tf-card { width:min(620px,94vw); max-height:86vh; display:flex;
+  flex-direction:column; background:#141a22; color:#dce8f5;
+  border:1px solid #3a4a5a; border-radius:12px; box-shadow:0 10px 40px rgba(0,0,0,0.5); }
+#townfolk-dialog .tf-topbar { display:flex; align-items:center; justify-content:space-between;
+  padding:12px 16px; border-bottom:1px solid #2a3542; }
+#townfolk-dialog .tf-topbar h2 { margin:0; font-size:17px; color:#fff; }
+#townfolk-dialog .tf-topbar .tf-x { cursor:pointer; color:#9fb3c8; font-size:18px; padding:0 4px; }
+#townfolk-dialog .tf-topbar .tf-x:hover { color:#fff; }
+#townfolk-dialog .tf-body { overflow-y:auto; padding:10px 16px 16px; }
+#townfolk-dialog .tf-group { margin:12px 0 4px; font-size:12px; letter-spacing:.06em;
+  text-transform:uppercase; color:#7f95ab; }
+#townfolk-dialog .tf-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
+#townfolk-dialog .tf-npc { display:flex; gap:10px; align-items:flex-start;
+  background:#1b222c; border:1px solid #2c3845; border-radius:9px; padding:9px 11px; }
+#townfolk-dialog .tf-por { width:52px; height:52px; flex:0 0 auto; border-radius:7px;
+  background:#10161e center/contain no-repeat; border:1px solid #2c3845;
+  image-rendering:pixelated; image-rendering:crisp-edges; }
+#townfolk-dialog .tf-main { flex:1 1 auto; min-width:0; }
+#townfolk-dialog .tf-head { display:flex; align-items:baseline; gap:7px; margin-bottom:6px; }
+#townfolk-dialog .tf-sym { font-size:16px; flex:0 0 auto; }
+#townfolk-dialog .tf-name { font-weight:bold; color:#fff; }
+#townfolk-dialog .tf-role { font-size:11px; color:#8ba2b8; margin-left:auto; text-align:right; }
+#townfolk-dialog .tf-acts { display:flex; flex-direction:column; gap:3px; }
+#townfolk-dialog .tf-act { cursor:pointer; padding:5px 8px; border-radius:6px;
+  background:#232d39; color:#cfe0f0; font-size:13px; }
+#townfolk-dialog .tf-act:hover { background:#2f3e4e; color:#fff; }
+#townfolk-dialog .tf-empty { color:#8ba2b8; padding:16px 4px; text-align:center; }
+`;
+  document.head.appendChild(css);
+
+  // --- button ---------------------------------------------------------------
+  const topBtn = document.createElement("div");
+  topBtn.id = "townfolk-top";
+  topBtn.title = "Everyone you can reach here — click to open the directory";
+  topBtn.innerHTML = `<span class="tf-pin">\u{1F3D8}️</span><span class="tf-where"></span>`;
+  document.body.appendChild(topBtn);
+  const whereEl = topBtn.querySelector(".tf-where");
+  const pinEl = topBtn.querySelector(".tf-pin");
+
+  // --- overlay --------------------------------------------------------------
+  const dialog = document.createElement("div");
+  dialog.id = "townfolk-dialog";
+  dialog.innerHTML = `<div class="tf-card">
+    <div class="tf-topbar"><h2></h2><span class="tf-x">✕</span></div>
+    <div class="tf-body"></div>
+  </div>`;
+  document.body.appendChild(dialog);
+  const titleEl = dialog.querySelector(".tf-topbar h2");
+  const bodyEl = dialog.querySelector(".tf-body");
+  dialog.querySelector(".tf-x").onclick = () => dialog.classList.remove("on");
+  dialog.onclick = e => { if (e.target === dialog) dialog.classList.remove("on"); };
+
+  // --- settlement + roster helpers -----------------------------------------
+  function here() {
+    if (typeof currentSettlement !== "function") return null;
+    try { return currentSettlement(); } catch (e) { return null; }
+  }
+
+  // every NPC inside the settlement footprint that we can actually walk to,
+  // deduped and sorted (shops/services first, then townsfolk, alpha within).
+  function roster(cur) {
+    if (!cur || typeof world === "undefined" || !world || !Array.isArray(world.npcs)) return [];
+    const v = cur.v, R2 = v.R * v.R;
+    const seen = new Set(), out = [];
+    for (const n of world.npcs) {
+      if (!n || n.name == null) continue;
+      const dx = n.x - v.x, dy = n.y - v.y;
+      if (dx * dx + dy * dy >= R2) continue;            // outside this settlement
+      const key = n.name + "@" + n.x + "," + n.y + "," + (n.level | 0);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (typeof findPath === "function" && findPath(n.x, n.y, 1) === null) continue; // no walkable path
+      out.push(n);
+    }
+    const rank = n => (n.trader || n.banker) ? 0 : 1;
+    out.sort((a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name)));
+    return out;
+  }
+
+  // the FULL right-click menu for an NPC — the same entries buildTileMenu builds
+  // (input.js): the primary Talk/Trade action (walk-to-then-act via doTarget),
+  // plus an Examine line. Reuses the game's own hoverLabel/doTarget so labels,
+  // night-closed/asleep gates and behaviour stay in lockstep with right-click.
+  function npcMenu(npc) {
+    const tg = { kind: "npc", npc };
+    const items = [];
+    if (typeof hoverLabel === "function" && typeof doTarget === "function")
+      items.push({ label: hoverLabel(tg), fn: () => doTarget(tg) });
+    else
+      items.push({
+        label: (npc.trader ? "Trade with " : "Talk to ") + npc.name,
+        fn: () => { if (typeof setGoal === "function") setGoal({ type: "npc", npc }, npc.x, npc.y, 1); },
+      });
+    const exam = (typeof npcAsleep === "function" && npcAsleep(npc)) ? `${npc.name} is fast asleep.`
+      : npc.trader ? ((typeof shopClosed === "function" && shopClosed(npc)) ? "A merchant — shop's shut for the night." : "A merchant. Fair prices, mostly.")
+      : `${npc.name}, a villager.`;
+    items.push({ label: `Examine ${npc.name}`, fn: () => { if (typeof log === "function") log(exam, "sys"); } });
+    return items;
+  }
+
+  function roleOf(npc) {
+    if (npc.trader) return shopName(npc);
+    if (npc.banker) return "Banker";
+    if (npc._questGiver) return "Has a task";
+    return npc.mixTitle || npc._bjob || "Townsfolk";
+  }
+  function symOf(npc) {
+    if (npc.trader) return SHOP_SYM[npc.shopType] || "\u{1F6D2}";
+    if (npc.banker) return "\u{1F3E6}";       // 🏦
+    if (npc._questGiver) return "✦";       // ✦
+    return "\u{1F464}";                        // 👤
+  }
+
+  function card(npc) {
+    const el = document.createElement("div");
+    el.className = "tf-npc";
+    const head = document.createElement("div");
+    head.className = "tf-head";
+    const sym = document.createElement("span");
+    sym.className = "tf-sym";
+    sym.textContent = symOf(npc);
+    if (npc.trader) sym.title = shopName(npc);
+    const name = document.createElement("span");
+    name.className = "tf-name";
+    name.textContent = npc.name;
+    const role = document.createElement("span");
+    role.className = "tf-role";
+    role.textContent = roleOf(npc);
+    head.append(sym, name, role);
+    const acts = document.createElement("div");
+    acts.className = "tf-acts";
+    for (const it of npcMenu(npc)) {
+      const a = document.createElement("div");
+      a.className = "tf-act";
+      a.textContent = it.label;
+      a.onclick = () => { dialog.classList.remove("on"); it.fn(); };
+      acts.appendChild(a);
+    }
+    const main = document.createElement("div");
+    main.className = "tf-main";
+    main.append(head, acts);
+    const por = portraitEl(npc);
+    if (por) { por.title = npc.name; el.append(por, main); }
+    else el.append(main);
+    return el;
+  }
+
+  function render() {
+    const cur = here();
+    if (!cur) { dialog.classList.remove("on"); return; }
+    titleEl.textContent = (cur.v.name || "Here") + " — who's about";
+    bodyEl.innerHTML = "";
+    const list = roster(cur);
+    if (!list.length) {
+      const e = document.createElement("div");
+      e.className = "tf-empty";
+      e.textContent = "No one here you can reach right now.";
+      bodyEl.appendChild(e);
+      return;
+    }
+    const shops = list.filter(n => n.trader || n.banker);
+    const folk = list.filter(n => !(n.trader || n.banker));
+    const section = (label, arr) => {
+      if (!arr.length) return;
+      const h = document.createElement("div");
+      h.className = "tf-group";
+      h.textContent = label;
+      const grid = document.createElement("div");
+      grid.className = "tf-grid";
+      for (const n of arr) grid.appendChild(card(n));
+      bodyEl.append(h, grid);
+    };
+    section("Shops & services", shops);
+    section("Townsfolk", folk);
+  }
+
+  topBtn.onclick = () => { dialog.classList.add("on"); render(); };
+
+  // show/hide the button as the player enters/leaves settlements; refresh the
+  // name live. Cheap — currentSettlement() is a small cached lookup. The heavy
+  // findPath roster only runs on open/refresh, never on this poll.
+  function tick() {
+    const cur = here();
+    topBtn.classList.toggle("on", !!cur);
+    if (cur) {
+      whereEl.textContent = cur.v.name || "Settlement";
+      pinEl.textContent = cur.v.kind === "city" ? "\u{1F3D9}️" : "\u{1F3D8}️"; // 🏙️ / 🏘️
+    } else if (dialog.classList.contains("on")) {
+      dialog.classList.remove("on");   // walked out of town with the panel open
+    }
+  }
+  setInterval(tick, 800);
+  tick();
+})();

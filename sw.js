@@ -3,7 +3,7 @@
 // experience. Bump CACHE_VERSION whenever shipped assets change.
 "use strict";
 
-const CACHE_VERSION = "taiao-v33"; // v33: SELF-HEALING chunk cache (chunks.js _chunkGroundValid) so the vista bug can never persist again — a holed-ground chunk is refused on persist AND dropped on hydrate (then regenerated), independent of any sig. v32 was the one-time cleanup; v33 is the permanent guard. (sig bumps because chunks.js changed, but the fix no longer RELIES on sig bumps.)
+const CACHE_VERSION = "taiao-v34"; // v34: Townfolk directory (in-settlement NPC roster button + overlay, js/gameplay/townfolk-ui.js) — new bundle, bust the shell cache so returning players get it immediately. v33: SELF-HEALING chunk cache (chunks.js _chunkGroundValid) so the vista bug can never persist again — a holed-ground chunk is refused on persist AND dropped on hydrate (then regenerated), independent of any sig. v32 was the one-time cleanup; v33 is the permanent guard. (sig bumps because chunks.js changed, but the fix no longer RELIES on sig bumps.)
 
 // ── Base-path independence ──────────────────────────────────────────────
 // Every path below is written relative to the game's ROOT ("/assets/…"),

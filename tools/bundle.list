@@ -204,6 +204,9 @@ js/lua/lua-src-gen.js
 js/lua/lua-boot.js
 js/gameplay/tutorial.js
 js/gameplay/daynight.js
+# in-settlement roster button + overlay; reads currentSettlement (daynight),
+# world.npcs, findPath (pathing), hoverLabel/doTarget (input), SHOP_TYPES (market)
+js/gameplay/townfolk-ui.js
 js/gameplay/biomeatmos.js
 js/gameplay/weather.js
 js/gameplay/cheats.js
