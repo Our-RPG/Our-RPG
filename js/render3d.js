@@ -676,7 +676,7 @@ const R3D = (() => {
         // piers under a river-spanning building rise to that building's slab
         // and get no parapets (the building provides the walls above)
         const inB = insideB(wx2, wz2);
-        const deck = (inB ? rawStep(inB.x0 + (inB.w >> 1), inB.y0 + (inB.h >> 1))
+        const deck = (inB ? bldTier(inB)
                           : bridgeDeckY(wx2, wz2)) + FLOOR_T;
         if (d0 === "stone_bridge#p") {
           const y0 = gys[z * CS + x] - 0.4; // riverbed under the water surface
@@ -1698,6 +1698,53 @@ void main() {
     return v;
   }
 
+  // ---- shared-foundation tier for connected buildings --------------------
+  // A building footprint flattens to ONE half-block tier so its floor slab and
+  // walls sit on level ground. Buildings that SHARE A WALL (row houses, grown
+  // settlement blocks) must flatten to the SAME tier, or the party wall they
+  // share would straddle a terrain step and the two floors would detach.
+  //
+  // Two buildings count as connected when their bbox footprints overlap along
+  // a line at least one tile long (a shared wall line — organic row-house
+  // bboxes overlap by the 1-tile party wall; a single-tile corner touch does
+  // NOT count). bldTier() floods the whole connected component and returns the
+  // centre tier of the component's canonical member (smallest x0, then y0), so
+  // every member resolves to the identical tier no matter which one asks.
+  // Static per seed; result is memoised for every member of the component.
+  const bldTierCache = new Map();
+  function sharesWall(a, b) {
+    const ox0 = Math.max(a.x0, b.x0), ox1 = Math.min(a.x0 + a.w - 1, b.x0 + b.w - 1);
+    const oy0 = Math.max(a.y0, b.y0), oy1 = Math.min(a.y0 + a.h - 1, b.y0 + b.h - 1);
+    // need overlap on both axes, spanning > a single tile (so a bare corner
+    // touch, overlap 1x1, is excluded but a 1-tile-thick shared wall is kept)
+    return ox0 <= ox1 && oy0 <= oy1 && (ox1 - ox0 + (oy1 - oy0)) >= 1;
+  }
+  function centreTier(b) { return rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1)); }
+  function bldTier(b) {
+    const key = b.x0 + "," + b.y0;
+    let v = bldTierCache.get(key);
+    if (v !== undefined) return v;
+    // flood the connected component by shared-wall adjacency
+    const seen = new Map([[key, b]]);
+    const stack = [b];
+    let canon = b;
+    while (stack.length) {
+      const cur = stack.pop();
+      const cx = cur.x0 + (cur.w >> 1), cy = cur.y0 + (cur.h >> 1);
+      for (const nb of world.buildingsNear(cx, cy, Math.max(cur.w, cur.h) + 32)) {
+        const nk = nb.x0 + "," + nb.y0;
+        if (seen.has(nk) || !sharesWall(cur, nb)) continue;
+        seen.set(nk, nb);
+        stack.push(nb);
+        if (nb.x0 < canon.x0 || (nb.x0 === canon.x0 && nb.y0 < canon.y0)) canon = nb;
+      }
+    }
+    v = centreTier(canon);
+    if (bldTierCache.size > 50000) bldTierCache.clear();
+    for (const mk of seen.keys()) bldTierCache.set(mk, v);
+    return v;
+  }
+
   // per-chunk water mask for fast neighbourhood scans: 0 = land, 1 = water at
   // sea-level elevation (ocean/lakes), 2 = water carved through land (rivers
   // and erosion-basin ponds — raw elevation is above the coast line), 3 =
@@ -2079,7 +2126,7 @@ void main() {
         if (hollow) b = null;
       }
       const _t1 = performance.now(); gyPerf.bld += _t1 - _t0;
-      if (b) v = rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1));
+      if (b) v = bldTier(b);
       else {
         const raw = rawStep(wx, wy);
         if (world.getGround(wx, wy) === "floor_wood") {
@@ -2112,7 +2159,7 @@ void main() {
                 const ddy = Math.max(rb.y0 - wy, 0, wy - (rb.y0 + rb.h - 1));
                 const d = Math.max(ddx, ddy);
                 if (d <= 8) {
-                  const t = rawStep(rb.x0 + (rb.w >> 1), rb.y0 + (rb.h >> 1)) -
+                  const t = bldTier(rb) -
                     Math.max(0, d - 1) * STEP_H;
                   if (t > v) v = t;
                 }
@@ -2137,7 +2184,7 @@ void main() {
                 for (const d3 of [m2.door, m2.door2]) {
                   if (!d3) continue;
                   if (Math.max(Math.abs(wx - d3.x), Math.abs(wy - d3.y)) <= 2) {
-                    const t = rawStep(rb.x0 + (rb.w >> 1), rb.y0 + (rb.h >> 1));
+                    const t = bldTier(rb);
                     if (t > v) v = t;
                   }
                 }
@@ -2178,7 +2225,7 @@ void main() {
     // floor slab, not a bridge deck of their own
     const b = insideB(tx, tz);
     if (b && (world.isWater(tx, tz) || !String(world.getGround(tx, tz)).startsWith("floor")))
-      return rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1)) + FLOOR_T;
+      return bldTier(b) + FLOOR_T;
     if ((world.getDecor(tx, tz) || "").startsWith("stone_bridge"))
       return bridgeDeckY(tx, tz) + FLOOR_T;
     return null;
@@ -3149,7 +3196,7 @@ void main() {
     if (!player.sailing && player.deck !== false) {
       const bIn = world.insideBuilding(player.x, player.y);
       if (bIn && bIn.river) {
-        const planeY = rawStep(bIn.x0 + (bIn.w >> 1), bIn.y0 + (bIn.h >> 1)) + FLOOR_T;
+        const planeY = bldTier(bIn) + FLOOR_T;
         const t2 = (planeY - o.y) / d.y;
         if (t2 > 0) {
           const hx = Math.floor(o.x + d.x * t2), hy = Math.floor(o.z + d.z * t2);
@@ -3950,7 +3997,7 @@ void main() {
 
     // ---- interior volumes, shadows, door leaves ----
     rec.vols = rooms.map(r => ({ x0: r.x, z0: r.y, x1: r.x + r.w, z1: r.y + r.h }));
-    rec.baseTier = rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1));
+    rec.baseTier = bldTier(b);
     rec.shadowFeet = rooms.map(r => ({ x0: r.x, z0: r.y, x1: r.x + r.w, z1: r.y + r.h,
       len: (r.s || 1) * STOREY_H + 1.5 }));
     buildStructShadow(rec);
@@ -4463,9 +4510,10 @@ void main() {
       // direction by buildStructShadow; heights are group-relative (group is
       // lifted by baseTier), sampled per tile so they drape over terrain steps.
       const roofExtra = light ? 2.8 : battl ? 0.6 : kind === "spire" ? 3.2 : 1.5;
-      // rawStep, not groundY: a river-spanning building's centre tile can be
-      // water (groundY = water surface), but the structure rides the bank tier
-      rec.baseTier = rawStep(b.x0 + (b.w >> 1), b.y0 + (b.h >> 1));
+      // bldTier (rawStep-based), not groundY: a river-spanning building's
+      // centre tile can be water (groundY = water surface), but the structure
+      // rides the shared bank tier of its connected block
+      rec.baseTier = bldTier(b);
       rec.shadowFeet = [{ x0, z0, x1, z1, len: storeys * STOREY_H + roofExtra }];
       if (wings) for (const wg of wings)
         rec.shadowFeet.push({ x0: wg.x0, z0: wg.y0, x1: wg.x0 + wg.w, z1: wg.y0 + wg.h, len: 2 * STOREY_H + 1.5 });

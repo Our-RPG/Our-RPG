@@ -34,6 +34,32 @@ function pageHome(root) {
   }
   render();
   Taiao.onAuth(render);   // badge + curator door resolve after boot
+  // First paint ships WITHOUT the game's data layer (see js/page-loader.js +
+  // tools/bundle-groups.mjs) so /workshop/ loads fast. If it isn't present yet,
+  // pull it in the background and repaint — the census counts and the sprite
+  // frieze light up then. Purely additive: the page is already interactive.
+  if (typeof MONSTERS === "undefined") ensureGameData(render);
+}
+
+// Load the deferred game-data chunk(s) once, in order, then run cb. URLs come
+// from window.__LAZY_GAMEDATA — one bundled chunk in the built site, the raw
+// file list in dev. No-op (cb still runs) when the data is already present; a
+// missing/broken chunk just leaves the census + frieze bare, never throws.
+let _gdStarted = false;
+function ensureGameData(cb) {
+  if (typeof MONSTERS !== "undefined") { try { cb && cb(); } catch (_) {} return; }
+  const urls = (typeof window !== "undefined" && window.__LAZY_GAMEDATA) || [];
+  if (!urls.length || _gdStarted) return;
+  _gdStarted = true;
+  let i = 0;
+  (function next() {
+    if (i >= urls.length) { try { cb && cb(); } catch (_) {} return; }
+    const s = document.createElement("script");
+    s.src = urls[i++];
+    s.onload = next;
+    s.onerror = next;
+    document.head.appendChild(s);
+  })();
 }
 
 // ---------- helpers ----------
