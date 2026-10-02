@@ -471,6 +471,7 @@ const R3D = (() => {
   // ---------- chunked world meshes (built on demand, disposed when far) ----------
   const chunkMeshes = new Map(); // "cx,cy" -> THREE.Group
   const meshLog = []; // rolling per-chunk mesh build times (perf triage)
+  const _meshHealed = new Set(); // chunks whose mesh threw once — self-heal retry (syncChunks)
   const warmRows = new Map(); // "cx,cy" -> next groundY row to pre-warm
   // ---- road-network warm worker ----
   // A cold city road link runs a multi-second A* the first time any chunk in
@@ -924,10 +925,33 @@ const R3D = (() => {
       const _t0 = performance.now();
       try { g = buildChunkMesh(m.cx, m.cy); }
       catch (e) {
-        console.error("chunk mesh build failed at", m.key, e);
-        g = new THREE.Group();
-        g.userData.groundGeom = new THREE.BufferGeometry();
-        scene.add(g);
+        // SELF-HEAL (the durable Newhaven-vista fix): a mesh build that throws
+        // is almost always poisoned cached chunk DATA — a torn-deploy mid-edit
+        // bundle persisted bad ground that chunks.js _chunkGroundValid's holed-
+        // array check doesn't catch (it passes validation yet still breaks the
+        // mesh). Left alone the chunk is quarantined as an empty group and the
+        // far-LOD vista shows through FOREVER (reloaded from IDB every session).
+        // So on the first failure: drop the cached chunk + its IDB record,
+        // regenerate clean from current code, and retry the mesh ONCE. Only a
+        // SECOND failure on freshly regenerated data is a genuine code bug —
+        // then quarantine as before. Guards every poison shape, not just holes,
+        // and deletes the bad IDB record so it can't return next session.
+        if (!_meshHealed.has(m.key) && world.dropChunkRect) {
+          _meshHealed.add(m.key);
+          console.warn("chunk mesh build failed — dropping + regenerating", m.key, e && e.message);
+          try {
+            const CS = world.CHUNK, bx = m.cx * CS, by = m.cy * CS;
+            world.dropChunkRect(bx, by, bx, by);
+            world.getChunk(m.cx, m.cy);
+            g = buildChunkMesh(m.cx, m.cy);
+          } catch (e2) { g = null; }
+        }
+        if (!g) {
+          console.error("chunk mesh build failed at", m.key, e);
+          g = new THREE.Group();
+          g.userData.groundGeom = new THREE.BufferGeometry();
+          scene.add(g);
+        }
       }
       meshLog.push({ key: m.key, ms: Math.round(performance.now() - _t0) });
       if (meshLog.length > 200) meshLog.splice(0, 100);
