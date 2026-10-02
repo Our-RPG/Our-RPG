@@ -2164,6 +2164,24 @@ void main() {
                   if (t > v) v = t;
                 }
               }
+            // ordinary land buildings flatten their footprint+1 ring to a single
+            // bldTier; on sloped ground the natural terrain just beyond that ring
+            // can sit MORE than a half step off that tier, and stepClimbOK (half
+            // a step max) then refuses the step — an invisible wall ringing the
+            // building that also blocks the door. Grade the approach: clamp the
+            // natural tier to within (d-1) half-steps of bldTier, BOTH up and
+            // down, so the ground terraces to the foundation half a step per tile
+            // whichever way the slope runs. (River buildings handled above.)
+            for (const rb of buildingsNearCell(wx, wy)) {
+              if (rb.river) continue;
+              const ddx = Math.max(rb.x0 - wx, 0, wx - (rb.x0 + rb.w - 1));
+              const ddy = Math.max(rb.y0 - wy, 0, wy - (rb.y0 + rb.h - 1));
+              const d = Math.max(ddx, ddy);
+              if (d < 2 || d > 12) continue; // d<=1 is the flattened ring itself
+              const bt = bldTier(rb), span = (d - 1) * STEP_H;
+              if (v > bt + span) v = bt + span;
+              else if (v < bt - span) v = bt - span;
+            }
             if (bridgeInBox(wx, wy))
               for (let dy2 = -8; dy2 <= 8; dy2++)
                 for (let dx2 = -8; dx2 <= 8; dx2++) {
@@ -3808,6 +3826,13 @@ void main() {
     // there (ties: smaller y0, then x0 wins) — otherwise two coplanar boxes
     // with different materials (stone vs wood row-houses) z-fight and shimmer
     const skipShared = new Set();
+    // this building's own wall tiles that ALSO back a neighbour's wall (party
+    // walls). They NEVER collapse to kerbs while the player is inside — the
+    // boundary with a connected building always reads as a solid wall from
+    // indoors (you see the neighbour's wall), and from outside the taller
+    // owner's full wall shows via skipShared. Only a building's EXTERIOR
+    // (non-party) walls drop away for the interior view.
+    const partyTile = new Set();
     {
       const theirH = new Map(); // gi -> tallest neighbour wall height there
       const theirWin = new Map(); // gi -> that neighbour wins ties
@@ -3829,8 +3854,10 @@ void main() {
               if (h2 > (theirH.get(k) || 0)) { theirH.set(k, h2); theirWin.set(k, tieWin); }
             }
       }
-      for (const [k, h2] of theirH)
+      for (const [k, h2] of theirH) {
+        partyTile.add(k); // a neighbour walls this tile too -> it's a party wall
         if (h2 > wallS[k] || (h2 === wallS[k] && theirWin.get(k))) skipShared.add(k);
+      }
     }
     // openings: per-storey BITMASK of archway/door gaps through wall tiles
     // (a Great Labyrinth archway exists on exactly ONE floor — d.s)
@@ -3892,12 +3919,18 @@ void main() {
       sg.group.add(sg.flat);
       for (const sd of ["n", "s", "e", "w"]) { sg.sides[sd] = new THREE.Group(); sg.group.add(sg.sides[sd]); }
       const sb = newSB(), fb = newSB(), ob = newSB();
+      // party-wall geometry (walls shared with a connected neighbour) goes to
+      // its own buffers: it is NOT added to wallMeshes, so it stays full height
+      // for the interior view instead of collapsing to a kerb.
+      const sbP = newSB(), fbP = newSB();
       const act = (x, z) => isWallTile(x, z) && wallS[gi(x, z)] > s;
       for (let z = oz; z < oz + H; z++)
         for (let x = ox; x < ox + W; x++) {
           if (!act(x, z)) continue;
           const k = gi(x, z);
           if (skipShared.has(k)) continue; // a taller neighbour draws this party wall
+          const party = partyTile.has(k);  // a party wall this building owns
+          const wb = party ? sbP : sb, tb = party ? fbP : fb;
           const open = !!((openLv.get(k) || 0) >> s & 1);
           // neighbour context: skip faces shared with another active wall tile
           const aN = act(x, z - 1), aS = act(x, z + 1), aW = act(x - 1, z), aE = act(x + 1, z);
@@ -3905,10 +3938,10 @@ void main() {
           const shW = inBld(x - 1, z) ? SH_IN : SH_W, shE = inBld(x + 1, z) ? SH_IN : SH_E;
           const yLo = open ? yB + DOOR_H : yB; // opening: only the lintel band
           if (yLo < yT) {
-            if (!aN) sbWallFace(sb, frontKey, x, z, x + 1, z, yLo, yT, shN);
-            if (!aS) sbWallFace(sb, frontKey, x, z + 1, x + 1, z + 1, yLo, yT, shS);
-            if (!aW) sbWallFace(sb, sideKey, x, z, x, z + 1, yLo, yT, shW);
-            if (!aE) sbWallFace(sb, sideKey, x + 1, z, x + 1, z + 1, yLo, yT, shE);
+            if (!aN) sbWallFace(wb, frontKey, x, z, x + 1, z, yLo, yT, shN);
+            if (!aS) sbWallFace(wb, frontKey, x, z + 1, x + 1, z + 1, yLo, yT, shS);
+            if (!aW) sbWallFace(wb, sideKey, x, z, x, z + 1, yLo, yT, shW);
+            if (!aE) sbWallFace(wb, sideKey, x + 1, z, x + 1, z + 1, yLo, yT, shE);
           }
           if (open) {
             // passage jambs + lintel underside. The walk-through axis is the
@@ -3916,18 +3949,20 @@ void main() {
             // in a south wall is walked N-S, so its jambs are the x-planes
             const zPass = !isWallTile(x, z - 1) && !isWallTile(x, z + 1);
             if (zPass) {
-              sbQuad(sb, sideKey, [x, yB, z], [x, yB, z + 1], [x, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z], SH_IN);
-              sbQuad(sb, sideKey, [x + 1, yB, z], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x + 1, yB + DOOR_H, z], SH_IN);
+              sbQuad(wb, sideKey, [x, yB, z], [x, yB, z + 1], [x, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z], SH_IN);
+              sbQuad(wb, sideKey, [x + 1, yB, z], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x + 1, yB + DOOR_H, z], SH_IN);
             } else {
-              sbQuad(sb, frontKey, [x, yB, z], [x + 1, yB, z], [x + 1, yB + DOOR_H, z], [x, yB + DOOR_H, z], SH_IN);
-              sbQuad(sb, frontKey, [x, yB, z + 1], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], SH_IN);
+              sbQuad(wb, frontKey, [x, yB, z], [x + 1, yB, z], [x + 1, yB + DOOR_H, z], [x, yB + DOOR_H, z], SH_IN);
+              sbQuad(wb, frontKey, [x, yB, z + 1], [x + 1, yB, z + 1], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], SH_IN);
             }
-            sbQuad(fb, frontKey, [x, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], 0.5);
+            sbQuad(tb, frontKey, [x, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z], [x + 1, yB + DOOR_H, z + 1], [x, yB + DOOR_H, z + 1], 0.5);
           }
           // wall top cap on this wall's final storey
-          if (wallS[k] === s + 1) sbQuad(fb, frontKey, [x, yT, z], [x + 1, yT, z], [x + 1, yT, z + 1], [x, yT, z + 1], SH_TOP);
-          // collapsed stand-in kerb (jamb posts flank openings)
-          if (!open) sbBlock(ob, x, yB + 0.01, z, x + 1, yB + 0.08, z + 1);
+          if (wallS[k] === s + 1) sbQuad(tb, frontKey, [x, yT, z], [x + 1, yT, z], [x + 1, yT, z + 1], [x, yT, z + 1], SH_TOP);
+          // collapsed stand-in kerb (jamb posts flank openings) — only for
+          // EXTERIOR walls; party walls stay full height so they get no kerb
+          if (party) { /* party walls never collapse — no kerb */ }
+          else if (!open) sbBlock(ob, x, yB + 0.01, z, x + 1, yB + 0.08, z + 1);
           else if (!isWallTile(x, z - 1) && !isWallTile(x, z + 1)) {
             // walked N-S: jamb posts on the west/east edges of the gap
             sbBlock(ob, x - 0.05, yB + 0.01, z, x + 0.1, yB + DOOR_H, z + 1);
@@ -3941,6 +3976,12 @@ void main() {
       const m2 = sbMesh(fb, matFlat(topCol), rec, sg.sides.s);
       if (m1) sg.wallMeshes.push(m1);
       if (m2) sg.wallMeshes.push(m2);
+      // party walls: same materials, added to the storey group (so they hide
+      // with upper storeys) but NOT to wallMeshes, so they never collapse to a
+      // kerb when the player stands inside — the connected neighbour's wall
+      // stays solid as the boundary.
+      sbMesh(sbP, sharedMat, rec, sg.sides.s);
+      sbMesh(fbP, matFlat(topCol), rec, sg.sides.s);
       sbMesh(ob, matFlat(topCol), rec, sg.flat);
       // ladder segments for every ladder climbing past this storey
       for (const ld of ladders) {
@@ -5177,26 +5218,102 @@ void main() {
     }
     return false;
   }
-  // Stuck-recovery wrapper around npcStepToward, shared by every caller that
-  // routes an NPC to a fixed chokepoint (a ladder, a door, a bed). The
-  // stepper itself has no memory, so two housemates trading the same tile
-  // back and forth can oscillate success/failure indefinitely without ever
-  // tripping a simple reset-on-any-success counter — DECREMENTING on
-  // success (instead of zeroing) tracks NET struggle over time instead, so
-  // persistent-but-intermittent contention still recovers promptly. The
-  // eventual snap only fires once the target tile is actually free, so two
-  // NPCs (or the player) never get shoved onto the same spot (user-
-  // reported: "stuck at the bottom of the ladder [in every house]",
-  // 2026-09-17).
-  function stuckStepToward(npc, key, tx, ty, T) {
-    if (npcStepToward(npc, tx, ty, T)) { npc[key] = Math.max(0, (npc[key] || 0) - 1); return true; }
-    npc[key] = (npc[key] || 0) + 1;
-    if (npc[key] > 6) {
-      const occupied = (tx === player.x && ty === player.y && (player.level | 0) === (npc.level | 0)) ||
-        (world.npcAt && world.npcAt(tx, ty, npc.level));
-      if (!occupied) { npc.x = tx; npc.y = ty; npc.px = PX(tx); npc.py = PX(ty); npc[key] = 0; return true; }
+  // static (wall/water/rooftop) passability for NPC pathing — same rules as
+  // npcStepToward minus the dynamic entity-occupancy check (the pathfinder
+  // plans over fixed geometry; live blockers are handled when following).
+  function npcTilePassable(npc, tx, ty) {
+    if (world.isBlocked(tx, ty) || world.isWater(tx, ty)) return false;
+    if ((npc.level | 0) > 0 && npc._owns &&
+        !(tx > npc._owns[0] && tx < npc._owns[0] + npc._owns[2] - 1 &&
+          ty > npc._owns[1] && ty < npc._owns[1] + npc._owns[3] - 1)) return false;
+    if (liftAt(tx, ty) > groundY(tx, ty) + 1.2) return false;
+    return true;
+  }
+  // bounded BFS pathfinder for town NPCs. Door/archway tiles are NOT blocked,
+  // so the route naturally threads the one doorway gap in a wall — this is what
+  // makes NPCs walk THROUGH doorways instead of the old greedy stepper giving
+  // up and the stuck-snap teleporting them across the wall. Diagonals allowed
+  // but never cut a wall corner. Returns the step list (excluding the start),
+  // [] when already at/adjacent to a blocked goal, or null if unreachable
+  // within the node budget. Capped so a walled-off goal can't stall a frame.
+  function npcPath(npc, gx, gy) {
+    const sx = npc.x, sy = npc.y;
+    if (sx === gx && sy === gy) return [];
+    const goalBlocked = !npcTilePassable(npc, gx, gy);
+    const BUDGET = 1600;
+    const prev = new Map(); // "x,y" -> previous "x,y" (null at the start)
+    prev.set(sx + "," + sy, null);
+    const q = [[sx, sy]];
+    let head = 0, found = null;
+    while (head < q.length && head < BUDGET) {
+      const cx = q[head][0], cy = q[head][1]; head++;
+      if ((cx === gx && cy === gy) ||
+          (goalBlocked && Math.max(Math.abs(cx - gx), Math.abs(cy - gy)) <= 1)) { found = cx + "," + cy; break; }
+      for (const d of DIR8_DELTA) {
+        const nx = cx + d[0], ny = cy + d[1], k = nx + "," + ny;
+        if (prev.has(k)) continue;
+        if (!npcTilePassable(npc, nx, ny)) continue;
+        if (d[0] && d[1] && (!npcTilePassable(npc, cx + d[0], cy) || !npcTilePassable(npc, cx, cy + d[1]))) continue;
+        prev.set(k, cx + "," + cy);
+        q.push([nx, ny]);
+      }
     }
-    return false;
+    if (found == null) return null;
+    const path = [];
+    for (let cur = found; cur && cur !== sx + "," + sy; cur = prev.get(cur)) {
+      const c = cur.indexOf(",");
+      path.push([+cur.slice(0, c), +cur.slice(c + 1)]);
+    }
+    path.reverse();
+    return path;
+  }
+  // Walk an NPC to (tx,ty) along a cached BFS route, one animated tile at a
+  // time, swinging doors open on the way. Recomputes when the goal changes, the
+  // route is consumed, or the next tile is unreachable; waits (never teleports)
+  // when a live blocker sits on the next tile, and only recomputes after a short
+  // cooldown so a crowded doorway doesn't thrash the pathfinder. Returns true
+  // while still en route, false once arrived (or the goal is truly unreachable).
+  // Replaces the old greedy-step + wall-crossing snap used by every chokepoint
+  // caller (bed / ladder / escort / away-bed).
+  function stuckStepToward(npc, key, tx, ty, T) {
+    if (npc.x === tx && npc.y === ty) return false;
+    const gk = tx + "," + ty;
+    let path = npc._path;
+    if (!path || npc._pathGoal !== gk || npc._pathI >= path.length) {
+      // recompute unless we recently failed to find a route to this same goal
+      if (!(npc._pathGoal === gk && npc._pathFailAt && T < npc._pathFailAt)) {
+        npc._path = npcPath(npc, tx, ty); npc._pathGoal = gk; npc._pathI = 0; npc._pathWait = 0;
+        npc._pathFailAt = npc._path ? 0 : T + 1200;
+      }
+      path = npc._path;
+      // no route within the BFS budget (goal far off, or genuinely walled off):
+      // fall back to one greedy step so an open-terrain walk still progresses.
+      // npcStepToward only ever animates onto a checked adjacent tile — it can
+      // never teleport across a wall, so the old wall-snap bug stays gone.
+      if (!path) return npcStepToward(npc, tx, ty, T);
+      if (!path.length) return false; // already adjacent to a blocked goal
+    }
+    const step = path[npc._pathI];
+    const nx = step[0], ny = step[1];
+    // next tile blocked by a live entity? wait for it to clear; after a while
+    // give up on this route and replan around the obstacle next tick.
+    if ((nx === player.x && ny === player.y && (player.level | 0) === (npc.level | 0)) ||
+        (world.npcAt && world.npcAt(nx, ny, npc.level)) || !npcTilePassable(npc, nx, ny)) {
+      if ((npc._pathWait = (npc._pathWait || 0) + 1) > 18) { npc._path = null; npc._pathWait = 0; }
+      return true;
+    }
+    npc._pathWait = 0;
+    const dx = nx - npc.x, dy = ny - npc.y;
+    const di = DIR8_DELTA.findIndex(([ex, ey]) => ex === dx && ey === dy);
+    if (di >= 0) npc.dir8 = DIR8[di];
+    const door = world.doorAt && (world.doorAt(nx, ny) || world.doorAt(npc.x, npc.y));
+    if (door && world.isDoorOpen && !world.isDoorOpen(door.x, door.y)) {
+      world.setDoorOpen(door.x, door.y, true); NPC_DOOR_CLOSE.set(door.x + "," + door.y, T + 4500);
+    }
+    npc._lastStep = [dx, dy];
+    npc.moving = { fx: npc.x, fy: npc.y, tx: nx, ty: ny, t: 0, dur: 260 }; npc._mt = T;
+    npc._pathI++;
+    return true;
   }
   // Route an NPC to its building's ladder and climb one storey at a time toward
   // targetLevel (the player's own useLadder, but autonomous). Returns true while
@@ -5429,14 +5546,18 @@ void main() {
       if (bed) {
         const home = npc._owns;
         const inHome = home && npc.x >= home[0] && npc.x < home[0] + home[2] && npc.y >= home[1] && npc.y < home[1] + home[3];
-        // the bedroom is upstairs (2-storey shop/station homes): get inside, then
-        // climb the ladder to the bed's storey before walking to the bed itself.
+        // the bedroom may be upstairs (2-storey shop/station homes): walk IN
+        // through the doorway first, then climb to the bed's storey, then to the
+        // bed. The BFS pathfinder threads the doorway on its own, so we route to
+        // a real passable tile (the ladder base when there's an upstairs, else
+        // the bed) rather than guessing a door-approach tile.
         if ((npc.level | 0) !== bedLv) {
-          if ((npc.level | 0) === 0 && home && !inHome) {            // still outside — head for the door first
+          if ((npc.level | 0) === 0 && home && !inHome) {            // still outside — walk in to the ladder
             if (T >= npc._wanderAt) {
               npc._wanderAt = T + 240 + Math.random() * 140;
-              const dx2 = home[0] + (home[2] >> 1), dy2 = home[1] + home[3] - 2;
-              stuckStepToward(npc, "_bedStuck", dx2, dy2, T);
+              const lad = npc._ladder || (npc._ladders && npc._ladders[0] && [npc._ladders[0].x, npc._ladders[0].y]);
+              const into = lad || bed;
+              stuckStepToward(npc, "_bedStuck", into[0], into[1], T);
             }
             return;
           }
@@ -5445,10 +5566,7 @@ void main() {
         if ((npc.level | 0) === bedLv && npc.x === bed[0] && npc.y === bed[1]) return; // in bed — stand
         if (T < npc._wanderAt) return;
         npc._wanderAt = T + 240 + Math.random() * 140;               // brisk walk home
-        // if we've wandered OUTSIDE our building (ground level), make for the doorway
-        // first (greedy stepping routes around walls poorly), then on to the bed.
-        const tgt = ((npc.level | 0) === 0 && home && !inHome) ? [home[0] + (home[2] >> 1), home[1] + home[3] - 2] : bed;
-        if (!stuckStepToward(npc, "_bedStuck", tgt[0], tgt[1], T)) {   // blocked, and no recovery snap this tick
+        if (!stuckStepToward(npc, "_bedStuck", bed[0], bed[1], T)) {   // arrived, or unreachable this tick
           if (inHome || Math.max(Math.abs(npc.x - bed[0]), Math.abs(npc.y - bed[1])) <= 1) return; // settle at home
         }
         return;
