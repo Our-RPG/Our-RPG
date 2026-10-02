@@ -1,0 +1,19 @@
+# Cloudflare Pages header rules (our-rpg.com).
+#
+# The shell files below must REVALIDATE on every use (cheap conditional GETs —
+# etag 304s when unchanged). Without this, Pages' default max-age=14400 let a
+# browser serve a four-hour-stale bundle.js from its HTTP cache *through* the
+# service worker's network-first fetch — which is how the torn v29 bundle
+# stayed pinned on clients after the fixed redeploy (2026-10-02 vista-map
+# incident). The SW's own Cache Storage still makes loads instant; this only
+# governs real network fetches.
+/sw.js
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/dist/*
+  Cache-Control: no-cache
+/js/*
+  Cache-Control: no-cache
+/css/*
+  Cache-Control: no-cache

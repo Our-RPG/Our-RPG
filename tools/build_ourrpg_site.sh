@@ -37,6 +37,7 @@ copydir() { mkdir -p "dist/site/$1"; cp -R "$1"/. "dist/site/$1/"; }
 
 copy index.html          # overwrites the studio build's redirect page
 copy sw.js
+copy _headers            # Pages header rules: shell files revalidate (no 4h HTTP-cache pinning)
 copydir css
 copydir fonts
 copy dist/bundle.js
