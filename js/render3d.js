@@ -5489,6 +5489,21 @@ void main() {
     // multiplayer (js/net/entsync.js): another client is this NPC's proximity
     // authority — it drives the wander; we only replay the synced steps above
     if (npc._remoteUntil && T < npc._remoteUntil) return;
+    // chase: beeline toward the PLAYER's live tile (not a fixed spot) until
+    // close enough to talk, then hand off to Tutorial — Tūhura Isle's Guide
+    // walking up to a fresh spark the moment they wash ashore (user req),
+    // rather than the old "pop the dialogue regardless of distance" welcome.
+    if (npc._approachPlayer) {
+      if (Math.hypot(player.x - npc.x, player.y - npc.y) <= 2.2) {
+        npc._approachPlayer = false; npc._approachStuck = 0;
+        if (typeof Tutorial !== "undefined" && Tutorial.onApproachArrive) Tutorial.onApproachArrive(npc);
+        return;
+      }
+      if (T < npc._wanderAt) return;
+      npc._wanderAt = T + 220 + Math.random() * 100;
+      stuckStepToward(npc, "_approachStuck", player.x, player.y, T);
+      return;
+    }
     // escort: walk to an arbitrary tile/storey, highest priority (Tūhura
     // Isle's Sigrid sequence, gameplay/tutorial.js) — properly climbs via
     // npcClimbToward (unlike the lamp task below, which only ever targets

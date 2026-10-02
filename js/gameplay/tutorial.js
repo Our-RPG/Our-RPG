@@ -1273,6 +1273,14 @@ const Tutorial = (() => {
     t.sigridSettled = 1; // leg 2 done — home for the night, until morning
     if (typeof saveGame === "function") saveGame();
   }
+  // fires from render3d.js's stepMixNpc the instant the Guide's _approachPlayer
+  // chase reaches the fresh spark — he opens the welcome himself, having
+  // actually walked up, instead of the talk popping out of nowhere.
+  function onApproachArrive(npc) {
+    if (npc.tutor !== "guide") return;
+    talk(npc);
+    if (typeof saveGame === "function") saveGame();
+  }
   // per-frame: gently walk the player toward Sigrid while t.escorting is
   // set, auto-climbing the shared ladder one storey at a time when standing
   // on it (walkTo alone can't cross storeys — that's an explicit ladder
@@ -1926,10 +1934,12 @@ const Tutorial = (() => {
   }
 
   // ---------- dialogue UI ----------
-  // A bottom CONVERSATION BAR, not a screen-blanking modal: the keeper's one
-  // spoken line (said aloud over their head as a bubble too) and the player's
-  // response buttons. Clicking a response advances the talk; a plain response
-  // on the last beat finishes (grant + staged-sky roll). See the DLG note.
+  // No panel at all (user req): the keeper's one spoken line appears ONLY as
+  // an overhead speech bubble (npcSay), just like any other NPC in the game —
+  // the only on-screen element here is a short plain-text list of the
+  // player's replies, bottom-centre, no card/box chrome. Clicking a response
+  // advances the talk; a plain response on the last beat finishes (grant +
+  // staged-sky roll). See the DLG note.
   let el = null, cur = null, curNpc = null, beat = 0;
   function liveNpc(id) {
     const list = (typeof world !== "undefined" && world && world.npcs) ||
@@ -1940,29 +1950,20 @@ const Tutorial = (() => {
     if (el) return;
     el = document.createElement("div");
     el.id = "tutdlg";
-    // a full-screen catcher (so a stray click can't walk the player off
-    // mid-talk) but TRANSPARENT — the scene, and the keeper's overhead speech
-    // bubble, stay in full view behind the bar
+    // NO GUI PANEL (user req): the keeper's line is spoken entirely through
+    // the overhead speech bubble (npcSay, called from render() below — it
+    // also mirrors the line into the sidebar log, same as any other NPC). This
+    // element only catches stray clicks while picking a response (so you can't
+    // accidentally walk off mid-conversation) and hosts the plain-text reply
+    // list itself — no card, no name/role header, no box chrome.
     el.style.cssText = "display:none;position:fixed;inset:0;z-index:9000;pointer-events:auto;" +
       "align-items:flex-end;justify-content:center;font:16px OpenDyslexic, Verdana, sans-serif;";
-    el.innerHTML =
-      `<div id="tutdlg-card" style="width:min(640px,94vw);margin:0 0 8vh;background:rgba(20,24,32,.96);` +
-      `border:1px solid rgba(90,120,180,.5);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.6);` +
-      `padding:16px 20px;color:#dfe6f2;">` +
-      `<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:8px;">` +
-      `<div id="tutdlg-name" style="font-size:17px;font-weight:bold;color:#ffd75e;"></div>` +
-      `<div id="tutdlg-role" style="font-size:12px;color:#8fa3c8;"></div>` +
-      `<button id="tutdlg-x" style="margin-left:auto;background:none;border:none;color:#8fa3c8;font-size:18px;cursor:pointer;line-height:1;">✕</button></div>` +
-      `<div id="tutdlg-line" style="margin:2px 0 12px;color:#eaf1ff;line-height:1.5;"></div>` +
-      `<div id="tutdlg-extra"></div>` +
-      `<div id="tutdlg-r" style="display:flex;flex-direction:column;gap:8px;"></div>` +
-      `</div>`;
+    el.innerHTML = `<div id="tutdlg-r" style="display:flex;flex-direction:column;align-items:center;gap:6px;margin:0 0 10vh;"></div>`;
     document.body.appendChild(el);
     // clicks on the transparent catcher do nothing (no accidental close); the
-    // card swallows its own clicks
+    // response text swallows its own clicks
     el.addEventListener("mousedown", e => e.stopPropagation());
     el.addEventListener("click", e => e.stopPropagation());
-    document.getElementById("tutdlg-x").onclick = close;
     document.addEventListener("keydown", e => {
       if (!isOpen()) return;
       // never steal keystrokes while the player is typing (chat bar, notes)
@@ -2077,16 +2078,12 @@ const Tutorial = (() => {
     const b = curBeat();
     if (!b) { close(); return; }
     const line = subst(b.npc);
-    document.getElementById("tutdlg-name").textContent = tutorName(cur);
-    document.getElementById("tutdlg-role").textContent = "· " + cur.role + " of Tūhura Isle";
-    document.getElementById("tutdlg-line").textContent = line;
-    // say it aloud over the keeper's head too — quote-free, by design (the
-    // bubble renders the line verbatim, so it must never carry quote marks)
+    // the keeper's ENTIRE line lives in the overhead speech bubble (quote-free
+    // by design — the bubble renders it verbatim) — npcSay also mirrors it
+    // into the sidebar log, exactly like any other NPC's speech; there is no
+    // separate text panel to duplicate it into (the Goals tab covers the
+    // itinerary the old first-beat panel used to show here)
     if (curNpc && typeof npcSay === "function") { try { npcSay(curNpc, line); } catch (e) { /* no live npc */ } }
-    const extra = document.getElementById("tutdlg-extra");
-    extra.innerHTML = "";
-    // the Guide's first beat appends the live itinerary (not on the reminder)
-    if (cur.id === "guide" && !cur._remind && beat === 0) extra.appendChild(progressList());
     const row = document.getElementById("tutdlg-r");
     row.innerHTML = "";
     (b.r || []).forEach((r, i) => {
@@ -2094,45 +2091,14 @@ const Tutorial = (() => {
       const isAct = !!(r && typeof r === "object" && r.act);
       const btn = document.createElement("button");
       btn.textContent = `${i + 1}. ${label}`;
-      btn.style.cssText = "text-align:left;padding:10px 14px;cursor:pointer;font:inherit;border-radius:8px;" +
-        (isAct ? "background:rgba(60,140,90,.22);color:#9fe8c0;border:1px solid rgba(90,170,120,.55);"
-               : "background:rgba(255,255,255,.06);color:#fff;border:1px solid rgba(255,255,255,.18);");
-      btn.onmouseenter = () => (btn.style.background = isAct ? "rgba(90,200,130,.3)" : "rgba(127,208,255,.22)");
-      btn.onmouseleave = () => (btn.style.background = isAct ? "rgba(60,140,90,.22)" : "rgba(255,255,255,.06)");
+      btn.style.cssText = "background:none;border:none;padding:4px 12px;cursor:pointer;font:inherit;" +
+        "text-shadow:0 1px 5px rgba(0,0,0,.95),0 0 12px rgba(0,0,0,.7);" +
+        (isAct ? "color:#9fe8c0;" : "color:#eaf1ff;");
+      btn.onmouseenter = () => (btn.style.color = isAct ? "#c8ffdf" : "#ffe9a8");
+      btn.onmouseleave = () => (btn.style.color = isAct ? "#9fe8c0" : "#eaf1ff");
       btn.onclick = e => { e.stopPropagation(); pick(r); };
       row.appendChild(btn);
     });
-  }
-  function progressList() {
-    const t = state();
-    const f = frontier();
-    const wrap = document.createElement("div");
-    wrap.style.cssText = "margin-top:10px;padding:10px 12px;background:#121623;border:1px solid #2a3550;border-radius:6px;";
-    const head = document.createElement("div");
-    head.style.cssText = "color:#8fa3c8;font-size:13px;margin-bottom:6px;";
-    head.textContent = `The journey east — ${_seenCount} / ${TUT_TUTORS.length} keepers met`;
-    wrap.appendChild(head);
-    TUT_TUTORS.forEach((tu, i) => {
-      const row = document.createElement("div");
-      const done = tutorComplete(tu.id);
-      const lockd = i > f;
-      row.style.cssText = `font-size:13px;color:${done ? "#6fae8a" : lockd ? "#4a5670" : "#7fe3c7"};`;
-      const r = REQS[tu.id];
-      const suffix = (r && t && t.seen[tu.id] && !done)
-        ? ` — ${r.task}${reqNeed(tu.id) > 1 ? ` (${reqNum(tu.id)}/${reqNeed(tu.id)})` : ""}`
-        : i === f ? " — " + dirFrom(tu) : "";
-      row.textContent = `${done ? "✦" : lockd ? "🔒" : "◈"} ${tutorFull(tu)}${suffix}`;
-      wrap.appendChild(row);
-    });
-    return wrap;
-  }
-  function dirFrom(tu) {
-    const [px, py] = podXY(tu.pod);
-    const dx = px + tu.dx - player.x, dy = py + tu.dy - player.y;
-    const d = Math.round(Math.hypot(dx, dy));
-    if (d < 6) return "right here";
-    const dirs = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"];
-    return `${d} tiles ${dirs[Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) & 7]}`;
   }
 
   // ---------- entry points ----------
@@ -2174,18 +2140,29 @@ const Tutorial = (() => {
     return true;
   }
 
-  // the one-time welcome popup, a few beats after a fresh character boots in
-  // (also re-hangs the journey bar on every boot of a live tutorial save)
+  // a fresh character boots in as an unformed spark — the Guide notices at
+  // once and walks over himself (render3d.js's _approachPlayer chase, handed
+  // off to onApproachArrive above) rather than a dialogue just popping up
+  // regardless of where he's standing (user req). Also re-hangs the journey
+  // bar on every boot of a live tutorial save.
   function maybeWelcome() {
     const t = state();
     refreshBar();
     if (!t || t.welcomed || t.graduated || !onIsle()) return;
     t.welcomed = 1;
-    if (typeof log === "function") {
-      log("A nameless spark of light washes ashore on Tūhura Isle — the Isle of Discovery.", "gold");
-      log(`Talk to ${tutorFull(TUT_TUTORS[0])} (just north of you), then follow the path east.`, "sys");
-    }
-    setTimeout(() => { talk({ tutor: "guide" }); if (typeof saveGame === "function") saveGame(); }, 1200);
+    if (typeof log === "function") log("A nameless spark of light washes ashore on Tūhura Isle — the Isle of Discovery.", "gold");
+    const g = liveNpc("guide");
+    // rooted tutors spawn with _wanderAt pinned 9e9ms out (so they never idle-
+    // wander off post) — stepMixNpc's chase branch gates on that same field,
+    // so it must be pulled back to "now" or the chase would never take a step
+    if (g) { g._approachPlayer = true; g._approachStuck = 0; g._wanderAt = 0; }
+    else if (typeof log === "function") log(`Talk to ${tutorFull(TUT_TUTORS[0])} (just north of you), then follow the path east.`, "sys");
+    // safety net: if the chunk wasn't hydrated yet or he gets stuck en route,
+    // never leave a fresh spawn stalled with no opening line
+    setTimeout(() => {
+      if (!isOpen() && !(state() && state().seen.guide)) talk({ tutor: "guide" });
+      if (typeof saveGame === "function") saveGame();
+    }, g ? 9000 : 1200);
   }
 
   // the Navigator's crossing: teleport to Newhaven, then SEAL the isle —
@@ -2377,7 +2354,7 @@ const Tutorial = (() => {
     phaseOverride, weatherOverride, flatSky, barred, frontier, refreshBar, goalState,
     skillVisible, riverFlow, tick, onCraft, anvilRecipes,
     villageHome, villageLamps, offDutyLine, villageBed, tutHouseUpperDecor,
-    sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, tickEscort,
+    sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, onApproachArrive, tickEscort,
     onGather, onWash, onBank, onKill, onChant,
     onQueue, onBrace, onStoke, onMerge, onChatReply,
     onHarvest, onTend, onEquip, onPickup, onOutOfArrows, keeperMixIdx };
