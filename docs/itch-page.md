@@ -15,8 +15,8 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
   "This file will be played in the browser".
 - **Pricing: $0, donations OFF.** The optional birdsong layer is CC BY-NC-SA
   (non-commercial); taking money on the page that distributes the game is a
-  line we don't need to test. Support goes through Ko-fi
-  ([ko-fi.com/taiao](https://ko-fi.com/taiao)) linked from the body instead.
+  line we don't need to test. Support goes through
+  [our-rpg.com/koha](https://our-rpg.com/koha) linked from the body instead.
 - **Embed:** 1280×720 minimum, **fullscreen button ON**, mobile-friendly
   OFF (it isn't — say so, don't fake it). Enable "SharedArrayBuffer support"
   only if testing shows the ML dialogue layer wants it; the game itself
@@ -47,9 +47,9 @@ README's "truthful front page" rule: nothing promised that isn't in the build.
 
 *(lead GIF here — the Bifrost crossing)*
 
-**The game's home is [our-rpg.com](https://our-rpg.com)** — this page embeds
-the very same build. The Workshop, where the community makes the game's art
-and votes it into everyone's world, lives at
+**The game's home is [our-rpg.com/play](https://our-rpg.com/play)** — this
+page embeds the very same build. The Workshop, where the community makes the
+game's art and votes it into everyone's world, lives at
 [our-rpg.com/workshop](https://our-rpg.com/workshop).
 
 **Our RPG** began life as *Taiao*, te reo Māori for the natural world — and
@@ -103,7 +103,7 @@ promise. If this game matters to you, the repo *is* the game.
   the world starts after ~15 MB; the rest of the art streams in behind you.
   Birdsong and music arrive quietly later and cache. Without them the game
   still works — quieter skies.
-- An **Accessibility** section in the ? tab offers a UI text-size slider
+- An **Accessibility** section in the Settings tab offers a UI text-size slider
   and a reduced-motion mode (static Bifrost crossing, no shakes or eased
   zooms); the system prefers-reduced-motion setting is honoured by default.
 - **Saves are in your browser's storage.** Clearing site data for itch.io
@@ -131,7 +131,7 @@ xeno-canto recordists (CC BY-NC-SA, distributed as an optional layer,
 individually credited). Full credits in the repo.
 Community: [the Workshop](https://our-rpg.com/workshop) ·
 [GitHub Discussions](https://github.com/dataversion5372/Taiao/discussions) ·
-Koha (support): [ko-fi.com/taiao](https://ko-fi.com/taiao) —
+Koha (support): [our-rpg.com/koha](https://our-rpg.com/koha) —
 [what it funds](https://github.com/dataversion5372/Taiao/blob/main/docs/koha.md).
 
 ---

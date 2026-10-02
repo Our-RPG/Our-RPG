@@ -101,6 +101,7 @@ const ROUTES = {
   "GET /api/sprites/published/item":    profile.publishedItem,
 
   "GET /api/koha/transparency":         koha.transparency,
+  "POST /api/koha/checkout":            koha.checkout,
 
   "POST /api/region/push":              region.pushDeltas,
   "GET /api/region/pull":               region.pullDeltas,

@@ -322,7 +322,7 @@
 			  <button class="tab" data-tab="skills">Skills</button>
 			  <button class="tab" data-tab="goals">Goals</button>
 			  <button class="tab" data-tab="account" id="accounttab" style="display:none" title="Optional account: cloud save vault, community workshop, leaderboards. The game never requires one.">Account</button>
-			  <button class="tab" data-tab="help" title="Help &amp; settings">?</button>
+			  <button class="tab" data-tab="help" title="Accessibility, privacy, sound and save settings">Settings</button>
 			  <button class="tab" data-tab="cheats" id="cheattab" style="display:none" title="Developer overrides: time, weather, snow, flood (DEV_MODE builds only)">Dev</button>
 			</div>
 			<div id="panels">
@@ -337,28 +337,6 @@
 			<div id="panel-account" class="panel"><!-- built by js/net/account-ui.js in server-enabled builds --></div>
 			<div id="panel-cheats" class="panel"><!-- built by js/gameplay/cheats.js in DEV_MODE builds --></div>
 			<div id="panel-help" class="panel">
-			  <h3>Our RPG</h3>
-				  <p>An offline single-player tribute to old-school tile MMOs — built, piece by piece, by the people who play it. You start in the city of <b>Newhaven</b>; 37 biomes stretch out forever in every direction, each with its own creatures.</p>
-			  <ul>
-				<li><b>Left-click</b>: walk / gather / attack / talk</li>
-				<li><b>Right-click</b>: context menu · <b>WASD</b>: walk</li>
-				<li><b>Your character</b>: choose which of the world's folk you play as when your first isle keeper offers a body, or later from Newhaven's Registrar in the plaza; they face the way you move.</li>
-				<li><b>Combat</b>: your style follows your main hand — a bow shoots (arrows in the quiver), a <b>wand or staff weaves runes into spell sentences</b> (runes are words: substances like Fire and Frost, verbs like Strike, Bind and Drain, modifiers like Twin and Wrath), anything else is melee. An offhand <b>dagger</b> in the shield slot lets an archer or mage fight back when enemies close in. <b>Shift+WASD</b> backs away mid-fight without dropping your target. Train Defence by taking hits. A mage can also speak spells directly: <b>Enter</b> opens the chant bar — type the words ("fire strike") and Enter casts them — and <b>V</b> toggles casting by voice (say the words aloud; browsers with speech recognition only). Every chanted word still burns its rune from the pouch.</li>
-				<li><b>Gather</b>: trees, rocks, fishing spots, berry bushes, herb patches.</li>
-				<li><b>Farm</b>: fenced fields grow naturally in Farmland — each one takes a single agriculture skill's seeds. Enter by the gate, <b>hoe</b> the bare soil to till it, then plant and harvest.</li>
-				<li><b>Craft</b>: furnace (smelt/jewelry), anvil, workbench (carpentry/fletching/leather), loom, tanning rack, millstone, cauldron (potions), runestone altar.</li>
-				<li><b>Furnish & launch</b>: carpentry furniture, casks, pottery and glassware can be <b>placed in the world</b> (click them in your pack) and picked back up. Boats launch onto water — board one and sail it, <b>row</b> small craft with a pair of oars, or ride oarless down the river current.</li>
-				<li><b>Firemaking</b>: click logs in your pack to light a cooking fire.</li>
-				<li><b>Slain beasts</b> drop meat and their own hide automatically — tan the hides into leather at a tanning rack.</li>
-				<li><b>Agility</b> shortcuts: cross stepping stones, mossy stones, rock scrambles and cliff ledges at rivers and ravines. Harder crossings need more Agility and risk a slip — but training it makes you nimbler and quicker on your feet.</li>
-				<li><b>Alchemy table</b> turns items into coins.</li>
-				<li><b>Villages</b> dot the wilderness — talk to villagers, trade with their merchants.</li>
-				<li><b>Sailing</b>: build a canoe/sailboat/ship at a shipyard (Shipwrighting), then click across rivers, lakes and seas. Deep-water fishing spots hold the best fish.</li>
-				<li><b>World map (M)</b>: everywhere you've explored, with hover icons for banks, villages, resources and mob camps. Scroll to zoom, drag to pan.</li>
-				<li><b>Postcard (K)</b>: saves a framed snapshot of the view, stamped with the place, coordinates and world. Everyone plays the same world — a postcard is an invitation, and its coordinates work in any copy of the game.</li>
-				<li>Trade at the <b>general store</b>. Bank at the <b>chest</b>. Eat food to heal. Autosaves.</li>
-				<li>Resources get richer with distance: 32 tiers each of trees, ores, fish, herbs, crops, runes and more.</li>
-			  </ul>
 				  <h4 style="margin:10px 0 4px">Accessibility</h4>
 				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0">UI text size
 				    <input type="range" id="fontscale" min="70" max="200" step="5" style="flex:1"></label>
@@ -404,10 +382,6 @@
 				  <input type="file" id="importfile" accept="application/json" style="display:none">
 				  <p class="hint">Save/load a real <code>.json</code> file on disk, independent of browser storage — use it as a backup or to move your character between browsers/computers.</p>
 				  <p class="hint">3D needs WebGL: hard-refresh (Cmd+Shift+R), enable hardware acceleration in your browser's performance settings, and allow this page in any canvas/fingerprint-blocking extension.</p>
-			  <h4 style="margin:10px 0 4px">Credits &amp; licences</h4>
-			  <p class="credits">Art: Kenney.nl roguelike packs (CC0) · "Tiny Creatures" by Clint Bellanger (CC0) · custom sprites made for Our RPG (PixelLab + hand-drawn, CC BY-SA). Sounds: CC0 from Kenney.nl &amp; OpenGameArt — every file credited in <code>assets/sfx/CREDITS.txt</code>. Birdsong: real xeno-canto recordings (CC BY-NC-SA), each recordist credited in <code>assets/birdsong/CREDITS.txt</code>. Music: Bifrost theme "Frozen Star" by Kevin MacLeod, incompetech.com (CC BY 4.0, <code>assets/music/CREDITS.txt</code>); exploration music is generated live by the game itself. Font: OpenDyslexic (SIL OFL). Engines: three.js (MIT). Code: GPL-3.0-or-later — Our RPG is free and licensed to stay that way, forever. It began as <i>Taiao</i>, te reo Māori for the natural world, and its world still carries that whakapapa.</p>
-				  <h4 style="margin:10px 0 4px">Community &amp; contributing</h4>
-				  <p class="credits">Source, issues and the object workshop's submission path: <a href="https://github.com/dataversion5372/Taiao" target="_blank" rel="noopener">github.com/dataversion5372/Taiao</a>. Questions, ideas, or just want to talk about the world — <a href="https://github.com/dataversion5372/Taiao/discussions" target="_blank" rel="noopener">GitHub Discussions</a> is the one community channel.</p>
 			</div>
 				</div>
 				<div id="sidebar-spacer"></div>

@@ -127,7 +127,7 @@
 <div style="color:#ffe97a;font-weight:bold;letter-spacing:1px;margin-bottom:8px;">From the keepers of Tūhura Isle</div>
 <p>You've walked this world for ${hrs} attentive hours now. Thank you — a world is only real while someone is in it.</p>
 <p>${costLine}</p>
-<p>If you ever feel like leaving a koha, it is welcome and never expected — <a href="https://ko-fi.com/taiao" target="_blank" rel="noopener" style="color:#ffd75e;">ko-fi.com/taiao</a> is the road. Nothing in Our RPG is metered, gated, or worse without it; the licence makes that a structural promise, not a polite one. <span style="color:#7d90a8;">(docs/koha.md in the repository tells the whole honest story of what it funds — and what it never will.)</span></p>
+<p>If you ever feel like leaving a koha, it is welcome and never expected — <a href="https://our-rpg.com/koha" target="_blank" rel="noopener" style="color:#ffd75e;">our-rpg.com/koha</a> is the road. Nothing in Our RPG is metered, gated, or worse without it; the licence makes that a structural promise, not a polite one. <span style="color:#7d90a8;">(docs/koha.md in the repository tells the whole honest story of what it funds — and what it never will.)</span></p>
 <p style="color:#7d90a8;">This letter returns, at most, every forty attentive hours. Or never again, if you prefer — we will honour that without another word.</p>
 <div style="margin-top:14px;">
 <button id="koha-close" style="background:#241c38;border:1px solid #3a3050;color:#d8d2e8;border-radius:4px;cursor:pointer;padding:4px 12px;font-size:12px;">Fold it away</button>

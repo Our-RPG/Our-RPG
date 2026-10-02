@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Koha — Our RPG</title>
+  <meta name="description" content="Koha: a gift, given without obligation. Support the server that keeps Our RPG's shared world running — never a fee, never expected.">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #14161f; color: #e8eaf2;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Verdana, sans-serif;
+    }
+    a { color: #ffd75e; }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 48px 20px 80px; }
+    h1 { color: #ffe97a; font-size: 24px; letter-spacing: .5px; margin: 0 0 4px; }
+    .sub { color: #7d90a8; font-size: 13px; margin-bottom: 28px; }
+    .card {
+      background: #1d1729; border: 1px solid #3a3050; border-radius: 10px;
+      padding: 22px 24px; margin-bottom: 20px;
+    }
+    #meter { color: #b8c4dd; font-size: 14px; min-height: 1.4em; }
+    .amounts { display: flex; gap: 10px; flex-wrap: wrap; margin: 16px 0; }
+    .amt {
+      flex: 1 1 auto; min-width: 56px; text-align: center; padding: 10px 8px;
+      background: #241c38; border: 1px solid #3a3050; border-radius: 6px;
+      color: #d8d2e8; cursor: pointer; font-size: 14px; font-weight: bold;
+    }
+    .amt.sel { background: #3a2a52; border-color: #ffd75e; color: #ffd75e; }
+    #custom {
+      width: 100%; margin-top: 4px; padding: 9px 10px; background: #14101e;
+      border: 1px solid #3a3050; border-radius: 6px; color: #e8eaf2; font-size: 14px;
+    }
+    .toggle { display: flex; gap: 10px; margin: 18px 0; }
+    .toggle label {
+      flex: 1; text-align: center; padding: 9px; border-radius: 6px; cursor: pointer;
+      background: #241c38; border: 1px solid #3a3050; color: #b8c4dd; font-size: 13px;
+    }
+    .toggle input { display: none; }
+    .toggle input:checked + span { color: #ffd75e; }
+    .toggle label:has(input:checked) { border-color: #ffd75e; background: #3a2a52; }
+    #give {
+      width: 100%; margin-top: 18px; padding: 13px; border-radius: 6px; border: none;
+      background: #ffd75e; color: #1d1729; font-weight: bold; font-size: 15px; cursor: pointer;
+    }
+    #give:disabled { opacity: .5; cursor: default; }
+    #status { margin-top: 10px; font-size: 13px; color: #8fa3c8; min-height: 1.3em; }
+    .thanks {
+      background: #1d2e1d; border: 1px solid #3a6a3a; color: #bde8bd;
+      padding: 16px 20px; border-radius: 8px; margin-bottom: 20px; font-size: 14px;
+    }
+    .credits { color: #7d90a8; font-size: 13px; line-height: 1.6; }
+    footer { margin-top: 40px; text-align: center; color: #5c6480; font-size: 12px; }
+    footer a { color: #8fa3c8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>From the keepers of Tūhura Isle</h1>
+    <div class="sub">koha (Māori): a gift, given without obligation, that carries its own mana — freely given, and freely able to be declined.</div>
+
+    <div class="thanks" id="thanksbox" style="display:none">
+      Kia ora — your koha arrived safely. Thank you for keeping the world lit.
+    </div>
+
+    <div class="card">
+      <p style="margin:0 0 12px">Our RPG works completely offline, forever,
+      no matter who's paying for what — the licence guarantees it. There's
+      now one small piece of optional infrastructure: a server that keeps
+      cloud saves, workshop votes and leaderboards. It costs a few dollars a
+      month, and that number is public:</p>
+      <p id="meter">Reading the meter…</p>
+    </div>
+
+    <div class="card">
+      <p style="margin:0 0 4px;font-weight:bold">Leave a koha</p>
+      <p class="credits" style="margin:0 0 4px">Nothing in Our RPG is
+      metered, gated, or better for those who give — the licence makes that
+      a structural promise. This is a gift, not a purchase.</p>
+
+      <div class="amounts" id="amounts">
+        <div class="amt" data-amt="3">$3</div>
+        <div class="amt sel" data-amt="5">$5</div>
+        <div class="amt" data-amt="10">$10</div>
+        <div class="amt" data-amt="25">$25</div>
+      </div>
+      <input type="number" id="custom" placeholder="Or enter a custom amount (USD)" min="1" max="500" step="1">
+
+      <div class="toggle">
+        <label><input type="radio" name="interval" value="once" checked><span>One-time</span></label>
+        <label><input type="radio" name="interval" value="month"><span>Every month</span></label>
+      </div>
+
+      <button id="give">Give →</button>
+      <div id="status"></div>
+    </div>
+
+    <p class="credits">
+      If you ever feel like giving, it's welcome and never expected. The
+      full, honest story of what koha funds — and what it never will — lives
+      in
+      <a href="https://github.com/dataversion5372/Taiao/blob/main/docs/koha.md" target="_blank" rel="noopener">docs/koha.md</a>
+      on GitHub.
+    </p>
+
+    <footer>
+      <a href="/home">Our RPG</a> · <a href="/play">Play</a> · <a href="/workshop">Workshop</a>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+      const params = new URLSearchParams(location.search);
+      if (params.get("thanks")) document.getElementById("thanksbox").style.display = "block";
+
+      fetch("/api/koha/transparency").then(r => r.json()).then(r => {
+        const meter = document.getElementById("meter");
+        if (r && r.ok && r.current) {
+          const usd = (r.current.usd_cents / 100).toFixed(2);
+          meter.textContent = `Running the whole shared world cost $${usd} in ${r.current.month}` +
+            (r.players30d > 1 ? `, shared across ${r.players30d} players.` : ".") +
+            " That's the whole bill; the numbers are public.";
+        } else {
+          meter.textContent = "The live meter publishes whenever the server is reachable — a real dollar figure, to the cent, updated monthly.";
+        }
+      }).catch(() => {
+        document.getElementById("meter").textContent =
+          "The live meter publishes whenever the server is reachable — a real dollar figure, to the cent, updated monthly.";
+      });
+
+      let amount = 5;
+      const amounts = document.getElementById("amounts");
+      const custom = document.getElementById("custom");
+      amounts.addEventListener("click", e => {
+        const el = e.target.closest(".amt");
+        if (!el) return;
+        amounts.querySelectorAll(".amt").forEach(a => a.classList.remove("sel"));
+        el.classList.add("sel");
+        amount = Number(el.dataset.amt);
+        custom.value = "";
+      });
+      custom.addEventListener("input", () => {
+        amounts.querySelectorAll(".amt").forEach(a => a.classList.remove("sel"));
+        amount = Number(custom.value);
+      });
+
+      const give = document.getElementById("give");
+      const status = document.getElementById("status");
+      give.addEventListener("click", async () => {
+        const interval = document.querySelector('input[name="interval"]:checked').value;
+        if (!Number.isFinite(amount) || amount < 1 || amount > 500) {
+          status.textContent = "Pick or enter an amount between $1 and $500.";
+          return;
+        }
+        give.disabled = true;
+        status.textContent = "Opening Stripe…";
+        try {
+          const r = await fetch("/api/koha/checkout", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ amount, interval }),
+          }).then(r => r.json());
+          if (r.ok && r.url) { location.href = r.url; return; }
+          status.textContent = r.error || "Something went wrong — try again shortly.";
+        } catch (e) {
+          status.textContent = "Couldn't reach the server — try again shortly.";
+        }
+        give.disabled = false;
+      });
+    })();
+  </script>
+</body>
+</html>

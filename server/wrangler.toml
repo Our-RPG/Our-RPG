@@ -84,4 +84,6 @@ LIVE_TRADE = "on"
 #   TURNSTILE_SECRET  — enables Turnstile verification on register/login
 #   ADMIN_TOKEN       — enables /api/admin/* (costs, flag queue, proposal status)
 #   GITHUB_TOKEN      — with GITHUB_REPO, posts the weekly digest to Discussions
+#   STRIPE_SECRET_KEY — enables /api/koha/checkout (Stripe Checkout Sessions,
+#                       our-rpg.com/koha); without it the endpoint 503s
 # Optional vars: GITHUB_REPO ("owner/name"), DIGEST_CATEGORY ("Workshop digest")

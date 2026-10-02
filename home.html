@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Our RPG — an endless world, built by everyone who plays it</title>
+  <meta name="description" content="A free, single-player, browser-native RPG in the spirit of old-school tile MMOs. No install, no account, no telemetry — your save lives in your browser. GPL-3.0 / CC BY-SA, forever.">
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: #14161f; color: #e8eaf2;
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Verdana, sans-serif;
+    }
+    a { color: #ffd75e; }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 48px 20px 80px; }
+    header.hero { text-align: center; margin-bottom: 40px; }
+    .hero h1 { font-size: 30px; color: #ffd75e; letter-spacing: 1px; margin: 0 0 8px; }
+    .hero .sub { color: #8f96ad; font-size: 14px; letter-spacing: 3px; text-transform: uppercase; }
+    .hero .tag { color: #b8c4dd; font-size: 17px; margin-top: 18px; }
+    .btn-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 28px 0; }
+    .btn {
+      display: inline-block; padding: 10px 22px; border-radius: 6px; text-decoration: none;
+      font-weight: bold; font-size: 14px; border: 1px solid #6a5a2a;
+    }
+    .btn.primary { background: #ffd75e; color: #1d1729; border-color: #ffd75e; }
+    .btn.ghost { background: #241c38; color: #ffd75e; }
+    h2 { color: #e8dcff; font-size: 13px; letter-spacing: 2px; text-transform: uppercase;
+      border-bottom: 1px solid #2a2d3d; padding-bottom: 6px; margin: 44px 0 16px; }
+    ul { padding-left: 20px; }
+    li { margin-bottom: 6px; }
+    .stats { width: 100%; border-collapse: collapse; font-size: 14px; }
+    .stats td { padding: 6px 10px; border-bottom: 1px solid #2a2d3d; }
+    .stats td:last-child { text-align: right; color: #ffd75e; font-weight: bold; }
+    .credits { color: #8f96ad; font-size: 13px; line-height: 1.6; }
+    footer { margin-top: 56px; text-align: center; color: #5c6480; font-size: 12px; }
+    code { background: #1c1f2c; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <h1>Our RPG</h1>
+      <div class="sub">free · endless · ours</div>
+      <p class="tag">An endless, living world that can never be taken from you.</p>
+      <div class="btn-row">
+        <a class="btn primary" href="/play">Play now ↗</a>
+        <a class="btn ghost" href="/workshop">Our RPG Workshop ↗</a>
+        <a class="btn ghost" href="/koha">Leave a koha ↗</a>
+      </div>
+    </header>
+
+    <p>Our RPG began life as <i>Taiao</i>, te reo Māori for the natural world
+    — and the natural world is still what it's made of. It's a
+    single-player, browser-native RPG in the spirit of old-school tile-based
+    MMOs — RPG MO, early RuneScape — rendered HD-2D: a WebGL world with a
+    tilted chase camera, depth fog, and billboarded pixel art.
+    <b>No install, no account, no telemetry.</b> Your save lives in your
+    browser.</p>
+
+    <p>The world is <b>endless and alive</b>. Terrain streams in forever
+    across 15,000²-tile named worlds; weather fronts drift on real isobars;
+    the sun's shadows follow your latitude and season all the way to a polar
+    midnight sun; rivers flood after long rain; snow settles and melts;
+    native birds of Aotearoa fly, perch, and sing — real field recordings,
+    mixed spatially into a dawn chorus. Everyone plays the same seed: a
+    place you find is a place a friend can visit.</p>
+
+    <h2>How you play</h2>
+    <ul>
+      <li><b>Left-click</b>: walk / gather / attack / talk · <b>Right-click</b>: context menu · <b>WASD</b>: walk</li>
+      <li><b>Your character</b>: choose which of the world's folk you play as when your first isle keeper offers a body, or later from Newhaven's Registrar; they face the way you move.</li>
+      <li><b>Combat</b> follows your main hand — a bow shoots, a <b>wand or staff weaves runes into spell sentences</b>, anything else is melee. <b>Enter</b> opens the chant bar to type spells; <b>V</b> toggles casting by voice.</li>
+      <li><b>Gather, farm and craft</b>: trees, rocks, fishing spots, herb patches; fenced fields in Farmland; furnace, anvil, workbench, loom, tanning rack, cauldron, runestone altar.</li>
+      <li><b>Sailing</b>: build a canoe/sailboat/ship at a shipyard, then cross rivers, lakes and seas.</li>
+      <li><b>World map (M)</b> and <b>postcard (K)</b>: everyone plays the same world — a postcard's coordinates work in any copy of the game.</li>
+      <li>Resources get richer with distance: 32 tiers each of trees, ores, fish, herbs, crops, runes and more.</li>
+    </ul>
+
+    <h2>The world, by the numbers</h2>
+    <table class="stats">
+      <tr><td>Trainable skills</td><td>61</td></tr>
+      <tr><td>Items</td><td>2,942</td></tr>
+      <tr><td>Recipes</td><td>2,482 across 45 crafts</td></tr>
+      <tr><td>Creatures</td><td>423, including 33 bosses</td></tr>
+      <tr><td>Biomes</td><td>37</td></tr>
+      <tr><td>Crops · resource node types</td><td>160 · 143</td></tr>
+      <tr><td>Tiers of fish / trees / ores / herbs / runes…</td><td>32 each</td></tr>
+    </table>
+
+    <h2>Yours, forever — that's a feature</h2>
+    <p>Our RPG is <b>free software</b>: the entire game — code (GPL-3.0), art
+    and audio (CC BY-SA) — lives at
+    <a href="https://github.com/dataversion5372/Taiao" target="_blank" rel="noopener">github.com/dataversion5372/Taiao</a>.
+    Clone it and it runs from a folder on your machine, offline, for as long
+    as computers run JavaScript. No publisher can delist it, no server
+    shutdown can brick it, and if you don't like a thing you can change it.
+    The optional community server is GPL too and self-hostable — the
+    strongest form of the promise. If this game matters to you, the repo
+    <i>is</i> the game.</p>
+
+    <h2>Community &amp; contributing</h2>
+    <p>Issues and pull requests are welcome. The in-game <b>object workshop</b>
+    (right-click → "Edit …") lets anyone re-sprite objects and vote on their
+    behaviour, then bundle a proposal and submit it for a maintainer to fold
+    in by hand — or build something bigger at
+    <a href="/workshop" target="_blank">Our RPG Workshop</a>, where players
+    generate the art, write the quests, and tune the world together.
+    Questions or ideas that don't fit an issue yet belong in
+    <a href="https://github.com/dataversion5372/Taiao/discussions" target="_blank" rel="noopener">GitHub Discussions</a>
+    — the project's one community channel.</p>
+
+    <h2>Credits &amp; licences</h2>
+    <p class="credits">
+      <b>Art:</b> Kenney.nl roguelike packs (CC0) · "Tiny Creatures" by Clint
+      Bellanger (CC0) · custom sprites made for Our RPG (PixelLab +
+      hand-drawn, CC BY-SA). <b>Sounds:</b> CC0 from Kenney.nl &amp;
+      OpenGameArt — every file credited in <code>assets/sfx/CREDITS.txt</code>.
+      <b>Birdsong:</b> real xeno-canto recordings (CC BY-NC-SA), each
+      recordist credited in <code>assets/birdsong/CREDITS.txt</code>.
+      <b>Music:</b> Bifrost theme "Frozen Star" by Kevin MacLeod,
+      incompetech.com (CC BY 4.0); exploration music is generated live by the
+      game itself. <b>Font:</b> OpenDyslexic (SIL OFL). <b>Engines:</b>
+      three.js (MIT). <b>Code:</b> GPL-3.0-or-later — Our RPG is free and
+      licensed to stay that way, forever. No one, including its original
+      creator, can ever close it, take it from its community, or sell it out
+      from under the people who play and build it; if its stewardship ever
+      went wrong, anyone could fork it and carry on. It began as
+      <i>Taiao</i>, te reo Māori for the natural world, and its world still
+      carries that whakapapa.
+    </p>
+
+    <footer>
+      <a href="/play">Play</a> · <a href="/workshop">Workshop</a> ·
+      <a href="/koha">Koha</a> ·
+      <a href="https://github.com/dataversion5372/Taiao" target="_blank" rel="noopener">GitHub</a>
+    </footer>
+  </div>
+</body>
+</html>

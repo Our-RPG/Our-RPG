@@ -138,8 +138,9 @@ way a crafted barrel carries its cooper's.
 
 Questions or ideas that don't fit an issue yet belong in
 [GitHub Discussions](https://github.com/dataversion5372/Taiao/discussions) —
-the project's one community channel, also linked from the in-game **?**
-panel. This project follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+the project's one community channel, also linked from
+[our-rpg.com/home](https://our-rpg.com/home). This project follows
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 
 ## Credits
 
@@ -188,4 +189,4 @@ If its stewardship ever went wrong, anyone could fork it and carry on.
 None of this requires your money to keep working. If you ever want to leave
 something for the road anyway, [docs/koha.md](docs/koha.md) says, honestly,
 what it would and wouldn't fund — koha (a gift, freely given) is at
-[ko-fi.com/taiao](https://ko-fi.com/taiao).
+[our-rpg.com/koha](https://our-rpg.com/koha).

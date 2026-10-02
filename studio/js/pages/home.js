@@ -401,7 +401,7 @@ function engineRoomBlock() {
     "gated, or better for those who give, and the licence makes that permanent. " +
     "The server is GPL and self-hostable if you'd rather bring your own." }));
   card.appendChild(el("div.btn-row", null, [
-    el("a.btn.ghost", { href: "https://ko-fi.com/taiao", rel: "noopener", target: "_blank", text: "leave a koha ↗" }),
+    el("a.btn.ghost", { href: "https://our-rpg.com/koha", rel: "noopener", target: "_blank", text: "leave a koha ↗" }),
     el("a", { href: "https://github.com/dataversion5372/Taiao/blob/main/docs/koha.md", rel: "noopener", target: "_blank",
       style: "align-self:center", text: "the whole honest ledger →" }),
   ]));

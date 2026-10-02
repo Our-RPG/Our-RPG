@@ -1,15 +1,23 @@
 #!/usr/bin/env bash
-# Our RPG — build the our-rpg.com site: the game at the root, the Workshop
-# at /workshop, one static tree (dist/site/) any static host can serve.
-# Cloudflare Pages is the intended host, with the taiao-server worker routed
-# at our-rpg.com/api/* (see server/wrangler.toml) so the API is same-origin.
+# Our RPG — build the our-rpg.com site: the game at /play, a marketing
+# homepage at /home (root "/" redirects there), koha (donations) at /koha,
+# and the Workshop at /workshop — one static tree (dist/site/) any static
+# host can serve. Cloudflare Pages is the intended host, with the
+# taiao-server worker routed at our-rpg.com/api/* (see server/wrangler.toml)
+# so the API is same-origin.
 #
 #   tools/build_ourrpg_site.sh
 #   npx wrangler pages deploy dist/site --project-name=our-rpg   # user-run
 #
 # Layout (matches studio/tools/build_site.mjs's ASSET_BASE contract):
-#   /            index.html, sw.js, css/, fonts/, dist/bundle.js, libs/,
-#                assets/* (game art; audio layers placed by the studio build)
+#   /            tiny redirect stub -> /home (index.html)
+#   /home        marketing homepage (home.html, config-free static page)
+#   /play        the game itself (play.html — same asset-relative layout
+#                index.html used to have at the root: css/, fonts/,
+#                dist/bundle.js, libs/, assets/*; a bare file with no
+#                trailing slash resolves those paths identically to "/")
+#   /koha        donations page (koha.html — Stripe Checkout, same-origin
+#                fetches to /api/koha/*, no build-time config needed)
 #   /js          zone-worker importScripts targets (from the studio build)
 #   /workshop    the Workshop app
 #
@@ -35,7 +43,27 @@ node studio/tools/build_site.mjs --out dist/site
 copy()    { mkdir -p "dist/site/$(dirname "$1")"; cp "$1" "dist/site/$1"; }
 copydir() { mkdir -p "dist/site/$1"; cp -R "$1"/. "dist/site/$1/"; }
 
-copy index.html          # overwrites the studio build's redirect page
+cp index.html dist/site/play.html   # the game, now served at /play (same asset
+                                     # layout as root — a bare file with no
+                                     # trailing slash resolves relative paths
+                                     # identically to "/")
+cp home.html dist/site/home.html    # marketing homepage, served at /home
+cp koha.html dist/site/koha.html    # donations (Stripe Checkout), served at /koha
+cat > dist/site/index.html <<'EOF'  # root -> /home (overwrites the studio build's redirect page)
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url=/home">
+  <title>Our RPG</title>
+  <link rel="canonical" href="/home">
+</head>
+<body>
+  <p>Redirecting to <a href="/home">Our RPG</a>…</p>
+  <script>location.replace("/home");</script>
+</body>
+</html>
+EOF
 copy sw.js
 copy _headers            # Pages header rules: shell files revalidate (no 4h HTTP-cache pinning)
 copydir css

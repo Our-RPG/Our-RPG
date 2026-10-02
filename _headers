@@ -11,6 +11,18 @@
   Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
+/play
+  Cache-Control: no-cache
+/play.html
+  Cache-Control: no-cache
+/home
+  Cache-Control: no-cache
+/home.html
+  Cache-Control: no-cache
+/koha
+  Cache-Control: no-cache
+/koha.html
+  Cache-Control: no-cache
 /dist/*
   Cache-Control: no-cache
 /js/*

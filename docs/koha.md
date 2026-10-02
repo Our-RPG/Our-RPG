@@ -58,8 +58,8 @@ honoured forever. That behaviour is code you can read
 
 ## Is there a way to give right now?
 
-Yes: **[ko-fi.com/taiao](https://ko-fi.com/taiao)**. It's a one-off or
-recurring gift, not a purchase — nothing on it is exchanged for anything in
-the game, which stays free either way. It's also linked from the README and
-from `.github/FUNDING.yml`, so it shows up as a "Sponsor" button on the
-GitHub repo too.
+Yes: **[our-rpg.com/koha](https://our-rpg.com/koha)**, a one-off or monthly
+gift paid directly by card through Stripe Checkout — not a purchase, nothing
+on it is exchanged for anything in the game, which stays free either way.
+It's also linked from `.github/FUNDING.yml`, so it shows up as a "Sponsor"
+button on the GitHub repo too.

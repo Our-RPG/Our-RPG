@@ -205,11 +205,11 @@ ${workshopHtml("Open Our RPG Workshop ↗")}
     Server.call("/api/koha/transparency").then(r => {
       const el = $("acc-koha");
       if (!el) return;
-      const kofi = `Koha is welcome and never expected — <a href="https://ko-fi.com/taiao" target="_blank" rel="noopener">ko-fi.com/taiao</a>; docs/koha.md has the whole honest story.`;
+      const koha = `Koha is welcome and never expected — <a href="https://our-rpg.com/koha" target="_blank" rel="noopener">our-rpg.com/koha</a>; docs/koha.md has the whole honest story.`;
       if (r.ok && r.current) {
         el.innerHTML = esc(`Running the world cost $${(r.current.usd_cents / 100).toFixed(2)} in ${r.current.month}` +
-          (r.players30d ? `, across ${r.players30d} players this month` : "") + ". ") + kofi;
-      } else el.innerHTML = kofi;
+          (r.players30d ? `, across ${r.players30d} players this month` : "") + ". ") + koha;
+      } else el.innerHTML = koha;
     });
   }
 

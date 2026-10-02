@@ -81,7 +81,7 @@ async function remoteFetch(path) {
 // but still work offline from the last cached copy. "/dist/" carries the
 // actual shipped bundle (index.html loads dist/bundle.js — "/js/" survives
 // for dev setups serving unbundled sources).
-const NETWORK_FIRST = ["/js/", "/dist/", "/css/", "/index.html", "/"];
+const NETWORK_FIRST = ["/js/", "/dist/", "/css/", "/index.html", "/play", "/play.html", "/"];
 
 function matchAny(path, list) {
   return list.some(p => p.endsWith("/") ? path.startsWith(p) : path === p);
