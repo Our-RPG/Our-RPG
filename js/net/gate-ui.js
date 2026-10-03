@@ -102,32 +102,39 @@
 
   function wireAccount() {
     const $ = id => card.querySelector("#" + id);
-    const run = async fn => {
+    // CRITICAL: read the fields BEFORE calling say()/render(). say() rebuilds
+    // card.innerHTML, replacing the inputs with blank ones — so anything read
+    // from the DOM *after* the "Working…" message is empty. That shipped a
+    // blank username to /api/register, which came back "Username must be 3-20
+    // characters…" for a perfectly valid name. Every action here now captures
+    // its field values first, then submits. (bug fix 2026-10-03)
+    const submit = async action => {
       if (busy) return;
-      busy = true; say("Working…", true);
-      const name = $("gate-user").value.trim(), pass = $("gate-pass").value;
-      const r = await fn(name, pass);
+      busy = true; say(action.working || "Working…", true);
+      const r = await action.run();
       busy = false;
       if (r && r.ok) { say("", true); done(); }
-      else say((r && r.error) || "Something went wrong — try again.", false);
+      else say((r && r.error) || action.fail || "Something went wrong — try again.", false);
     };
     $("gate-create").onclick = () => {
-      if ($("gate-pass").value !== $("gate-pass2").value) { say("Passwords don't match.", false); return; }
-      run((n, p) => Server.register(n, p, $("gate-email").value.trim(), $("gate-ts")));
+      const user = $("gate-user").value.trim(), pass = $("gate-pass").value,
+            pass2 = $("gate-pass2").value, email = $("gate-email").value.trim(), ts = $("gate-ts");
+      if (pass !== pass2) { say("Passwords don't match.", false); return; }
+      submit({ run: () => Server.register(user, pass, email, ts) });
     };
-    $("gate-login").onclick = () => run((n, p) => Server.login(n, p, $("gate-ts")));
+    $("gate-login").onclick = () => {
+      const user = $("gate-user").value.trim(), pass = $("gate-pass").value, ts = $("gate-ts");
+      submit({ run: () => Server.login(user, pass, ts) });
+    };
     $("gate-pass").onkeydown = e => { if (e.key === "Enter") $("gate-create").click(); };
     $("gate-pass2").onkeydown = e => { if (e.key === "Enter") $("gate-create").click(); };
     // typing it twice only catches a typo if neither copy can be a paste of the other
     $("gate-pass2").addEventListener("paste", e => e.preventDefault());
     $("gate-pass2").addEventListener("drop", e => e.preventDefault());
-    $("gate-pk").onclick = async () => {
-      if (busy) return;
-      busy = true; say("Waiting for your passkey…", true);
-      const r = await Server.passkeyLogin($("gate-user").value.trim() || undefined);
-      busy = false;
-      if (r && r.ok) { say("", true); done(); }
-      else say((r && r.error) || "Passkey sign-in failed.", false);
+    $("gate-pk").onclick = () => {
+      const user = $("gate-user").value.trim() || undefined;
+      submit({ working: "Waiting for your passkey…", fail: "Passkey sign-in failed.",
+               run: () => Server.passkeyLogin(user) });
     };
   }
 

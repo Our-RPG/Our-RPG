@@ -97,17 +97,22 @@
           // already in hand, but don't strand the player on a dead screen).
           if (!got) { say("Logged in, but no saved character was found for this account.", false); finish(); }
         };
+        // Read the fields BEFORE say() — it calls renderLogin(), which rebuilds
+        // the card and blanks the inputs; reading after it logged in with an
+        // empty username/password. (same class of bug as gate-ui, fixed 2026-10-03)
         $("bc-dologin").onclick = async () => {
           if (busy) return;
+          const user = $("bc-user").value.trim(), pass = $("bc-pass").value, ts = $("bc-ts");
           busy = true; say("Working…", true);
-          const r = await Server.login($("bc-user").value.trim(), $("bc-pass").value, $("bc-ts"));
+          const r = await Server.login(user, pass, ts);
           busy = false; await afterLogin(r);
         };
         $("bc-pass").onkeydown = e => { if (e.key === "Enter") $("bc-dologin").click(); };
         $("bc-pk").onclick = async () => {
           if (busy) return;
+          const user = $("bc-user").value.trim() || undefined;
           busy = true; say("Waiting for your passkey…", true);
-          const r = await Server.passkeyLogin($("bc-user").value.trim() || undefined);
+          const r = await Server.passkeyLogin(user);
           busy = false; await afterLogin(r);
         };
       }
