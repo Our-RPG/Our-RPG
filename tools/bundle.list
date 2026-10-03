@@ -224,6 +224,9 @@ js/net/serverapi.js
 # AccountGate can use Server; consumed by tutorial.js and main.js at runtime.
 js/net/gate-ui.js
 js/net/telemetry.js
+# tutorial analytics — LAST of the observers (after telemetry + pulse) so its
+# wraps sit outermost; uses Tele.ev / Server.call / Tutorial / Pulse.
+js/gameplay/tut-analytics.js
 js/net/actionlog.js
 js/net/savesync.js
 # pre-boot landing chooser — after serverapi/savesync (uses Server.login/

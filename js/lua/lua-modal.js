@@ -73,7 +73,10 @@
           if (typeof playerSay === "function") playerSay(label);
           if (typeof log === "function") log(`You: "${label}"`, "sys");
         }
-        resolve(idx);
+        // Beat before the NPC answers (user req): the player's reply lands first,
+        // then the NPC responds 700ms later rather than instantly on top of it —
+        // resuming the Lua coroutine is what fires the NPC's next chatnpc line.
+        setTimeout(() => resolve(idx), 700);
       };
       panel.innerHTML = "";
       labels.forEach((label, i) => {
@@ -101,11 +104,12 @@
         document.addEventListener("keydown", liveKey, true);
       };
       // Wait out the NPC's bubble so the picker doesn't talk over it — but
-      // CAP it: a long intro line's bubble can run 10-15s, and making the
-      // player stare at the options-less screen that whole time reads as a
-      // hang. 5s is enough to start reading; the bubble keeps playing above
-      // the picker after it appears (user req 2026-10-03).
-      const MAX_REVEAL_WAIT = 5000;
+      // CAP it so the options appear a few seconds EARLY (user req): a long
+      // intro line's bubble can run 10-15s, and making the player stare at the
+      // options-less screen that whole time reads as a hang. ~2s is enough to
+      // start reading; the bubble keeps playing above the picker after it
+      // appears.
+      const MAX_REVEAL_WAIT = 2000;
       let waitMs = (npc && npc._say && npc._say.until > performance.now()) ? (npc._say.until - performance.now()) : 0;
       if (waitMs > MAX_REVEAL_WAIT) waitMs = MAX_REVEAL_WAIT;
       if (waitMs > 0) pendingReveal = setTimeout(() => { pendingReveal = null; reveal(); }, waitMs);

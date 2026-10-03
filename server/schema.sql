@@ -439,3 +439,54 @@ CREATE TABLE IF NOT EXISTS bug_flags (
   created_at INTEGER NOT NULL,
   PRIMARY KEY (bug_id, user_id)
 );
+
+-- Tutorial + play-pulse analytics (server/src/analytics.js + Workshop Statistics
+-- tab). One row per tutorial session (upsert) + one per (session,stage); public
+-- aggregates computed by SQL GROUP BY. Detailed per-player play-by-play rides the
+-- telemetry pipe to R2, NOT here. See migrations/0015_analytics.sql for details.
+CREATE TABLE IF NOT EXISTS tut_sessions (
+  session_id     TEXT PRIMARY KEY,
+  uid            INTEGER,
+  is_guest       INTEGER NOT NULL DEFAULT 1,
+  build          TEXT,
+  started_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  graduated      INTEGER NOT NULL DEFAULT 0,
+  final_idx      INTEGER NOT NULL DEFAULT 0,
+  stages_reached INTEGER NOT NULL DEFAULT 0,
+  total_ms       INTEGER NOT NULL DEFAULT 0,
+  active_ms      INTEGER NOT NULL DEFAULT 0,
+  idle_ms        INTEGER NOT NULL DEFAULT 0,
+  walk_tiles     INTEGER NOT NULL DEFAULT 0,
+  kills          INTEGER NOT NULL DEFAULT 0,
+  deaths         INTEGER NOT NULL DEFAULT 0,
+  talks          INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tut_sessions_grad ON tut_sessions(graduated, updated_at);
+CREATE TABLE IF NOT EXISTS tut_stage_stats (
+  session_id  TEXT NOT NULL,
+  idx         INTEGER NOT NULL,
+  stage       TEXT NOT NULL,
+  ms          INTEGER NOT NULL DEFAULT 0,
+  active_ms   INTEGER NOT NULL DEFAULT 0,
+  idle_ms     INTEGER NOT NULL DEFAULT 0,
+  walk_tiles  INTEGER NOT NULL DEFAULT 0,
+  gather      INTEGER NOT NULL DEFAULT 0,
+  craft       INTEGER NOT NULL DEFAULT 0,
+  kills       INTEGER NOT NULL DEFAULT 0,
+  deaths      INTEGER NOT NULL DEFAULT 0,
+  talks       INTEGER NOT NULL DEFAULT 0,
+  enters      INTEGER NOT NULL DEFAULT 1,
+  completed   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (session_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_tut_stage_idx ON tut_stage_stats(idx);
+CREATE TABLE IF NOT EXISTS pulse_reports (
+  device      TEXT PRIMARY KEY,
+  uid         INTEGER,
+  updated_at  INTEGER NOT NULL,
+  sessions    INTEGER NOT NULL DEFAULT 0,
+  total_sec   INTEGER NOT NULL DEFAULT 0,
+  data_json   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pulse_updated ON pulse_reports(updated_at);

@@ -118,6 +118,7 @@ const HUBS = [
   ["ideas",         "Ideas",         { kind:"ideas",   tab:"ideas" }],
   ["code",          "Code",          { kind:"code",    tab:"code" }],
   ["bugs",          "Bugs",          { kind:"bugs",    tab:"bugs" }],
+  ["stats",         "Statistics",    { kind:"stats",   tab:"stats" }],
   ["sounds",        "Sounds",        { kind:"catalog", tab:"sounds",        type:"sound" }],
   ["skills",        "Skills",        { kind:"skills",  tab:"skills" }],
   ["review",        "Review",        { kind:"review",  tab:"review" }],
