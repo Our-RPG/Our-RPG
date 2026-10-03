@@ -686,13 +686,14 @@ document.addEventListener("keydown", e => {
 function talkTo(npc) {
   // Lua role scripts (js/lua) for the bespoke NPCs intercept BEFORE the built-in
   // JS handlers when one is registered (else fall through, incl. during boot).
+  // Tūhura Isle tutors are NOT special-cased here (user req 2026-10-03,
+  // "use the exact same format as quests"): each is just an on_npc() script
+  // keyed by the live NPC's name (scripts/npc/tutors/*.lua), picked up by the
+  // generic Lua.hasNpc/runNpc dispatch below, same as any quest-giver.
   if (typeof Lua !== "undefined" && Lua.ready) {
-    if (npc.tutor && Lua.hasRole("tutor", npc)) { Lua.runRole("tutor", npc); return; }
     if (npc.wizard && Lua.hasRole("wizard", npc)) { Lua.runRole("wizard", npc); return; }
     if (npc.dreamNpc && Lua.hasRole("dream", npc)) { Lua.runRole("dream", npc); return; }
   }
-  // Tūhura Isle tutors open their tutorial dialogue (gameplay/tutorial.js)
-  if (npc.tutor && typeof Tutorial !== "undefined" && Tutorial.talk(npc)) return;
   // the Weaver: chant-magic lessons + the veil-ride to his tower (gameplay/wizard.js)
   if (npc.wizard && typeof Wizard !== "undefined") { Wizard.talk(npc); return; }
   // the Heart of the Dream's villagers (gameplay/dream.js): the Matron speaks
@@ -719,8 +720,16 @@ function talkTo(npc) {
     log(`${npc.name}'s shop is closed for the night. Come back in the morning.`, "warn");
     return;
   }
-  // everyone else: don't wake a sleeping villager
-  if (!npc.trader && typeof npcAsleep === "function" && npcAsleep(npc)) {
+  // everyone else: don't wake a sleeping villager — except a Tūhura Isle
+  // tutor still ROOTED at their lesson post (no _bed yet: they haven't
+  // retired to the Harbour Village). npcAsleep() reduces to pure
+  // isBedtime(npc.x) for a rooted NPC (home == current tile, always "at
+  // home"), so without this guard any tutor not yet met would refuse to
+  // talk the moment the isle's staged clock crosses into night — a
+  // softlock the old Tutorial.talk() special case never had to worry about
+  // (it ran before this gate existed). Once genuinely housed (_bed set,
+  // Tutorial._villageSync) they sleep like everyone else.
+  if (!npc.trader && !(npc.tutor && !npc._bed) && typeof npcAsleep === "function" && npcAsleep(npc)) {
     log(`${npc.name} is fast asleep.`, "sys");
     return;
   }
@@ -746,9 +755,6 @@ function talkTo(npc) {
     Quests.talkGiver(npc);                 // offer / advance / reward a quest
   } else if (typeof Quests !== "undefined" && Quests.onTalk(npc)) {
     // this NPC was a quest "contact" — the talk-step was just completed
-  } else if (typeof npcFocusChat === "function" && npcFocusChat(npc)) {
-    // AI dialogue is live (Nets bridge) — clicking a townsperson opens the chat
-    // bar so you can speak to them (and anyone else in earshot).
   } else {
     log(`${npc.name}: "${npc.line || npcTalkLine(npc)}"`, "sys");
   }

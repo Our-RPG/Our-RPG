@@ -5,11 +5,22 @@ world — and its world still carries that whakapapa: the birds, the koha,
 the isle of Tūhura. The new name says the other true thing: this RPG
 belongs to the people who play and build it.*
 
-An offline, single-player RPG in the spirit of old-school tile-based browser MMOs
+A browser-native RPG in the spirit of old-school tile-based browser MMOs
 (RPG MO / early RuneScape), rendered HD-2D style: a WebGL world with a tilted
 chase camera, depth fog, and billboarded pixel-art sprites, drawn by the game's
-own three.js renderer (`js/render3d.js`). It runs entirely in your browser —
-no server, no accounts, no telemetry, saves locally.
+own three.js renderer (`js/render3d.js`). It runs entirely in your browser, no
+install.
+
+Play it hosted at **[our-rpg.com/play](https://our-rpg.com/play)** (the itch.io
+page mirrors this same build) and it's a live, shared place: past the tutorial
+island you cross into a persistent world with other real players in it, which
+needs a free account (no email required) and sends anonymous gameplay
+telemetry by default — there's an off switch in the Settings tab, and
+[docs/telemetry.md](docs/telemetry.md) spells out exactly what's sent. Clone
+this repo and run it yourself instead, and you get the game this project
+started as: solo, fully offline, no server, no account, no telemetry, saves
+in your browser alone — the license guarantees that mode keeps working
+forever no matter what happens to the hosted site.
 
 The world is **endless**: terrain streams in chunk by chunk in every direction,
 forever, across 15,000²-tile named worlds with their own registry of towns,
@@ -40,12 +51,12 @@ keepers — and leave it by a crossing you'll want to see for yourself.
 | | |
 |---|---|
 | Trainable skills | **61** |
-| Items | **2,942** |
-| Recipes | **2,482** across 45 crafts |
-| Creatures | **423**, including 33 bosses |
+| Items | **3,286** |
+| Recipes | **2,785** across 45 crafts |
+| Creatures | **448**, including 33 bosses |
 | Biomes | **37** |
-| Crops · resource node types | **160 · 143** |
-| Tiers of fish / trees / ores / herbs / runes / textiles… | **32 each**, one unlock per level |
+| Crops · resource node types | **161 · 170** |
+| Tiers of fish / trees / ores / herbs / runes / textiles… | **32 each** (fish: 33), one unlock per level |
 
 ## The living-world systems
 
@@ -63,10 +74,13 @@ keepers — and leave it by a crossing you'll want to see for yourself.
   own pack and gear, queueing real work in parallel. One soul, many hands.
 - **Spoken magic** — spells are sentences of runes; type them, or hold **V**
   and say them aloud.
-- **NPCs that answer** — villagers reply by in-browser semantic retrieval over
-  tens of thousands of written lines (an optional local layer; see below), each
-  with a stable personality, quirk, and life of their own — beds, doors,
-  ladders, schedules.
+- **NPCs that answer** — every villager has a hand-authored personality and a
+  bank of in-character lines (`js/gameplay/npc-starter-roles.js`) that ships
+  with the game and needs nothing extra; on the hosted build, a logged-in
+  account additionally routes chat through a closed-source, server-side
+  dialogue engine for freer, state-aware replies (`server/src/npc.js`,
+  `js/gameplay/npc-engine-client.js`). Either way each NPC keeps its own
+  schedule: beds, doors, ladders, a life of their own.
 - **A working economy** — production quality from inputs, skill, mastery, tool
   and station; goods that carry their maker's name; road-web bank networks;
   town delivery contracts; passive workshop jobs.
@@ -96,11 +110,13 @@ skies, and villagers who speak from a small built-in starter pool baked into
   (non-commercial) and so are distributed from Taiao-cdn rather than inside
   this repository's CC BY-SA asset grant; the per-clip attribution text
   ships both here (`assets/birdsong/CREDITS.txt`) and beside the audio.
-- **NPC dialogue bank + embedding model + ONNX runtime** (~150 MB, fetched
-  only when an NPC is actually in earshot) — build pipeline in
-  `tools/npc_dialogue/` (see its README for provenance and licensing notes).
-  The starter pool remains the offline fallback, so chat (including the Sky
-  Knoll's Skywatcher) always works.
+- **NPC dialogue bank + embedding model + ONNX runtime** (~150 MB) — build
+  pipeline in `tools/npc_dialogue/` (see its README for provenance and
+  licensing notes). Currently disabled in the shipped build
+  (`NPC_RETRIEVAL_ENABLED = false` in `js/gameplay/npc-chat.js`); villagers
+  speak from the hand-authored starter pool instead, or from the hosted
+  build's server-side engine (see "NPCs that answer" above) — nothing in this
+  repo currently needs this layer fetched.
 
 Maintainers refresh Taiao-cdn with `tools/publish_cdn_assets.sh`.
 
@@ -118,11 +134,14 @@ node tools/build.mjs # -> dist/bundle.js  (rerun after any js/ edit)
 tools (max skills, cheats panel, separate dev save). A headless-testing recipe
 lives in `.claude/skills/verify/`.
 
-The game builds and runs completely offline with no server at all. An
-optional Cloudflare Worker (`server/`) adds accounts, a save vault, synced
-workshop votes, and a shared world layer — see
-[docs/SPEC.md](docs/SPEC.md) for what it does and [server/README.md](server/README.md)
-for how to run it.
+Built from source with no `TAIAO_SERVER_URL` set, the game runs completely
+offline with no server at all — solo, forever. The hosted build at
+our-rpg.com (and the itch.io embed, which mirrors it) builds *with* the
+Cloudflare Worker (`server/`) enabled, which is what actually adds accounts,
+a save vault, gameplay telemetry (on by default, togglable in Settings),
+synced workshop votes, and the shared, live multiplayer world you cross into
+after Tūhura Isle — see [docs/SPEC.md](docs/SPEC.md) for what it does and
+[server/README.md](server/README.md) for how to run your own.
 
 ## Contributing
 

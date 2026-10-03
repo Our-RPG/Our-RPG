@@ -58,13 +58,13 @@ function mes(t)     __mes(t) end
 -- thread, not the main Lua thread). Every suspending wrapper below does the same.
 function choice(...)
   local c = _current
-  local r = __choice(...):await()
+  local r = __choice(_current, ...):await()
   _current = c
   return r
 end
 function dialog(title, body, ...)
   local c = _current
-  local r = __dialog(title, body, ...):await()
+  local r = __dialog(_current, title, body, ...):await()
   _current = c
   return r
 end
@@ -149,6 +149,23 @@ function light_lamp()      __light_lamp(_current) end
 
 -- ---- scripted encounters (NEW) ---------------------------------------------
 function spawn_monster(kind, x, y) return __spawn_monster(kind, x, y) end
+
+-- ---- Tūhura Isle tutor-dialogue bridge (scripts/npc/tutors/*.lua) ----------
+-- The island geography, goal counters and gate logic all stay in JS
+-- (gameplay/tutorial.js) — these just read/advance that state from a script.
+function tut_seen(id)       return __tut_seen(id) end
+function tut_task_done(id)  return __tut_task_done(id) end
+function tut_task_label(id) return __tut_task_label(id) end
+function tut_complete(id)   __tut_complete(id) end
+function tut_name(id)       return __tut_name(id) end
+function tut_has_body()     return __tut_has_body() end
+function tut_journey_done() return __tut_journey_done() end
+function tut_slept()        return __tut_slept() end
+function tut_sigrid_bed()   __tut_sigrid_bed() end
+function tut_graduate()     __tut_graduate() end
+function tut_open_charselect() __tut_open_charselect() end
+function tut_open_bestiary()   __tut_open_bestiary() end
+function tut_open_questlog()   __tut_open_questlog() end
 
 -- ---- cutscene primitives (NEW; suspending ones save/restore _current) ------
 function fade_out(sec)      local c = _current; __fade(1, sec or 0.6):await(); _current = c end

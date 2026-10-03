@@ -88,12 +88,13 @@
   // (Live.chatOn() — the LIVE_CHAT flag carried in the roster). Hub
   // connectivity alone is NOT enough: offering the input while the server's
   // chat/DM gate is off just lets a client send lines the server will reject
-  // (and whispers ride that same gate). Also suppressed while a Tūhura Isle
-  // tutor conversation is open (gameplay/tutorial.js) — otherwise this bar's
-  // own "(Enter to send)" placeholder sits in the exact same corner as the
-  // tutorial's reply list, reading as a second, redundant "press Enter" prompt.
+  // (and whispers ride that same gate). Also suppressed while ANY scripted
+  // NPC conversation is open (js/lua/lua-modal.js's dlgbar — tutors, traders,
+  // bankers, the Weaver, quest-givers all share it) — otherwise this bar's
+  // own "(Enter to send)" placeholder sits in the exact same corner as that
+  // reply list, reading as a second, redundant "press Enter" prompt.
   const chatFieldOn = () =>
-    !(typeof Tutorial !== "undefined" && Tutorial.dialogueOpen && Tutorial.dialogueOpen()) &&
+    !(window.__LUA && window.__LUA.dlgbar && window.__LUA.dlgbar.isOpen()) &&
     Live.chatOn();
 
   document.addEventListener("keydown", e => {

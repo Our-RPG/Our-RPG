@@ -53,11 +53,17 @@ game's art and votes it into everyone's world, lives at
 [our-rpg.com/workshop](https://our-rpg.com/workshop).
 
 **Our RPG** began life as *Taiao*, te reo Māori for the natural world — and
-the natural world is still what it's made of. It's a single-player,
-browser-native RPG in the spirit of old-school tile-based MMOs — RPG MO,
-early RuneScape — rendered HD-2D: a WebGL world with a tilted chase camera,
-depth fog, and billboarded pixel art. No install, no account, no telemetry.
-Your save lives in your browser.
+the natural world is still what it's made of. It's a browser-native RPG in
+the spirit of old-school tile-based MMOs — RPG MO, early RuneScape —
+rendered HD-2D: a WebGL world with a tilted chase camera, depth fog, and
+billboarded pixel art. No install.
+
+This build (same as our-rpg.com/play) is a shared, live world past the
+tutorial island: it needs a free account (no email required) and shares
+anonymous gameplay telemetry by default — an off switch lives in the
+Settings tab. Clone [the repo](https://github.com/dataversion5372/Taiao)
+instead for the fully offline, account-free, telemetry-free solo game this
+started as; your save then lives in your browser alone.
 
 The world is **endless and alive**. Terrain streams in forever across
 15,000²-tile named worlds; weather fronts drift on real isobars; the sun's
@@ -70,12 +76,12 @@ friend can visit.
 | The world, by the numbers | |
 |---|---|
 | Trainable skills | **61** |
-| Items | **2,942** |
-| Recipes | **2,482** across 45 crafts |
-| Creatures | **423**, including 33 bosses |
+| Items | **3,286** |
+| Recipes | **2,785** across 45 crafts |
+| Creatures | **448**, including 33 bosses |
 | Biomes | **37** |
-| Crops · resource node types | **160 · 143** |
-| Tiers of fish / trees / ores / herbs / runes… | **32 each** — one unlock per level |
+| Crops · resource node types | **161 · 170** |
+| Tiers of fish / trees / ores / herbs / runes… | **32 each** (fish: 33) — one unlock per level |
 
 New characters wake on **Tūhura Isle**, a hand-built tutorial island of
 fifteen keepers, and leave it by a crossing you'll want to see for yourself.
@@ -108,9 +114,16 @@ promise. If this game matters to you, the repo *is* the game.
   zooms); the system prefers-reduced-motion setting is honoured by default.
 - **Saves are in your browser's storage.** Clearing site data for itch.io
   deletes them, and the itch embed and our-rpg.com are separate origins with
-  separate saves — an optional account's cloud save is the bridge between
-  them. (Playing from a clone of the repo keeps your save in a browser
-  profile you control.)
+  separate saves — your account's cloud save is the bridge between them.
+  (Playing from a clone of the repo skips all of this: no account, no
+  server, your save stays in a browser profile you control.)
+- **An account is required past Tūhura Isle** on this build (free, no email
+  needed) — the world beyond the tutorial island is shared and live, with
+  other real players in it.
+- **Gameplay telemetry is on by default** — anonymous moves, clicks,
+  crafting, fights and menu use (no chat text, no personal data; see
+  [docs/telemetry.md](https://github.com/dataversion5372/Taiao/blob/main/docs/telemetry.md)).
+  There's a per-player off switch in the Settings tab.
 - Made for long sessions and slow evenings; combat exists but this is a
   gathering-crafting-wandering game first.
 

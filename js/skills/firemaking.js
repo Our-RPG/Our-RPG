@@ -175,7 +175,12 @@ function stokeFire(node, invIndex, alreadySparked) {
   if (node.expireAt != null) node.expireAt = now + f.burnMs;   // keep a re-stoked campfire alive as long as it's hot
   s.qty -= 1;
   if (s.qty <= 0) player.inv[invIndex] = null;
-  addXp("Firemaking", Math.round(30 * (1 + Math.min(MAX_LEVEL - 1, f.tier) * 0.55) * (f.premium ? 1.4 : 1)));
+  // base doubled from 30 (user req 2026-10-03): the smith stage's own smelt
+  // plan only naturally stokes the furnace once or twice, nowhere near the
+  // 1154 xp level 3 demands — and iron smelting is gated on exactly that
+  // level (firemakingCap() at 3 == reqHeat(iron's req:3)), so the old rate
+  // quietly asked for a lot of off-quest log-burning just to unlock iron.
+  addXp("Firemaking", Math.round(60 * (1 + Math.min(MAX_LEVEL - 1, f.tier) * 0.55) * (f.premium ? 1.4 : 1)));
   // the Smith's stage counts the first furnace lit (gameplay/tutorial.js)
   if (typeof Tutorial !== "undefined" && Tutorial.onStoke) Tutorial.onStoke(node);
   const capped = !f.premium && logHeat(f.tier) > firemakingCap();
@@ -225,7 +230,12 @@ function lightPlacedFire(node) {
   node.expireAt = now + f.burnMs;
   stationHeat.set(heatKey(node), { peak: f.peak, stokedAt: now, burnMs: f.burnMs, tier: f.tier });
   if (typeof RegionSync !== "undefined") RegionSync.noteHeat(heatKey(node));
-  addXp("Firemaking", Math.round(30 * (1 + Math.min(MAX_LEVEL - 1, f.tier) * 0.55) * (f.premium ? 1.4 : 1)));
+  // base doubled from 30 (user req 2026-10-03): the smith stage's own smelt
+  // plan only naturally stokes the furnace once or twice, nowhere near the
+  // 1154 xp level 3 demands — and iron smelting is gated on exactly that
+  // level (firemakingCap() at 3 == reqHeat(iron's req:3)), so the old rate
+  // quietly asked for a lot of off-quest log-burning just to unlock iron.
+  addXp("Firemaking", Math.round(60 * (1 + Math.min(MAX_LEVEL - 1, f.tier) * 0.55) * (f.premium ? 1.4 : 1)));
   log("The fire catches and burns merrily.");
   uiDirty = true;
 }

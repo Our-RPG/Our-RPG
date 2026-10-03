@@ -3,16 +3,20 @@
 *Koha (Māori): a gift, given without obligation, that carries its own
 mana — freely given, and freely able to be declined.*
 
-Our RPG began with no server, no accounts, and no telemetry — and the game
-still works exactly that way, offline, forever: the license guarantees it
-keeps working regardless of who's paying for what (see
+Our RPG began with no server, no accounts, and no telemetry. A from-source,
+offline build still works exactly that way, forever — the license guarantees
+it keeps working regardless of who's paying for what (see
 [Licensing](../README.md#licensing)). Nothing about the game is metered,
 gated, or worse without support.
 
-There is now one small piece of infrastructure: an optional server
-(`server/`, GPL like everything else) that keeps cloud copies of saves,
-counts the community's workshop votes, and publishes leaderboard
-distributions. It costs on the order of **$5–30 a month**, and that number
+There is now one small piece of infrastructure: a server (`server/`, GPL
+like everything else) that keeps cloud copies of saves, runs the shared
+live world past the tutorial island, sends anonymous gameplay telemetry
+(default on, off switch in Settings), counts the community's workshop
+votes, and publishes leaderboard distributions. It's optional in the
+codebase — a build with no `TAIAO_SERVER_URL` skips it entirely — but the
+hosted game at our-rpg.com runs it, so it's the normal way most people
+actually play. It costs on the order of **$5–30 a month**, and that number
 is public — the server itself reports its real monthly cost and player
 count at `/api/koha/transparency`, and the in-game keepers' letter quotes
 it live. Anyone can also self-host it, which is the strongest form of the
@@ -40,8 +44,10 @@ it live. Anyone can also self-host it, which is the strongest form of the
   what a non-paying player gets. The GPL-3.0/CC BY-SA license makes this a
   structural guarantee, not a promise: anyone could fork the project the
   moment that stopped being true, and keep every asset in it.
-- No advertising, and no telemetry beyond what a player explicitly opts
-  into (leaderboard XP sharing is opt-in, per player, reversible).
+- No advertising. Gameplay telemetry (the anonymous action stream — see
+  [docs/telemetry.md](telemetry.md)) is on by default on the hosted game,
+  with a per-player off switch in Settings; XP leaderboard sharing is a
+  separate, genuinely opt-in feature.
 - No list of donors' names. If gratitude is shown at all, one community
   book records helpers of every kind — artists, coders, testers,
   moderators, donors — indistinguishably. The game remembers helpers, not

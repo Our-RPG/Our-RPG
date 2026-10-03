@@ -446,15 +446,17 @@ function npcChatTick() {
     } else {
       NPC_CHAT.active.set(cid, npc); // refresh the (wandering) npc reference
       // Unprompted greetings are OPT-IN: NPCs speak only when spoken to
-      // (clicked, or addressed via the chat bar) unless explicitly flagged
-      // npc.talksFirst — the hook for characters scripted to open the
+      // (clicked, or addressed via the real live-chat bar) unless explicitly
+      // flagged npc.talksFirst — the hook for characters scripted to open the
       // conversation themselves. For those, the old etiquette still applies:
       // only after the player has LINGERED in earshot (~2.5s, passers-by are
-      // left in peace), and never while the player is mid-sentence.
+      // left in peace), and never while the player is mid-sentence in any
+      // text field (the chat bar, a note, …).
       if (npc.talksFirst) {
         const since = NPC_CHAT.enteredAt.get(cid) || now;
-        if (now - since >= 2500 && !(typeof playerIsTyping === "function" && playerIsTyping()))
-          npcGreet(npc, cid);   // npcGreet self-debounces (90s)
+        const ae = document.activeElement;
+        const typing = ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") && ae.value && ae.value.trim();
+        if (now - since >= 2500 && !typing) npcGreet(npc, cid);   // npcGreet self-debounces (90s)
       }
     }
   }
@@ -481,18 +483,6 @@ function npcChatTick() {
       if (AI_NPC_ENABLED && !npcChatOffline()) npcFetch("/npc/leave", { id: cid }).catch(() => {});
     }
   }
-  // The dedicated NPC chat bar is a LEGACY affordance: with the server-side
-  // engine, NPCs listen to the normal Live chat instead (live-ui.js feeds
-  // npcBroadcast). Show the bar only where that chat isn't available — the
-  // legacy AI/retrieval modes, or offline/tutorial play (keeps Ravenna's
-  // Sky Knoll typed-chat gate reachable pre-account).
-  const liveChatOn = typeof Live !== "undefined" && Live.chatOn && Live.chatOn();
-  // suppressed while a scripted tutor conversation (gameplay/tutorial.js) is
-  // open — its own reply list docks in this same corner; Ravenna's Sky Knoll
-  // typed-chat gate is unaffected (that's ambient proximity chat, not a
-  // Tutorial.talk() beat)
-  const tutDlgOpen = typeof Tutorial !== "undefined" && Tutorial.dialogueOpen && Tutorial.dialogueOpen();
-  updateChatBar(tutDlgOpen ? 0 : (AI_NPC_ENABLED || NPC_RETRIEVAL_ENABLED || !liveChatOn) ? near.length : 0);
 }
 
 // NPC opens the conversation when you wander up (once per ~90s per NPC).
@@ -638,125 +628,6 @@ function npcBroadcast(text, opts) {
 function playerSay(text, ms) {
   if (typeof player === "undefined") return;
   player._say = { text, until: performance.now() + (ms || Math.min(9000, 2500 + text.length * 45)) };
-}
-
-function _playerSend() {
-  const v = _chatInput.value.trim();
-  _chatInput.value = "";
-  _chatInput.blur();
-  if (!v) { if (player._say) player._say = null; return; }
-  playerSay(v);                      // the spoken line lingers over the player
-  npcBroadcast(v);
-}
-
-// True while the player is mid-sentence in the chat bar.
-function playerIsTyping() {
-  return _chatInput && document.activeElement === _chatInput && _chatInput.value.trim().length > 0;
-}
-
-// Stream the player's words-so-far to the nearest NPCs (prefix prefill on the
-// brain). CURRENTLY UNCALLED: the chat bar allows editing now, which breaks
-// the always-a-prefix guarantee this relied on — if the brain is ever
-// re-enabled, either restore no-backspace or accept full reprocess on edits.
-function npcListenTick(v) {
-  if (!AI_NPC_ENABLED) return;   // brain-only: retrieval needs no prefill
-  if (!v || npcChatOffline()) return;
-  if (!NPC_CHAT._listen) NPC_CHAT._listen = { sent: "", at: 0, pending: new Set() };
-  const L = NPC_CHAT._listen;
-  const t = performance.now();
-  if (v.length - L.sent.length < 8 && t - L.at < 900) return;   // throttle
-  if (!v.startsWith(L.sent)) L.sent = "";
-  L.sent = v; L.at = t;
-  for (const npc of npcsInEarshot().slice(0, 2)) {              // at most 2 listeners
-    const cid = npcCid(npc);
-    if (L.pending.has(cid)) continue;
-    L.pending.add(cid);
-    npcFetch("/npc/listen", { id: cid, persona: npcPersona(npc), partial: v })
-      .catch(() => {}).finally(() => L.pending.delete(cid));
-  }
-}
-
-// ---------- chat bar UI ----------
-let _chatBar, _chatInput;
-function buildChatBar() {
-  if (_chatBar) return;
-  const style = document.createElement("style");
-  style.textContent = `
-    #npcchat { position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
-      display:none; z-index:40; width:min(440px,70%); }
-    #npcchat.show { display:block; }
-    #npcchat input { width:100%; box-sizing:border-box; padding:8px 12px; border-radius:16px;
-      border:1px solid #4a5a72; background:rgba(18,22,30,0.88); color:#e8eefc;
-      font:14px OpenDyslexic,Verdana; outline:none; }
-    #npcchat input::placeholder { color:#8ea0bd; }
-    #npcchat input:focus { border-color:#7fb0ff; box-shadow:0 0 0 2px rgba(127,176,255,0.25); }`;
-  document.head.appendChild(style);
-  _chatBar = document.createElement("div");
-  _chatBar.id = "npcchat";
-  _chatInput = document.createElement("input");
-  _chatInput.type = "text";
-  _chatInput.maxLength = 200;
-  _chatInput.autocomplete = "off";
-  _chatInput.placeholder = "Say something… (Enter)";
-  _chatBar.appendChild(_chatInput);
-  (document.getElementById("gamecol") || document.body).appendChild(_chatBar);
-
-  // a normal chat box: edit freely (backspace and all); nothing is spoken —
-  // no player bubble, no NPC hearing — until Enter commits the line. (The old
-  // no-backspace + live-mirror behaviour served the AI brain's hear-as-you-type
-  // prefix prefill; retrieval consumes nothing until send.)
-  _chatInput.addEventListener("keydown", e => {
-    e.stopPropagation();
-    if (e.key === "Enter") {
-      _playerSend();
-    } else if (e.key === "Escape") {
-      _chatInput.blur();
-    }
-  });
-  // Enter (when not already typing) focuses the bar if anyone is in earshot.
-  window.addEventListener("keydown", e => {
-    const ae = document.activeElement;
-    if (e.key === "Enter" && _chatBar.classList.contains("show") &&
-        !(ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA"))) {
-      e.preventDefault(); _chatInput.focus();
-    }
-  });
-}
-function updateChatBar(nNear) {
-  if (!_chatBar) buildChatBar();
-  _chatBar.classList.toggle("show", nNear > 0);
-  if (nNear === 0 && document.activeElement === _chatInput) _chatInput.blur();
-}
-
-// Called from talkTo() when you click an NPC. If AI dialogue is live, open and
-// focus the chat bar (greeting them if they haven't spoken yet) and return true
-// so the caller skips the canned one-liner. Returns false when the bridge is
-// offline, letting the game fall back to npc.line.
-function npcFocusChat(npc) {
-  if (!AI_NPC_ENABLED) {
-    if (!NPC_RETRIEVAL_ENABLED) return false;   // fully canned
-    npcRetrievalWarm();
-    buildChatBar();
-    const cid = npcCid(npc);
-    if (!NPC_CHAT.active.has(cid)) { NPC_CHAT.active.set(cid, npc); npcGreet(npc, cid); }
-    _chatBar.classList.add("show");
-    _chatInput.focus();
-    return true;
-  }
-  if (!NPC_CHAT.online || npcChatOffline()) {
-    // one-time nudge so a missing bridge isn't a silent mystery
-    if (!NPC_CHAT._warnedOffline && typeof log === "function") {
-      NPC_CHAT._warnedOffline = true;
-      log("(AI NPC chat is offline — start tools/npc_bridge.py to talk to them.)", "warn");
-    }
-    return false;
-  }
-  buildChatBar();
-  const cid = npcCid(npc);
-  if (!NPC_CHAT.active.has(cid)) { NPC_CHAT.active.set(cid, npc); npcGreet(npc, cid); }
-  _chatBar.classList.add("show");
-  _chatInput.focus();
-  return true;
 }
 
 // probe the bridge once at startup so we start in the right online/offline state

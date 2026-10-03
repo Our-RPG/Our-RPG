@@ -6,12 +6,16 @@ in-repo reference for the "audit §N" section numbers cited throughout the
 code — those citations point here now, not to an external design doc.*
 
 Taiao's offline game is complete and self-sufficient; everything in this
-document is optional, additive infrastructure. The client always builds
-with `TAIAO_SERVER_URL` empty by default, and every net-facing module is
-written to no-op cleanly in that case — logged-out play, or a build with no
-server configured at all, is exactly the serverless game this project
-started as. Nothing here is required reading to play or to hack on the
-game; it matters if you're standing up the optional server or auditing what
+document is optional, additive infrastructure from the *codebase's*
+perspective. The client always builds with `TAIAO_SERVER_URL` empty by
+default, and every net-facing module is written to no-op cleanly in that
+case — logged-out play, or a build with no server configured at all, is
+exactly the serverless game this project started as. But the canonical
+hosted deployment (our-rpg.com, and the itch.io embed that mirrors it)
+builds *with* `TAIAO_SERVER_URL` set, so for anyone playing there this
+infrastructure isn't optional at all past the tutorial island — see
+`js/net/gate-ui.js`. Nothing here is required reading to play or to hack on
+the game; it matters if you're standing up your own server or auditing what
 it does.
 
 ## Phase 0 — keep the magic (client-only)

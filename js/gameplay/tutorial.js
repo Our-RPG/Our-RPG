@@ -280,8 +280,8 @@ const TUT_CONTENT = (() => {
     // @360xp). The old exact plan (8 copper + 2 bronze firings, no slack)
     // meant one wrong-order firing = wait out the respawn curve — the
     // harshest spike on the isle. Now Menkaure's keeper gift front-loads
-    // demonstration xp (Smelting 550, Ore-mining 400 — see DLG.smith
-    // reward) and the ledger runs at HALF the firings with spare stone:
+    // demonstration xp (Smelting 550, Ore-mining 400 — see REWARDS.smith
+    // below) and the ledger runs at HALF the firings with spare stone:
     //  · smelt plan → Smelting 3 (1154 xp, required before ANY iron_bar
     //    can be smelted): gift 550 + FOUR copper firings (24 ore → 24
     //    bars, 480 xp; Smelting 2 = 650 falls after the first) + ONE
@@ -1278,7 +1278,7 @@ const Tutorial = (() => {
   // actually walked up, instead of the talk popping out of nowhere.
   function onApproachArrive(npc) {
     if (npc.tutor !== "guide") return;
-    talk(npc);
+    if (typeof talkTo === "function") talkTo(npc);
     if (typeof saveGame === "function") saveGame();
   }
   // per-frame: gently walk the player toward Sigrid while t.escorting is
@@ -1479,7 +1479,7 @@ const Tutorial = (() => {
       t.skipGiven[id] = 1;
       t.seen[id] = 1;
       if (SKIP_PROG[id]) SKIP_PROG[id](t);
-      if (DLG[id] && DLG[id].reward) grant(id, DLG[id].reward);
+      if (REWARDS[id]) grant(id, REWARDS[id]);
       for (const [iid, qty] of SKIP_ITEMS[id] || [])
         if (typeof ITEMS !== "undefined" && ITEMS[iid] && typeof addItem === "function") addItem(iid, qty);
     }
@@ -1607,265 +1607,33 @@ const Tutorial = (() => {
   }
 
   // ---------- dialogue content ----------
-  // Each tutor is a CONVERSATION, not a wall of text: `convo` is a list of
-  // BEATS, each a single spoken NPC line (said aloud as an overhead bubble AND
-  // in the conversation bar) followed by the player's `r` responses. A response
-  // is a plain string (the player says it and the talk advances to the next
-  // beat; on the LAST beat it finishes — granting the reward and unbarring the
-  // next gate), or an object { t, act?, goto?, finish?, end? }:
-  //   act    — open the real UI (charselect/bestiary/questlog/graduate/…)
-  //   goto   — jump to beat index N (branches)
-  //   finish — grant + mark seen + advance the staged sky, then close
-  //   end    — just close, marking nothing (decline paths)
-  // Keep every NPC line QUOTE-FREE: the bubble renders it verbatim over the
-  // keeper's head, and bubbles must never show quotation marks.
-  const DLG = {
-    guide: {
-      reward: { coins: 25 },
-      convo: [
-        { npc: "Haere mai, traveller — welcome to Tūhura Isle, the Isle of Discovery. Everyone arrives the same way: washed up on the sand with empty hands.",
-          r: ["What am I, exactly?"] },
-        { npc: "Look at yourself, e hoa — still a spark of unformed light. Before anything else you must take a BODY. Dozens of folk to choose from, each with their own build, pace and wardrobe.",
-          r: [{ t: "Let me choose a body now", act: "charselect" }, "First — how do I get around?"] },
-        { npc: "Click the ground to walk; click a tree, rock, fire or person to use it. RIGHT-click anything for more choices, and press ENTER near anyone to talk in your own words — we truly answer.",
-          r: ["And where am I headed?"] },
-        { npc: "Follow the dirt path east. {bush} the Bushman is expecting you, and every keeper after equips you for their lesson — tool by tool — until you walk off my isle fully kitted. The ? tab holds a full guide; the Goals tab tracks your journey.",
-          r: [{ t: "I'm ready — let me choose a body", act: "charselect" }] },
-      ],
-    },
-    bush: {
-      reward: { items: [["axe_iron", 1]] },
-      openGrant: true,
-      convo: [
-        { npc: "Kia ora! Take my spare iron axe — it's yours. See all these young trees? With an axe in your pack, click one and you'll fell it for logs.",
-          r: ["What else can I gather?"] },
-        { npc: "Berry bushes, herb patches, wildflowers, even boulders — nearly everything growing or lying about can be gathered, and it all grows back in time. Over thirty-five skills in this world, and every one starts just like this: click, gather, learn.",
-          r: ["Are all trees the same?"] },
-        { npc: "Out in the wide world the forests fill with kauri, rimu, kahikatea, tōtara — real giants. Higher-tier trees want a higher Woodcutting level and a better axe, but their timber is worth it. Listen in the deep bush and you'll meet tūī, kererū, kea, even kiwi scratching about at night.",
-          r: ["So what's my lesson?"] },
-        { npc: "The woodsman's real trick: PLANNING the day's felling. Hold OPTION and CLICK a tree and the job joins your QUEUE — a white ring marks each tree waiting its turn, and your hands move to the next the moment a stump settles.",
-          r: ["How many should I queue?"] },
-        { npc: "QUEUE FIVE FELLING JOBS, and FELL FIVE TREES — that's my lesson, both halves. It works for nearly everything: harvest rows, ore terraces, pickups. Queue the work, then let yourself get on with it.",
-          r: ["Does a better axe help?"] },
-        { npc: "A better axe fells faster — true everywhere: good field tools speed your gathering, fine workshop tools raise the quality of what you craft. And KEEP those logs; you'll saw, fletch and carpenter with them up the path.",
-          r: ["How do I reach the next keeper?"] },
-        { npc: "Here's the fun of it — there's NO dry road to the cove. Follow my path to where the stream slips through the chamber wall, wade in, and let the current CARRY you. The RIVER GATE swings open the moment your fifth tree falls, and the water itself sets you on {fish}'s bank. Hold SHIFT any time you'd rather stand than drift.",
-          r: ["Off I go, then."] },
-      ],
-    },
-    fish: {
-      reward: { items: [["small_net", 1], ["fishing_rod", 1]] },
-      convo: [
-        { npc: "Kia ora — and what an entrance, riding the gate down like a whitebait yourself! See where my stream meets the sea? That's a RIVERMOUTH, and every spring the whitebait — īnanga — run up it in silver clouds. Take my scoop-net and my old rod; the net's the tool for whitebait.",
-          r: ["How do I fish a current?"] },
-        { npc: "First lesson before any net touches water: wade in and BRACE — hold SHIFT with your feet dug against the current. Feel it stop pulling? That's the stance you fish from; let go and the river tears you off the spot.",
-          r: ["Does it matter where I fish?"] },
-        { npc: "Every fishing spot in the world holds ONE kind of fish — shallow shore, deep sea and fresh water each carry their own, and rarer waters mean rarer fish. Hoki and snapper offshore, tuna — that's our eel — and kōura in the fresh, whitebait right here at the mouth.",
-          r: ["How many do I need?"] },
-        { npc: "Net FIVE, braced the whole while — you'll want every one, for the fritters ahead ask for all five. Raw kai does you no good; cooked, it heals you, and the finest dishes grant buffs — faster gathering, harder hitting, tougher skin.",
-          r: ["Fritters?"] },
-        { npc: "Here's a secret worth the whole isle: HOLD ONTO your raw whitebait. Up the path {farm} keeps the fowl for eggs, and {cook} will show you how to bind whitebait and egg into golden WHITEBAIT FRITTERS — best kai on Tūhura.",
-          r: ["Where to after I've netted five?"] },
-        { npc: "CROSS THE BRIDGE over the river and carry on to {smith}'s forge through the next gate.",
-          r: ["Thank you — I'll get netting."] },
-      ],
-    },
-    smith: {
-      // the xp is Menkaure's DEMONSTRATION — he works a load in front of you
-      // (beat 1) so the ledger below runs at half the firings it used to.
-      // Numbers are load-bearing: the terrace-ledger comment in TUT_CONTENT
-      // derives the whole smelt plan from Smelting 550 / Ore-mining 400.
-      reward: { items: [["pickaxe_iron", 1], ["knife", 1], ["flint", 1]],
-                xp: { Smelting: 550, "Ore-mining": 400 } },
-      convo: [
-        { npc: "This pickaxe is yours — and the first lesson's free: watch my hands. One load drawn, raked and fired true. That's the knack, and I've just put it in your arms — take the experience; the rest you earn stroke by stroke.",
-          r: ["What ore have I got to work?"] },
-        { npc: "My terrace is a MEASURED LEDGER — the only ore on this whole isle: FIVE copper rocks at seven ore each, TWO pale tin rocks at two each, ONE dark iron rock at six. Copper first — your arms harden on it. Tin yields at Ore-mining TWO, iron at THREE, and the copper carries you there.",
-          r: ["And the smelting plan?"] },
-        { npc: "My furnace smelts in LOADS OF SIX. FOUR firings of COPPER — twenty-four bars — then ONE firing of BRONZE, which drinks four copper and two tin. That lands your Smelting at THREE: enough for ONE firing of IRON, six bars, plenty for the kit. I've left SPARE STONE, so a stray firing strands no one.",
-          r: ["Is there a harder way?"] },
-        { npc: "A MASTER runs the whole ledger in SIX firings flat, nothing wasted. Do that and I'll pay you a mastersmith's koha of 150 coins. But first — a cold furnace smelts nothing. Every fire on this isle burns REAL fuel.",
-          r: ["How do I light it?"] },
-        { npc: "Take my working KNIFE and this piece of FLINT — keep both in your pack. Stand at the furnace, STRIKE a spark, then STOKE the fire with logs. Lighting my furnace is the first mark of your lesson, and every stoke feeds your FIREMAKING — even a fizzled spark is practice. The flint never wears out.",
-          r: ["Will plain logs smelt everything?"] },
-        { npc: "Plain logs burn hot enough for copper and bronze — but IRON wants a fiercer fire. Fell a MĀNUKA once your Woodcutting reaches 3, stoke with its logs, and keep striking until your Firemaking can hold that heat.",
-          r: ["What am I forging?"] },
-        { npc: "No hand-outs at the anvil — you earn your gear. Forge all FOUR: an IRON SHORTSWORD and thirty IRON ARROWHEADS — two anvil batches, Weaponsmithing — plus a BRONZE CHAINBODY and a BRONZE TARGE, Armoursmithing. The forge gate opens when the furnace has ROARED and all four are MADE.",
-          r: ["Why does all this matter?"] },
-        { npc: "This is the whole economy in miniature: miner feeds smelter, smelter feeds smith, smith arms the fighter, whose drops feed thirty-five other trades. THIRTY-TWO tiers of metal out there, humble copper to Eternium. Master a craft and your quality climbs above other makers' — your goods even carry your name.",
-          r: ["Where next, once I'm kitted?"] },
-        { npc: "To the terrace, the furnace, the anvil. Forge your four and wear them, then on to {swim} at the lagoon.",
-          r: ["I'll get to work."] },
-      ],
-    },
-    soap: {
-      convo: [
-        { npc: "Look at the state of you — fish guts, forge smoke, monster ichor, honest sweat. Your stink metre climbs as you work and fight, and after that pit you're RIPE.",
-          r: ["Does it matter if I'm rank?"] },
-        { npc: "Let it climb too high out in the world and shopkeepers bar their doors until you wash! And no bars handed out here — you'll MAKE your soap from what you carry.",
-          r: ["How do I make soap?"] },
-        { npc: "Char some of your LOGS at my clamp — a slow fire turns wood to charcoal and WOOD ASH. Leach the ash into LYE at the soap works, then boil the lye with the TALLOW you rendered off the warden's beasts. That's a bar of soap. Two crafts in it: Charcoaling for the ash, Soapmaking for the lye and the bar.",
-          r: ["Then how do I actually wash?"] },
-        { npc: "Wade into my spring pool behind me — waist deep, safe — and SCRUB with your soap until every trace of stink is gone. Different soaps target different reeks; fancier bars scrub harder. Clean at last? Then climb on — {sky} keeps the knoll just past the gate.",
-          r: ["I'll get scrubbing."] },
-      ],
-    },
-    swim: {
-      reward: { items: [["log_raft", 1], ["snorkel", 1]] },
-      convo: [
-        { npc: "You can wade and swim — but watch the depth. Once the waterline passes your nose your AIR drains; run out and you'll black out and wash ashore, lighter in the pockets. My lagoon here shelves off fast into deep blue.",
-          r: ["How far can I swim?"] },
-        { npc: "This snorkel I'm giving you buys you nearly double the distance — glassblowers make them. Now for MY lesson. Out past the lagoon, south-east, a lone MOTU rides the swell, and on its sand sits an old sea chest with a PEARL in it.",
-          r: ["You want me to fetch it?"] },
-        { npc: "Fetch it and swim it home — that's the whole task, and the whole trick. The crossing is measured against YOUR body, e hoa: exactly one breath too wide. Strike out with bare lungs and the deep takes you a few strokes short of the sand.",
-          r: ["So how do I make it?"] },
-        { npc: "EQUIP THE SNORKEL — it halves the thirst of your lungs, and the crossing becomes yours with air to spare. Rest on the motu, then swim the pearl back and put it in MY hand. And don't dream of paddling it — the chop over the drowned shelf would swamp any hull. This one is swum, out and back.",
-          r: ["What about the open sea?"] },
-        { npc: "The open sea past the fences is no road. The fence lines run off the beaches into the surf, and beyond them the water only gets DEEPER, with nowhere to land. Don't go hunting a way round a gate by sea; there isn't one worth your life. The path is the only way on.",
-          r: ["You mentioned rivers carry you?"] },
-        { npc: "You've felt it already — that ride down through the gate. Wade a river unbraced and the current bears you downstream; BRACE with SHIFT and your line is your own. Storms swell a river into flood — deeper, colder, far stronger. The corridor above the river gate even climbs to the SOURCE, marked on your map, if you want the full run.",
-          r: ["And the raft you packed?"] },
-        { npc: "Stand at the water's edge, place it, and paddle — anywhere but my motu channel! Shipwrights build proper hulls up to great sailing ships; bigger hulls draw more water. Where roads meet water the world builds stone bridges, and over shallow seas whole causeways on piles — you'll sail under some, and tall hulls must duck the low ones.",
-          r: ["The pearl's waiting — I'm off."] },
-      ],
-    },
-    bank: {
-      reward: { coins: 100 },
-      convo: [
-        { npc: "That chest by my tent is a BANK. Anything you store is safe forever — death can't touch it. Out here on a lonely isle the vault is free and private.",
-          r: ["Is it the same on the mainland?"] },
-        { npc: "Grander: every road-connected settlement shares one network. Stash your ore in one town, withdraw it in the next — the Bank of Newhaven's web spans nearly the whole known world.",
-          r: ["How do I join a network?"] },
-        { npc: "Big city networks want a signature at their main branch — a grand three-storey hall with a row of tellers. Village co-ops will sign you at the counter. Here — a hundred coins of seed money. Put something in the vault before you walk on, just to feel it.",
-          r: ["Anything else before I go?"] },
-        { npc: "See my CARPENTER'S BENCH? The camps ahead run on MILK, and milk needs pails. Fell a tree here, saw your logs into PLANKS at the bench, and MAKE NINE EMPTY PAILS.",
-          r: ["Nine's a lot to carry."] },
-        { npc: "That's the lesson, e hoa — stash the spares in the vault. It carries what your pack can't, and they'll be waiting at any bank you find. {farm}'s fields are through the gate.",
-          r: ["Good to know — thank you."] },
-      ],
-    },
-    farm: {
-      reward: { items: [["hoe", 1], ["seed_wheat", 10], ["seed_potato", 10], ["seed_apple", 10], ["seed_sageleaf", 10], ["seed_flax", 10]] },
-      convo: [
-        { npc: "Welcome to the heart of the isle! My farm behind the fence has FIVE ROWS, five plots each — one row per crop: wheat, potatoes, apples, sageleaves, flax, all ripe and waiting. Take this hoe and TEN SEEDS of each, and step through the gate.",
-          r: ["What do you need picked?"] },
-        { npc: "Bring in TWENTY of each crop — a good picking of every row. And learn the marvel: crops grow in REAL time. REPLANT a row after you clear it — sowing takes five seeds, and most harvested crops drop one back — and it ripens again in minutes, whether you watch or wander.",
-          r: ["Is there more than crops here?"] },
-        { npc: "Grain becomes food at the MILLSTONE — mill TEN wheat into flour, bran and all, for baking up the path. Keep your flax too; it spins into linen for candle wicks. And livestock roam the pasture: TEND them for wool, milk, feathers and eggs.",
-          r: ["What should I tend?"] },
-        { npc: "Tend my QUAIL and hens for TEN eggs — save some for the fritters! — and TEN FEATHERS, the exact fletching budget for {wood}'s thirty arrows, so every feather counts. Watch for GIANT animals: one in six is born big and gives double. And that grey mountain in the pasture is a KURANUI, the biggest bird that ever walked — she minds her own business; you mind yours around her feet.",
-          r: ["This'll take a while to grow out."] },
-        { npc: "Here's the vale's deepest secret, and my favourite: while the rows regrow, DON'T stand waiting. Press X and SPLIT into TWO SELVES — each with hands, a pack, a will. Leave one to reap, replant and mill, and walk the other wherever it's needed. Tab hops between them; your strength divides apart and flows back whole when you rejoin. Keep BOTH busy — that's my mark.",
-          r: ["Where would I send the other self?"] },
-        { npc: "My gift for the road: the little gate NE through my east arch is MY SHORTCUT, a straight lane from the bank chamber into {wood}'s camp. It unbars when my stage is done. Send your free self to wait there; when the last crop falls, both roads open — one self through the crown's south gate, one through the shortcut — and you meet at Torra's benches.",
-          r: ["Remind me of the whole list?"] },
-        { npc: "Twenty of each crop, ten flour milled, ten eggs and ten feathers, and both selves at work. Keep those pails handy — {cook} up the path keeps COWS, and once your Husbandry reaches THREE they'll fill every pail you carry. At dusk in a real town you'll see lamplighters set glowing candle-stands, gathered again by dawn. This world lives its own life.",
-          r: ["Two of me — let's get to it."] },
-      ],
-    },
-    wood: {
-      convo: [
-        { npc: "Kia ora — both of you, if Kenji taught you right! First things first: stand your two selves SIDE BY SIDE and press X to MERGE back into one. Divided hands are grand for waiting on crops; fletching three hundred arrows wants your whole strength in one pair of arms.",
-          r: ["One of me again. What's here?"] },
-        { npc: "The woodcrafting camp — everything begins with LOGS, the ones you felled in the bush. At the sawmill you SAW logs into boards; at my bench you shape them further. Three skills live here: Sawing, Fletching and Carpentry. No gifts from me — you make your own kit from wood you cut.",
-          r: ["Walk me through the ladder."] },
-        { npc: "FIRST: cut THREE HUNDRED ARROW SHAFTS at my bench — twenty logs, fifteen shafts a cut. By the last bundle your Fletching reaches LEVEL TWO, exactly what iron arrows demand. SECOND: bind THIRTY IRON ARROWS — two batches, each fifteen shafts, five of the vale's feathers and fifteen of {smith}'s iron heads. Your feathers and heads are the exact budget: nothing wasted.",
-          r: ["And the bow?"] },
-        { npc: "THIRD: carve a SHORTBOW from a couple of logs. That bow and those arrows are how you'll bring down the warden's koreke later, so make them well. Those pails you sawed back at {bank}'s camp will earn their keep soon — {cook} keeps cows, cows mean milk, milk means cheese. On you go!",
-          r: ["To the bench, then."] },
-      ],
-    },
-    cook: {
-      convo: [
-        { npc: "Welcome to my kitchen! Cooking heals you, and the finest dishes grant buffs. Three trades here: Cooking, Baking and Cheesemaking. My fires are yours to light — you've carried flint since {smith}'s forge, so strike your blade and stoke with logs, same as he taught.",
-          r: ["Where do I start?"] },
-        { npc: "The FRITTERS first: bind raw whitebait with an egg at my cookfire and fry it — cook FIVE golden whitebait fritters.",
-          r: ["And the cheese?"] },
-        { npc: "You'll need MILK. Take your empty PAILS to my COWS and milk them — a little Husbandry does it; tend the vale's flocks if yours isn't there yet. Curdle the milk at my creamery into curds, then press ONE COTTAGE CHEESE.",
-          r: ["Is there bread too?"] },
-        { npc: "That flour you milled bakes into FLATBREAD at my bakehouse — bake FIVE. Five fritters, a cottage cheese, five flatbread, and {war} waits at the pit past the gate. Go well fed!",
-          r: ["Smells good already — thanks."] },
-      ],
-    },
-    war: {
-      reward: { items: [["potion_health", 2]] },
-      convo: [
-        { npc: "Draw that iron shortsword you forged — and take these two health draughts. The SLIMES in the pit are yours: click one and go.",
-          r: ["How does fighting work?"] },
-        { npc: "Two ways. MELEE is sword and shield up close; ARCHERY looses real arrows that arc through the air — you can kite, but you need line of sight. There are stranger arts out in the wide world — woven magic, spoken spells — but those are lessons for beyond the mist, not for my pit.",
-          r: ["What do you want me to prove?"] },
-        { npc: "Slay THREE SLIMES, and gather ONE TALLOW and THREE HIDE from the pit's beasts, THREE ACTION RUNES off the slimes, and THREE STATE RUNES — mine the essence rocks for those. Monsters drop coins and rare REAGENTS that gate whole crafting skills; hunters feed the whole economy.",
-          r: ["Anything I should keep track of?"] },
-        { npc: "Every kill fills your BESTIARY — press B to read it. And mind this: the wilds get harder the further you roam from Newhaven, but near towns and roads there are PEACE ZONES, so nothing jumps you on Main Street.",
-          r: [{ t: "Open the bestiary (B)", act: "bestiary" }, "What about that bird?"] },
-        { npc: "The KOREKE — the little quail about the pit? Startle one and it takes to the air, and a bird on the wing is beyond any blade; this is what your bow is for. Nock an arrow, lead the flight, and bring ONE down. That's archery. Run dry and I'll come running with more — don't fret the count.",
-          r: ["Where to when the pit's done?"] },
-        { npc: "Slimes slain, reagents gathered, a koreke down — then wash up with {soap} at the springs past the gate. You've earned a scrub.",
-          r: ["Time to fight."] },
-      ],
-    },
-    sky: {
-      reward: { coins: 30 },
-      convo: [
-        { npc: "Before the sky, a wonder closer to hand. Everyone you've met on this isle — everyone in this whole world — can be SPOKEN WITH. Not clicked. Spoken with. Press ENTER, say anything in your own words, and we answer.",
-          r: ["What should I ask you?"] },
-        { npc: "Ask me what I love about my knoll. Ask about the rain that soaked you at the bank camp, or what I make of the Warden's slimes, or whether the stars go out. And understand what you hear: no script, no wheel of stock phrases, and no dream-machine inventing words nobody meant. Every answer is a thing a real soul once truly said, found because it fits YOUR words. Say something to me — and hear for yourself.",
-          r: ["Tell me about this sky, then."] },
-        { npc: "Look up! Out in the wide world, day and night roll on REAL time — and the world's so wide it has TIMEZONES: every 256 tiles east is an hour ahead. Newhaven's clocks already read three hours ahead of ours.",
-          r: ["Does the whole world share one day?"] },
-        { npc: "This isle sits at an even 50% latitude — half day, half night. Sail far enough north or south and latitude changes the days themselves: polar summers where the sun never sets, winters where it barely rises. Here on Tūhura the sky turns as YOU learn — each keeper finished rolls the day forward. Stay the course and you'll earn the stars.",
-          r: ["What about the weather?"] },
-        { npc: "Weather fronts drift across the world like the real thing — watch the pressure fall before a storm on a barometer. Rain swells the rivers into flood; in the cold lands, snow settles white on every roof, then melts away. The wide chart is kept in Newhaven: press M once you've crossed for day/night bands and a synoptic chart. Until then, read the sky itself — it never lies for long. {candle} keeps the hollow just past my knoll.",
-          r: ["I'll go and really talk to you now."] },
-      ],
-    },
-    candle: {
-      convo: [
-        { npc: "Evening's coming on — feel how the isle dims? Out in the world, night is DARK, and a carried light is worth more than gold in a dungeon or on a midnight road. That's my craft: Candlemaking.",
-          r: ["What do I need to make one?"] },
-        { npc: "No gift — you've already gathered the makings. Remember the flax you reaped in the vale, and the tallow off the warden's beasts? Those become a candle. We start with the humblest light there is: the RUSHLIGHT. No wick to spin — just tallow, dipped at my chandlery until it holds a flame. DIP ONE and the gate opens.",
-          r: ["How do I use it?"] },
-        { npc: "Carry it lit in your off-hand — click it in your pack — and its glow walks with you; you'll want that tonight. When your Candlemaking grows, come back for wicks and tapers, scented and cathedral candles beyond. {lore} waits at the portal crown.",
-          r: ["I'll dip one now."] },
-      ],
-    },
-    lore: {
-      reward: { items: [["state_rune", 50]] },
-      convo: [
-        { npc: "Take these — FIFTY raw STATE RUNES, humming with unshaped intent. Raw, they're just cold stones; shaped at a RUNESTONE ALTAR they become true runes. That's my craft: RUNECRAFTING.",
-          r: ["What do I do with them?"] },
-        { npc: "My altar stands beside the portal. Work all fifty into AIR RUNES — the lightest, kindest shaping there is — and feel the craft settle into your hands. As your Runecrafting deepens, each raw stone yields more. And keep Miles's rushlight EQUIPPED in your off-hand — night won't fall proper till it's burning at your side and the altar's done.",
-          r: ["Why air runes, though?"] },
-        { npc: "Look at that stone ring on the crown: an ANCIENT PORTAL, one of a network scattered across the endless world. Step up and it ATTUNES to you. Attune every portal you find and you can leap between them — FOR A PRICE IN RUNES. The further the jump, the finer the rune the veil demands; your fifty air runes are short-hop fare. This one the mist reclaims when you sail, but out there every portal you wake is yours for good.",
-          r: ["Anything else I should know out there?"] },
-        { npc: "Folk marked with a ✦ have WORK for you — letters to carry, roads to clear, sealed rooms to open. Finish one and they trust you with something bigger. Press J for your journal, M for the world map, which zooms from your street to the whole world. And right-click a city fountain to set your RESPAWN there, so death returns you somewhere friendly. The harbour waits below — {ferry} will open the way.",
-          r: [{ t: "Open the quest journal (J)", act: "questlog" }, "Thank you — I'm set."] },
-      ],
-    },
-    // shown once the player has slept at Sigrid's spare room (t.sleptAtSigrids)
-    // — the "Ready for the wide world?" intro already ran in FERRY_INVITE
-    // the night before, so this picks straight up the next morning
-    ferry: {
-      convo: [
-        { npc: "Slept well? Good — a clear head for a strange road. You'll climb until the isle is a coin on the sea, fall between worlds the whole night through, and drop out of a MORNING sky over Newhaven — the grand bank, the markets, the quest-givers and the thousand roads all waking beneath you.",
-          r: ["Then I'm ready. Sing it."] },
-        { npc: "Stand ready, and I'll sing the light down.",
-          r: [{ t: "Sing the song — send me up!", act: "graduate" }, { t: "I'll explore a little longer", act: "close" }] },
-      ],
-    },
-  };
-
-  // action buttons → real UI
-  const ACTS = {
-    charselect: () => { close(); if (typeof CharSelect !== "undefined") CharSelect.open(); },
-    bestiary: () => { close(); if (typeof openBestiary === "function") openBestiary(); },
-    map: () => { close(); if (typeof openWorldMap === "function") openWorldMap(); },
-    questlog: () => { close(); if (typeof Quests !== "undefined") Quests.openLog(); },
-    graduate: () => { close(); graduate(); },
-    sigridBed: () => { close(); inviteSigridSleep(); },
-    // (the Cook's pail-for-milk barter was removed 2026-09-15, user req —
-    // milk is earned at her cows with your own Husbandry, no shortcut)
-    close: () => close(),
+  // The actual CONVERSATIONS live in scripts/npc/tutors/*.lua now, written in
+  // the exact on_npc()/chatnpc()/choice() format every other quest uses (user
+  // req 2026-10-03) — see js/lua/lua-host.js's __tut_* bridge and
+  // js/lua/prelude.lua's tut_* wrappers for what a tutor script can read/do:
+  // tut_seen/tut_task_done/tut_task_label (this module's REQS/goal state),
+  // tut_complete (mark the intro seen + advance the staged sky — the old
+  // finish()'s bookkeeping, minus the reward grant, which a script does
+  // itself via add_item/give_xp), tut_name (the live roster name for {bush}-
+  // style substitution), tut_has_body/tut_journey_done/tut_slept (Guide/
+  // Sigrid's special phases), and tut_graduate/tut_sigrid_bed/tut_open_* for
+  // the old ACTS table's real-UI actions. This REWARDS table is now ONLY the
+  // STAGE_SKIP dev tool's catch-up grant (skipStagesThrough below) — every
+  // live playthrough grants through the Lua scripts directly.
+  const REWARDS = {
+    guide: { coins: 25 },
+    bush:  { items: [["axe_iron", 1]] },
+    fish:  { items: [["small_net", 1], ["fishing_rod", 1]] },
+    // the xp is Menkaure's DEMONSTRATION (he works a load in front of you) —
+    // numbers are load-bearing, see the terrace-ledger comment in TUT_CONTENT
+    smith: { items: [["pickaxe_iron", 1], ["knife", 1], ["flint", 1]],
+              xp: { Smelting: 550, "Ore-mining": 400 } },
+    swim:  { items: [["log_raft", 1], ["snorkel", 1]] },
+    bank:  { coins: 100 },
+    farm:  { items: [["hoe", 1], ["seed_wheat", 10], ["seed_potato", 10], ["seed_apple", 10], ["seed_sageleaf", 10], ["seed_flax", 10]] },
+    war:   { items: [["potion_health", 2]] },
+    sky:   { coins: 30 },
+    lore:  { items: [["state_rune", 50]] },
   };
 
   // ---------- journey progress ----------
@@ -1933,217 +1701,44 @@ const Tutorial = (() => {
       cur: { id: tu.id, name: tutorName(tu), role: tu.role, full: tutorFull(tu), met, rows } };
   }
 
-  // ---------- dialogue UI ----------
-  // NO popup/card/panel (user req): this reads as part of the SAME chat UI the
-  // rest of the game uses, not a bespoke tutorial-only box. The keeper's line
-  // appears only as an overhead speech bubble (npcSay — mirrors into #log like
-  // any NPC); the player's replies are borderless text options docked exactly
-  // where js/net/live-ui.js's #livechat bar sits (bottom-left, below #log),
-  // styled like #log's own .msg lines (css/style.css) rather than boxed
-  // buttons. While open, the real chat bars are suppressed (dialogueOpen()
-  // export, read by live-ui.js's chatFieldOn and npc-chat.js's npcChatTick) so
-  // there's never a redundant "press Enter to chat" bar competing for the
-  // same corner of the screen.
-  let el = null, cur = null, curNpc = null, beat = 0;
+  // ---------- dialogue bridge ----------
+  // The conversations themselves live in scripts/npc/tutors/*.lua — a tutor
+  // is just an on_npc() script like any quest-giver's, dispatched the SAME
+  // way (ui.js's talkTo() -> Lua.hasNpc/runNpc, matched by the live NPC's
+  // .name — see js/lua/lua-engine.js's npcSubject). This module no longer
+  // owns a talk() entry point or any dialogue DOM; what's left here is just
+  // the handful of helpers a tutor script reads/drives through the __tut_*
+  // bridge (js/lua/lua-host.js) to touch this module's progress/gate state
+  // and the handful of real-UI actions (graduate, Sigrid's bed, charselect/
+  // bestiary/questlog) a script can't reach any other way.
   function liveNpc(id) {
     const list = (typeof world !== "undefined" && world && world.npcs) ||
       (typeof npcs !== "undefined" ? npcs : null);
     return list ? list.find(n => n && n.tutor === id) : null;
   }
-  function ensureDom() {
-    if (el) return;
-    el = document.createElement("div");
-    el.id = "tutdlg";
-    // left:10px / bottom:8px matches #livechat's dock exactly (live-ui.js) —
-    // same corner of the screen as the game's own chat bar. No full-screen
-    // catcher: like every other chat/quest UI here, it never blocks the rest
-    // of the screen.
-    el.style.cssText = "display:none;position:fixed;left:10px;bottom:8px;width:72%;max-width:860px;" +
-      "z-index:45;flex-direction:column;gap:2px;font:12px OpenDyslexic, Verdana, sans-serif;";
-    document.body.appendChild(el);
-    el.addEventListener("mousedown", e => e.stopPropagation());
-    el.addEventListener("click", e => e.stopPropagation());
-    document.addEventListener("keydown", e => {
-      if (!isOpen()) return;
-      // never steal keystrokes while the player is typing (chat bar, notes)
-      const ae = document.activeElement;
-      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
-      if (e.key === "Escape") { e.stopPropagation(); close(); return; }
-      const b = curBeat(), rs = (b && b.r) || [];
-      // Enter / Space take the first response; number keys pick that response
-      if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); if (rs[0] != null) pick(rs[0]); return; }
-      const n = parseInt(e.key, 10);
-      if (n >= 1 && n <= rs.length) { e.stopPropagation(); e.preventDefault(); pick(rs[n - 1]); }
-    }, true);
-  }
-  const isOpen = () => el && el.style.display === "flex";
-  function close() { if (el) el.style.display = "none"; cur = null; curNpc = null; }
-  // one-beat nudge shown when the Guide is re-visited while you're still a
-  // spark of light (the C key is disabled — the Guide is the only chooser)
-  const GUIDE_REMIND = [
-    { npc: "You're still a spark of unformed light, e hoa — the path east won't open until you've taken a body.",
-      r: ["How do I choose one?"] },
-    { npc: "Choose one now and become someone. You can always come back to me and pick a different form later.",
-      r: [{ t: "Choose my character", act: "charselect" }] },
-  ];
-  // With no fence between the Landing and the Harbour (one open village
-  // shore), a fresh hand can stroll up to Sigrid on DAY ONE — she plays
-  // village host, but also offers the crossing early (user req): the
-  // "graduate" act works unchanged for an early Sigrid (finishSilent() no-ops
-  // on cur._early, so no stage/reward bookkeeping fires — graduate() itself
-  // doesn't care how far the journey got). Declining (the close act) marks
-  // NOTHING seen (the staged sky doesn't turn).
-  const FERRY_EARLY = [
-    { npc: "Haere mai to the village, traveller! This shore is where the keepers lay their heads when the day's teaching is done — walk among the tents; you're welcome here any hour.",
-      r: ["When does your waka sail?"] },
-    { npc: "She properly sails for Newhaven once every keeper on the path has sent you on — their lessons, tools and gifts yours along the way. But if you'd rather not wait, say the word and I'll sing you there right now: you'll land with empty hands, nothing learned, and no going back to finish what you skipped.",
-      r: [{ t: "Skip ahead — sing me up now", act: "graduate" }, { t: "I'll earn it properly", act: "close" }] },
-  ];
-  // journey's done, night's fallen — Sigrid invites the player to rest before
-  // the crossing (user req 2026-09-17). The sigridBed act (inviteSigridSleep)
-  // is what marks her "seen" and rolls the staged sky to night, then starts
-  // the walk-to-bed escort — so this convo ENDS on that act and never calls
-  // finish() (which would double-advance the stage).
-  const FERRY_INVITE = [
-    { npc: "I'm {ferry}. I have sailed every sea you can dream of, and here's a navigator's secret: no hull sails OUT of Tūhura. For that there's my wayfinding song — a pillar of light to lift you over the roof of the sky and set you down in Newhaven, the great city at the centre of everything.",
-      r: ["What becomes of the isle?"] },
-    { npc: "Tūhura exists between the tides. The moment you rise, the mist takes it back — no chart, ship or portal will ever find it again. So take your time, and take every gift.",
-      r: ["I think I'm ready."] },
-    { npc: "Not tonight, e hoa — a tired body has no business singing itself across the sky. I keep a spare room off my own; sleep there, and we'll talk come morning, clear-headed and ready for the crossing. Go on — I'll walk you down myself.",
-      r: [{ t: "Follow Sigrid to her spare room", act: "sigridBed" }] },
-  ];
-  const curConvo = () => (cur && cur._remind) ? GUIDE_REMIND
-    : (cur && cur._early) ? FERRY_EARLY
-    : (cur && cur._preSleep) ? FERRY_INVITE
-    : (cur ? DLG[cur.id].convo : []);
-  const curBeat = () => { const c = curConvo(); return c && c[beat]; };
-  // the player picks a response: echo it, run its directive, then advance
-  function pick(r) {
-    if (!cur) return;
-    const label = subst(typeof r === "string" ? r : r.t);
-    // "Player" literally — matching the game's own chat (live-ui.js logs the
-    // account's real name; a spark of light on Tūhura Isle has no name yet,
-    // and it floats over the player's own head too, like real chat does
-    if (typeof log === "function") log(`Player: ${label}`, "sys");
-    if (typeof playerSay === "function") { try { playerSay(label); } catch (e) { /* no-op off-screen */ } }
-    if (r && typeof r === "object") {
-      if (r.end) { close(); return; }
-      if (r.finish) { finish(); return; }
-      if (r.act) {
-        // charselect/graduate/close complete the stage silently as they close
-        // (matches the old page-act rule); bestiary/questlog/sigridBed don't
-        if (r.act === "graduate" || r.act === "close" || r.act === "charselect") finishSilent();
-        if (ACTS[r.act]) ACTS[r.act]();
-        return;
-      }
-      if (r.goto != null) { beat = r.goto; render(); return; }
-    }
-    // a plain response advances; the last beat finishes (grant + sky roll)
-    const convo = curConvo();
-    if (beat < convo.length - 1) { beat++; render(); }
-    else finish();
-  }
-  function finish() {
-    if (!cur) return;
-    // the Navigator's early village-host chat leaves no trace: her stage
-    // isn't "met" and the staged sky holds still
-    if (cur._early) { close(); return; }
+  const seen = id => { const t = state(); return !!(t && t.seen[id]); };
+  const taskDone = id => reqDone(id);
+  const taskLabel = id => { const r = REQS[id]; return r ? r.task : ""; };
+  const tutorDisplayName = id => { const tu = TUT_TUTORS.find(x => x.id === id); return tu ? tutorName(tu) : id; };
+  // journey's end, for Sigrid's early-visit phase (the open village shore
+  // makes the Harbour a one-minute stroll from the Landing on day one)
+  const journeyDone = () => frontier() >= TUT_TUTORS.length - 1;
+  const slept = () => { const t = state(); return !!(t && t.sleptAtSigrids); };
+  // mark a tutor's intro seen + advance the staged sky + note the remaining
+  // hands-on task — the old finish()'s bookkeeping, minus the reward grant
+  // (a tutor script grants its own items/xp directly via add_item/give_xp,
+  // so there's nothing left here to double up)
+  function complete(id) {
     const t = state();
-    if (t) {
-      const prev = _seenCount;
-      t.seen[cur.id] = 1;
-      _seenCount = Object.keys(t.seen).length;
-      grant(cur.id, DLG[cur.id].reward);
-      advanceStage(prev); // the staged sky rolls forward with each keeper met
-      // announce the keeper's hands-on task (the gate stays shut until it's done)
-      if (REQS[cur.id] && !reqDone(cur.id) && typeof log === "function")
-        log(`${tutorName(cur)}'s task: ${REQS[cur.id].task} — then the gate opens.`, "gold");
-      refreshBar();
-      if (typeof saveGame === "function") saveGame();
-      if (typeof uiDirty !== "undefined") uiDirty = true;
-    }
-    close();
-  }
-  // mark seen + grant without closing twice (action buttons close themselves)
-  function finishSilent() {
-    if (cur && cur._early) return;
-    const t = state();
-    if (t && cur) {
-      const prev = _seenCount;
-      t.seen[cur.id] = 1;
-      _seenCount = Object.keys(t.seen).length;
-      grant(cur.id, DLG[cur.id].reward);
-      advanceStage(prev);
-      refreshBar();
-    }
-  }
-  function render() {
-    const b = curBeat();
-    if (!b) { close(); return; }
-    const line = subst(b.npc);
-    // the keeper's ENTIRE line lives in the overhead speech bubble (quote-free
-    // by design — the bubble renders it verbatim) — npcSay also mirrors it
-    // into the sidebar log, exactly like any other NPC's speech; there is no
-    // separate text panel to duplicate it into (the Goals tab covers the
-    // itinerary the old first-beat panel used to show here)
-    if (curNpc && typeof npcSay === "function") { try { npcSay(curNpc, line); } catch (e) { /* no live npc */ } }
-    el.innerHTML = "";
-    (b.r || []).forEach((r, i) => {
-      const label = subst(typeof r === "string" ? r : r.t);
-      const isAct = !!(r && typeof r === "object" && r.act);
-      const btn = document.createElement("button");
-      btn.textContent = `${i + 1}. ${label}`;
-      // matches css/style.css's #log .msg (borderless, left-aligned, the same
-      // dark 4-direction text-shadow outline so it reads over any terrain) —
-      // act options tint like .msg.xp, plain ones like .msg.chat b
-      btn.style.cssText = "display:block;width:100%;text-align:left;background:none;border:none;" +
-        "padding:1px 0;cursor:pointer;font:inherit;" +
-        "text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 3px #000;" +
-        (isAct ? "color:#8ff08f;" : "color:#a8ffc9;");
-      btn.onmouseenter = () => (btn.style.color = isAct ? "#b8ffb8" : "#ffe9a8");
-      btn.onmouseleave = () => (btn.style.color = isAct ? "#8ff08f" : "#a8ffc9");
-      btn.onclick = e => { e.stopPropagation(); pick(r); };
-      el.appendChild(btn);
-    });
-  }
-
-  // ---------- entry points ----------
-  function talk(npc) {
-    const def = TUT_TUTORS.find(x => x.id === npc.tutor);
-    if (!def || !DLG[def.id]) return false;
-    // once a keeper has settled into the Harbour Village for the night, their
-    // scripted lesson is done for good — fall through to ui.js's normal NPC
-    // chat (the speech-bubble line, and the semantic Enter-key chat, which
-    // was never gated on npc.tutor in the first place) instead of replaying
-    // the intro forever (user req 2026-09-17). Sigrid never gets a village
-    // seat (villageHome always returns null for "ferry" — she never leaves
-    // her waka), so this never retires her — her own dialogue tree handles
-    // its own phases (early/invite/graduate) via curConvo() below.
-    if (villageHome(def.id) != null) return false;
-    ensureDom();
-    cur = def;
-    // the live keeper object (for the overhead speech bubble) — maybeWelcome
-    // passes a bare { tutor } stub, so resolve the real npc from the world
-    curNpc = liveNpc(def.id) || npc;
-    // Guide re-visited while still a spark → jump straight to the "take a form"
-    // nudge instead of replaying the whole intro
-    const t = state();
-    cur._remind = def.id === "guide" && !!(t && t.seen.guide) && !hasBody();
-    // Sigrid reached ahead of the journey's end (the open village shore
-    // makes that a one-minute stroll from the Landing): host, don't ferry
-    cur._early = def.id === "ferry" && frontier() < TUT_TUTORS.length - 1;
-    // Sigrid, journey done, but hasn't slept yet — show the invite instead
-    // of "sing the song" (user req 2026-09-17: sleep till morning first)
-    cur._preSleep = def.id === "ferry" && !cur._early && !(t && t.sleptAtSigrids);
-    // openGrant tutors (the Bushman's axe) hand their tool over the instant
-    // the dialogue opens, not after every page is read — grant() is
-    // idempotent (t.given[tid]), so finish()'s later call is a no-op
-    if (!cur._remind && !cur._early && DLG[def.id].openGrant) grant(def.id, DLG[def.id].reward);
-    beat = 0;
-    el.style.display = "flex";
-    render();
+    if (!t || t.seen[id]) return; // already marked — never double-advance
+    const prev = _seenCount;
+    t.seen[id] = 1;
+    _seenCount = Object.keys(t.seen).length;
+    advanceStage(prev); // the staged sky rolls forward with each keeper met
+    if (REQS[id] && !reqDone(id) && typeof log === "function")
+      log(`${tutorDisplayName(id)}'s task: ${REQS[id].task} — then the gate opens.`, "gold");
     refreshBar();
-    return true;
+    if (typeof saveGame === "function") saveGame();
   }
 
   // a fresh character boots in as an unformed spark — the Guide notices at
@@ -2166,7 +1761,9 @@ const Tutorial = (() => {
     // safety net: if the chunk wasn't hydrated yet or he gets stuck en route,
     // never leave a fresh spawn stalled with no opening line
     setTimeout(() => {
-      if (!isOpen() && !(state() && state().seen.guide)) talk({ tutor: "guide" });
+      const dlgOpen = window.__LUA && window.__LUA.dlgbar && window.__LUA.dlgbar.isOpen();
+      const gnpc = liveNpc("guide");
+      if (!dlgOpen && !(state() && state().seen.guide) && gnpc && typeof talkTo === "function") talkTo(gnpc);
       if (typeof saveGame === "function") saveGame();
     }, g ? 9000 : 1200);
   }
@@ -2356,12 +1953,14 @@ const Tutorial = (() => {
     return TUT_TUTORS.filter(tu => tu.mix != null).map(tu => ((tu.mix % N) + N) % N);
   }
 
-  return { START, talk, maybeWelcome, graduate, state, onIsle, active,
+  return { START, maybeWelcome, graduate, state, onIsle, active,
     phaseOverride, weatherOverride, flatSky, barred, frontier, refreshBar, goalState,
     skillVisible, riverFlow, tick, onCraft, anvilRecipes,
     villageHome, villageLamps, offDutyLine, villageBed, tutHouseUpperDecor,
     sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, onApproachArrive, tickEscort,
-    dialogueOpen: isOpen,
+    // scripts/npc/tutors/*.lua bridge (js/lua/lua-host.js's __tut_*)
+    seen, taskDone, taskLabel, tutorDisplayName, complete, journeyDone, slept,
+    sigridBed: inviteSigridSleep,
     onGather, onWash, onBank, onKill, onChant,
     onQueue, onBrace, onStoke, onMerge, onChatReply,
     onHarvest, onTend, onEquip, onPickup, onOutOfArrows, keeperMixIdx };

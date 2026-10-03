@@ -100,9 +100,19 @@
     __say: (cid, t) => { const n = npcOf(cid); if (n && typeof npcSay === "function") npcSay(n, String(t)); },
     __mes: t => { if (typeof log === "function") log(String(t), "sys"); },
 
-    // choices (async — yields until the player clicks; returns 1-based index)
-    __choice: async (...labels) => (L.modal ? await L.modal.choose(labels.map(String)) : 1),
-    __dialog: async (title, body, ...labels) => (L.modal ? await L.modal.dialog(String(title), String(body), labels.map(String)) : 1),
+    // choices (async — yields until the player clicks; returns 1-based index).
+    // __dialog speaks its body through the bound npc (bubble + #log, same as
+    // chatnpc) before the SAME docked picker choice() uses opens for the reply
+    // list — one dialogue surface for every scripted NPC, tutors included.
+    __choice: async (cid, ...labels) => (L.dlgbar ? await L.dlgbar.choose(labels.map(String)) : 1),
+    __dialog: async (cid, title, body, ...labels) => {
+      if (body) {
+        const n = npcOf(cid);
+        if (n && typeof npcSay === "function") npcSay(n, String(body));
+        else if (typeof log === "function") log(String(body), "sys");
+      }
+      return L.dlgbar ? await L.dlgbar.choose(labels.map(String)) : 1;
+    },
 
     // inventory / progression
     __add_item: (id, n) => { const rid = ensureItem(String(id)); return (typeof addItem === "function") ? !!addItem(rid, (n | 0) || 1) : false; },
@@ -158,6 +168,26 @@
     __bed_x: cid => { const n = npcOf(cid); return n && n._bed ? n._bed[0] : (n && n._home ? n._home[0] : 0); },
     __bed_y: cid => { const n = npcOf(cid); return n && n._bed ? n._bed[1] : (n && n._home ? n._home[1] : 0); },
     __bed_level: cid => { const n = npcOf(cid); return n && n._bed ? (n._bedLevel | 0) : 0; },
+
+    // Tūhura Isle tutor-dialogue bridge (scripts/npc/tutors/*.lua): the
+    // island geography, goal counters (fed by onGather/onBrace/onStoke/…)
+    // and gate-barring logic all stay in gameplay/tutorial.js — only the
+    // CONVERSATION moved to Lua, so a tutor script reads "is my hands-on task
+    // done yet" and "mark the intro seen" through these thin wrappers instead
+    // of reimplementing any of that.
+    __tut_seen: id => (typeof Tutorial !== "undefined" ? !!Tutorial.seen(String(id)) : false),
+    __tut_task_done: id => (typeof Tutorial !== "undefined" ? !!Tutorial.taskDone(String(id)) : true),
+    __tut_task_label: id => (typeof Tutorial !== "undefined" ? Tutorial.taskLabel(String(id)) : ""),
+    __tut_complete: id => { if (typeof Tutorial !== "undefined") Tutorial.complete(String(id)); },
+    __tut_name: id => (typeof Tutorial !== "undefined" ? Tutorial.tutorDisplayName(String(id)) : String(id)),
+    __tut_has_body: () => { const p = P(); return !!(p && p.character != null); },
+    __tut_journey_done: () => (typeof Tutorial !== "undefined" && Tutorial.journeyDone()),
+    __tut_slept: () => (typeof Tutorial !== "undefined" && Tutorial.slept()),
+    __tut_sigrid_bed: () => { if (typeof Tutorial !== "undefined") Tutorial.sigridBed(); },
+    __tut_graduate: () => { if (typeof Tutorial !== "undefined") Tutorial.graduate(); },
+    __tut_open_charselect: () => { if (typeof CharSelect !== "undefined") CharSelect.open(); },
+    __tut_open_bestiary: () => { if (typeof openBestiary === "function") openBestiary(); },
+    __tut_open_questlog: () => { if (typeof Quests !== "undefined") Quests.openLog(); },
 
     // player position (for handlers with no bound NPC — on_item / on_kill)
     __player_x: () => { const p = P(); return p ? p.x | 0 : 0; },

@@ -1,82 +1,80 @@
-// ===== Taiao Lua — dialogue/choice modal + cutscene UI =====
-// The choice/dialog overlay (ported from QuestScript's showModal) and the
-// cutscene primitives (fade, caption, camera zoom). Loaded first: it creates
-// window.__LUA and exposes __LUA.modal / __LUA.cutscene for the host bridge.
+// ===== Taiao Lua — dialogue/choice bar + cutscene UI =====
+// The picker docks exactly where js/net/live-ui.js's #livechat bar sits
+// (bottom-left, below #log) — borderless numbered text lines styled like the
+// log's own .msg lines, never a boxed popup. This is the ONE picker every
+// scripted NPC conversation uses (tutors, traders, bankers, the Weaver,
+// quest-givers) so there's never two differently-styled dialogue surfaces
+// competing for the same corner of the screen. Speech itself (chatnpc/say/
+// dialog's body) goes through npcSay — the overhead bubble + #log, same as
+// any other NPC line; this module only renders the reply OPTIONS.
+// Also carries the cutscene primitives (fade, caption, camera zoom). Loaded
+// first: it creates window.__LUA and exposes __LUA.dlgbar / __LUA.cutscene
+// for the host bridge.
 //
-// choose()/dialog() resolve with a 1-BASED option index (Lua convention). Esc /
-// clicking away picks the LAST option (conventionally the decline), so a script
-// can never soft-lock waiting for input.
+// choose() resolves with a 1-BASED option index (Lua convention). Escape
+// picks the LAST option (conventionally the decline) so a script can never
+// soft-lock waiting for input; Enter/Space picks the first.
 "use strict";
 
 (function () {
   const L = (window.__LUA = window.__LUA || {});
 
-  function showModal(opts) {
-    const options = opts.options || [];
+  let el = null;
+  function ensureDom() {
+    if (el) return el;
+    el = document.createElement("div");
+    el.id = "luadlg";
+    // matches js/net/live-ui.js's #livechat dock exactly — same corner of the
+    // screen as the game's own chat bar, never a full-screen catcher
+    el.style.cssText = "display:none;position:fixed;left:10px;bottom:8px;width:72%;max-width:860px;" +
+      "z-index:45;flex-direction:column;gap:2px;font:12px OpenDyslexic, Verdana, sans-serif;";
+    document.body.appendChild(el);
+    el.addEventListener("mousedown", e => e.stopPropagation());
+    el.addEventListener("click", e => e.stopPropagation());
+    return el;
+  }
+
+  let liveKey = null;   // the currently-attached keydown listener, if any
+  function teardown() {
+    if (liveKey) { document.removeEventListener("keydown", liveKey, true); liveKey = null; }
+    if (el) { el.style.display = "none"; el.innerHTML = ""; }
+  }
+
+  function choose(labels) {
+    teardown(); // a stray earlier picker (soft-locked script, hot reload) never stacks
     return new Promise(resolve => {
-      if (!options.length) { resolve(1); return; }
-      const done = idx => { cleanup(); resolve(idx); };
-      const overlay = document.createElement("div");
-      overlay.id = "luachoice";
-      Object.assign(overlay.style, {
-        position: "fixed", inset: "0", zIndex: "9000", display: "flex",
-        alignItems: opts.title || opts.body ? "center" : "flex-end", justifyContent: "center",
-        background: "rgba(0,0,0,0.3)", pointerEvents: "auto",
+      const bar = ensureDom();
+      if (!labels.length) { resolve(1); return; }
+      const done = idx => { teardown(); resolve(idx); };
+      bar.innerHTML = "";
+      labels.forEach((label, i) => {
+        const btn = document.createElement("button");
+        btn.textContent = `${i + 1}. ${label}`;
+        // matches css/style.css's #log .msg (borderless, left-aligned, the same
+        // dark 4-direction text-shadow outline so it reads over any terrain)
+        btn.style.cssText = "display:block;width:100%;text-align:left;background:none;border:none;" +
+          "padding:1px 0;cursor:pointer;font:inherit;color:#a8ffc9;" +
+          "text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 3px #000;";
+        btn.onmouseenter = () => (btn.style.color = "#ffe9a8");
+        btn.onmouseleave = () => (btn.style.color = "#a8ffc9");
+        btn.onclick = e => { e.stopPropagation(); done(i + 1); };
+        bar.appendChild(btn);
       });
-      const panel = document.createElement("div");
-      Object.assign(panel.style, {
-        margin: opts.title || opts.body ? "0" : "0 0 14vh", minWidth: "280px", maxWidth: "min(540px,92vw)",
-        display: "flex", flexDirection: "column", gap: "8px", padding: "18px 20px",
-        background: "rgba(20,24,32,0.96)", border: "1px solid rgba(90,120,180,0.5)",
-        borderRadius: "12px", boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
-        font: "16px OpenDyslexic, Verdana, sans-serif", color: "#dfe6f2", lineHeight: "1.5",
-      });
-      if (opts.title) {
-        const h = document.createElement("div");
-        Object.assign(h.style, { color: "#ffd75e", fontWeight: "bold", fontSize: "17px", marginBottom: "4px" });
-        h.textContent = opts.title;
-        panel.appendChild(h);
-      }
-      if (opts.body) for (const para of String(opts.body).split("\n")) {
-        if (!para.trim()) continue;
-        const d = document.createElement("div");
-        Object.assign(d.style, { margin: "5px 0", color: "#c7d2e8" });
-        d.textContent = para;
-        panel.appendChild(d);
-      }
-      const row = document.createElement("div");
-      Object.assign(row.style, { display: "flex", flexDirection: "column", gap: "8px", marginTop: "10px" });
-      options.forEach((label, idx) => {
-        const b = document.createElement("button");
-        b.textContent = `${idx + 1}. ${label}`;
-        Object.assign(b.style, {
-          textAlign: "left", padding: "10px 14px", cursor: "pointer",
-          background: "rgba(255,255,255,0.06)", color: "#fff",
-          border: "1px solid rgba(255,255,255,0.18)", borderRadius: "8px", font: "inherit",
-        });
-        b.onmouseenter = () => (b.style.background = "rgba(127,208,255,0.22)");
-        b.onmouseleave = () => (b.style.background = "rgba(255,255,255,0.06)");
-        b.onclick = e => { e.stopPropagation(); done(idx + 1); };
-        row.appendChild(b);
-      });
-      panel.appendChild(row);
-      overlay.appendChild(panel);
-      overlay.onclick = () => done(options.length);
-      const onKey = e => {
-        if (e.key === "Escape") { e.preventDefault(); done(options.length); return; }
+      bar.style.display = "flex";
+      liveKey = e => {
+        // never steal keystrokes while the player is typing (chat bar, notes)
+        const ae = document.activeElement;
+        if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) return;
+        if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); done(labels.length); return; }
+        if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); e.preventDefault(); done(1); return; }
         const n = parseInt(e.key, 10);
-        if (n >= 1 && n <= options.length) { e.preventDefault(); done(n); }
+        if (n >= 1 && n <= labels.length) { e.stopPropagation(); e.preventDefault(); done(n); }
       };
-      function cleanup() { document.removeEventListener("keydown", onKey, true); overlay.remove(); }
-      document.addEventListener("keydown", onKey, true);
-      document.body.appendChild(overlay);
+      document.addEventListener("keydown", liveKey, true);
     });
   }
 
-  L.modal = {
-    choose: labels => showModal({ options: labels }),
-    dialog: (title, body, labels) => showModal({ title, body, options: labels }),
-  };
+  L.dlgbar = { choose, isOpen: () => !!liveKey };
 
   // ---- cutscene primitives -------------------------------------------------
   // Each returns a Promise; wasmoon yields the running Lua coroutine until it

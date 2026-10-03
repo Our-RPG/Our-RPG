@@ -473,6 +473,13 @@ function createWorldChunks(ctx) {
           _wanderAt: (typeof performance !== "undefined" ? performance.now() : 0) + (vh ? 800 + Math.random() * 3000 : 9e9),
           _mt: 0, level: 0,
           tutor: tu.id,
+          // explicit on_npc() dispatch key (js/lua/lua-engine.js npcSubject
+          // checks this BEFORE npc.name) — the live name is "<name> the
+          // <role>" (mix-roster or Māori fallback, see below), which never
+          // matches a plain on_npc(id, ...) registration, so a stable key
+          // independent of the roster/name is required. scripts/npc/tutors/
+          // *.lua all register on this exact "tut_<id>" string.
+          _script: "tut_" + tu.id,
           line: vh && typeof Tutorial !== "undefined" && Tutorial.offDutyLine
             ? Tutorial.offDutyLine(tu.id)
             : `"Haere mai! Come, let me show you something."`,
