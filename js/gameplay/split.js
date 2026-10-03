@@ -150,9 +150,55 @@ var Split = (() => {
     }
     return added;
   }
-  // strip a body's WORN gear into a pack (merge/death): every distinct item
-  // comes off — multi-slot pieces clear all their slots, the quiver keeps its
-  // count — and whatever doesn't fit spills at (dropX, dropY).
+  // shop value is the codebase's established generic tier proxy (geartiers.js
+  // scales it with every gear family's power level; market.js sorts by it
+  // too) — good enough to rank two items competing for the same slot.
+  const gearRank = id => { const def = id && ITEMS[id]; return def ? (def.value | 0) : -1; };
+  // on rejoin, a worn item from the body being absorbed only stays worn if it
+  // out-tiers what the survivor already has on; otherwise (or if nothing of
+  // this item's kind is on the survivor) it's adopted outright. Returns false
+  // if the item isn't eligible (no gear slot, or a stack) so the caller falls
+  // back to plain pouring; otherwise returns how many displaced items spilled
+  // to the ground for not fitting in `toInv`.
+  function mergeOneItem(id, toInv, dropX, dropY) {
+    const def = id && ITEMS[id];
+    if (!def || !def.equip || def.equip === "rune" || def.equip === "quiver") return false;
+    const tag = EQUIP_CHOICES[def.equip];
+    const slots = tag || (Array.isArray(def.equip) ? def.equip : [def.equip]);
+    let target, evictIds;
+    if (tag) {                         // ring/bracelet/anklet: 2 independent slots
+      target = slots.find(sl => !player.equip[sl]);
+      if (target == null) {
+        target = slots[0];
+        let worst = gearRank(player.equip[target]);
+        for (const sl of slots) { const r = gearRank(player.equip[sl]); if (r < worst) { worst = r; target = sl; } }
+        if (gearRank(id) <= worst) return false;
+      }
+      evictIds = player.equip[target] ? [player.equip[target]] : [];
+    } else {                           // fixed single- or multi-slot span
+      const old = player.equip[slots[0]];
+      if (old != null && gearRank(id) <= gearRank(old)) return false;
+      evictIds = [...new Set(slots.map(sl => player.equip[sl]).filter(Boolean))];
+    }
+    let dropped = 0;
+    for (const oldId of evictIds) {
+      const oldDef = ITEMS[oldId];
+      const oldSlots = (oldDef && Array.isArray(oldDef.equip)) ? oldDef.equip : (tag ? [target] : slots);
+      for (const sl of oldSlots) if (player.equip[sl] === oldId) player.equip[sl] = null;
+      if (!invAdd(toInv, oldId, 1, null) && dropX != null && typeof dropOnGround === "function") {
+        dropOnGround(oldId, 1, dropX, dropY); dropped += 1;
+      }
+    }
+    if (tag) player.equip[target] = id;
+    else for (const sl of slots) player.equip[sl] = id;
+    if (typeof equipOrderTouch === "function") equipOrderTouch(tag ? target : slots[0]);
+    return dropped;
+  }
+  // strip a body's WORN gear into the survivor (merge/death): the better of
+  // the two selves' items for each slot STAYS EQUIPPED on the survivor (user
+  // req) — the loser (bumped old gear, or the absorbed item if it wasn't an
+  // upgrade) falls into the pack, or spills at (dropX, dropY) if it won't fit.
+  // Quiver/rune stacks keep their old behaviour: no tier to compare, just pour.
   function pourEquip(eq, toInv, dropX, dropY) {
     let dropped = 0;
     if (!eq) return 0;
@@ -167,9 +213,11 @@ var Split = (() => {
         continue;
       }
       const def = ITEMS[val];
+      const merged = mergeOneItem(val, toInv, dropX, dropY);
       if (def && Array.isArray(def.equip)) {   // one item spanning several slots
         for (const sl of def.equip) if (eq[sl] === val) eq[sl] = null;
       } else eq[slot] = null;
+      if (merged !== false) { dropped += merged; continue; }
       if (!invAdd(toInv, val, 1, null) && dropX != null && typeof dropOnGround === "function") {
         dropOnGround(val, 1, dropX, dropY); dropped += 1;
       }
@@ -243,8 +291,8 @@ var Split = (() => {
     uiDirty = true;
     syncHud(true);
   }
-  // Collapse every echo back into ONE self, xp conserved — used by doReset and
-  // any "start over" path so a split player never reloads as several bodies (or
+  // Collapse every echo back into ONE self, xp conserved — for any "start
+  // over" path so a split player never reloads as several bodies (or
   // several sparks of light, back on Tūhura). Silent: the caller owns messaging.
   function mergeAll() {
     if (ghost) return;                 // never run mid ghost-tick

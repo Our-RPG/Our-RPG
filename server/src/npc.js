@@ -7,9 +7,32 @@
  * exactly as it does offline — a null reply here is a soft miss, never an
  * error the player sees.
  */
-import { json, err, readJson, authUser, rateLimit } from "./util.js";
+import { json, err, readJson, authUser, rateLimit, now } from "./util.js";
 
 const MAX_TEXT = 300;
+
+// ---------- engine reachability (the top-right status dot) ----------
+// Cached module-scope (a warm isolate keeps this between requests) so a
+// roomful of clients polling every ~20s doesn't turn into a roomful of
+// requests to the actual engine. No account/rate-limit needed — same
+// treatment as /api/health, just a cheap "is it up" probe.
+const STATUS_TTL = 10000;
+let _statusCache = { at: 0, ok: false };
+export async function status(req, env) {
+  if (!env.NPC_ENGINE_URL || !env.NPC_ENGINE_KEY) return json({ ok: false });
+  const t = now();
+  if (t - _statusCache.at < STATUS_TTL) return json({ ok: _statusCache.ok });
+  let ok = false;
+  try {
+    const res = await fetch(env.NPC_ENGINE_URL + "/health", {
+      headers: { "x-engine-key": env.NPC_ENGINE_KEY },
+      signal: AbortSignal.timeout(3000),
+    });
+    ok = res.ok;
+  } catch (e) { ok = false; }
+  _statusCache = { at: t, ok };
+  return json({ ok });
+}
 
 export async function chat(req, env) {
   if (!env.NPC_ENGINE_URL || !env.NPC_ENGINE_KEY)

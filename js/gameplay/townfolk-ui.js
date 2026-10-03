@@ -3,8 +3,9 @@
 // city/village you're standing in.
 //
 // When the player is inside a settlement (daynight.js currentSettlement), a
-// button appears top-right just UNDER the multiplayer "Online" pill, labelled
-// with the settlement's name. Clicking it opens an overlay listing every NPC in
+// button appears top-right just UNDER the multiplayer "Online" pill and the
+// NPC-engine status pill (js/net/npc-engine-ui.js), labelled with the
+// settlement's name. Clicking it opens an overlay listing every NPC in
 // the settlement footprint that the player currently has a walkable path to
 // (gameplay/pathing.js findPath). Each NPC shows its FULL right-click menu —
 // the very same {label, fn} entries buildTileMenu produces (gameplay/input.js:
@@ -95,7 +96,7 @@
   // --- styling (mirrors #online-top / #online-dialog in js/net/social-ui.js) --
   const css = document.createElement("style");
   css.textContent = `
-#townfolk-top { position:fixed; top:40px; right:340px; z-index:50; display:none;
+#townfolk-top { position:fixed; top:72px; right:340px; z-index:50; display:none;
   align-items:center; gap:6px; max-width:240px; background:rgba(20,26,34,0.92);
   color:#cfe4ff; border:1px solid #3a4a5a; border-radius:8px; padding:5px 11px;
   cursor:pointer; font:12px OpenDyslexic, Verdana, sans-serif; }

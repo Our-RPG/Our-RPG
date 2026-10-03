@@ -7547,26 +7547,55 @@ void main() {
   }
 
   // ---------- river current: drifting foam streaks ----------
-  // A small pool of flat pale streaks rides the rivers, each following the
-  // local downstream direction from world.riverFlowAt — the water visibly
+  // A small pool of soft foam-glint streaks rides the rivers, each following
+  // the local downstream direction from world.riverFlowAt — the water visibly
   // "flows". Streaks spawn on carved-water tiles near the player and die when
   // they run aground or time out.
-  // sized/opaque enough to read at the default zoom — the original
-  // 0.55x0.09 streaks at 0.38 alpha were invisible among the water tile art
-  // ("rivers lack current animations")
+  // 2026-10 redraw: the original streak was a flat opaque colour rectangle —
+  // read as a frosted slab stuck to the water rather than current, so the
+  // effect was retired. This version textures the streak with a soft
+  // feathered gradient (faded at every edge, no hard rectangle silhouette) so
+  // it reads as foam riding the surface rather than a decal, tints it with
+  // the world's day/night colour grading (tintPatch) so it doesn't sit
+  // outside the lighting, and scales each streak in/out over its lifetime
+  // instead of popping visible.
   const FLOW_N = 48;
-  const FLOW_STREAKS_OFF = true;   // pale current streaks retired (read as frosted slabs on the water)
   const flowPool = [];
   let flowMat = null, flowGeom = null, flowLastT = 0;
+  function flowTexture() {
+    const cv = document.createElement("canvas");
+    cv.width = 64; cv.height = 16;
+    const cc = cv.getContext("2d");
+    const hg = cc.createLinearGradient(0, 0, 64, 0);
+    hg.addColorStop(0, "rgba(255,255,255,0)");
+    hg.addColorStop(0.5, "rgba(255,255,255,1)");
+    hg.addColorStop(1, "rgba(255,255,255,0)");
+    cc.fillStyle = hg;
+    cc.fillRect(0, 0, 64, 16);
+    // feather the long edges too (destination-in a vertical falloff) so the
+    // streak reads as an oval glint, not a rectangle with soft left/right caps
+    cc.globalCompositeOperation = "destination-in";
+    const vg = cc.createLinearGradient(0, 0, 0, 16);
+    vg.addColorStop(0, "rgba(255,255,255,0)");
+    vg.addColorStop(0.5, "rgba(255,255,255,1)");
+    vg.addColorStop(1, "rgba(255,255,255,0)");
+    cc.fillStyle = vg;
+    cc.fillRect(0, 0, 64, 16);
+    const tex = new THREE.CanvasTexture(cv);
+    return tex;
+  }
   function syncFlow() {
-    // Retired: the pale drifting foam streaks read on the water as flat frosted
-    // slabs rather than current, so the rivers now flow through their tile art
-    // alone. Hide any live streaks and skip the spawn/drift work. (Pool + math
-    // kept intact for the day the effect earns a subtler redraw.)
-    if (FLOW_STREAKS_OFF) { for (const p of flowPool) { p.die = 0; if (p.m) p.m.visible = false; } return; }
     if (!flowMat) {
-      flowMat = new THREE.MeshBasicMaterial({ color: 0xe8f6ff, transparent: true, opacity: 0.6, depthWrite: false });
-      flowGeom = new THREE.PlaneGeometry(0.9, 0.16);
+      // normal alpha blend, not additive: additive barely brightens an
+      // already-bright water tile (invisible in practice); plain alpha reads
+      // as foam actually sitting on the surface. The soft feathered texture
+      // (not opacity) is what keeps this from reading as a hard slab.
+      flowMat = new THREE.MeshBasicMaterial({
+        map: flowTexture(), color: 0xf4fbff, transparent: true, opacity: 0.85,
+        depthWrite: false, side: THREE.DoubleSide,
+      });
+      tintPatch(flowMat);
+      flowGeom = new THREE.PlaneGeometry(1.05, 0.22);
     }
     // flow at (wx,wy): the tutorial isle's RIVER animates via the Tutorial
     // hook (it isn't in world.riverFlowAt's registry). The SEA is still —
@@ -7588,7 +7617,7 @@ void main() {
         m.rotation.x = -Math.PI / 2;
         m.visible = false;
         scene.add(m);
-        slot = { m, die: 0, x: 0, y: 0, fx: 1, fy: 0 };
+        slot = { m, die: 0, born: 0, x: 0, y: 0, fx: 1, fy: 0 };
         flowPool.push(slot);
       }
       if (!slot) break;
@@ -7601,11 +7630,13 @@ void main() {
       slot.x = wx + 0.15 + Math.random() * 0.7;
       slot.y = wy + 0.15 + Math.random() * 0.7;
       slot.fx = f[0]; slot.fy = f[1];
+      slot.born = now;
       slot.die = now + 1600 + Math.random() * 1800;
       slot.m.visible = true;
     }
     // tiles per second of drift — a river in flood visibly races
     const sp = 1.35 * (1 + floodLvl * 1.6) * dt / 1000;
+    const FADE = 260; // ms — streaks scale in/out instead of popping visible
     for (const p of flowPool) {
       if (p.die <= now) { p.m.visible = false; continue; }
       p.x += p.fx * sp; p.y += p.fy * sp;
@@ -7616,6 +7647,9 @@ void main() {
       if (f) { p.fx = f[0]; p.fy = f[1]; } // bend with the river / rip
       p.m.position.set(p.x, waterLevelAt(tx, ty) + 0.05, p.y);
       p.m.rotation.y = -Math.atan2(p.fy, p.fx);
+      const age = now - p.born, remain = p.die - now;
+      const s = Math.max(0, Math.min(1, age / FADE, remain / FADE));
+      p.m.scale.setScalar(0.4 + s * 0.6);
     }
   }
 

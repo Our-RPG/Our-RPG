@@ -246,6 +246,10 @@ js/net/player-actions.js
 # its UI. hubsync must precede social-ui (which guards on `typeof Hub`).
 js/net/hubsync.js
 js/net/social-ui.js
+# NPC-engine connectivity pill: between online-top (8px) and townfolk-top
+# (now 72px). After social-ui (shares its styling convention) and
+# npc-engine-client.js (gameplay/, loaded earlier) for npcEngineAvailable().
+js/net/npc-engine-ui.js
 js/net/account-ui.js
 js/gameplay/koha.js
 js/gameplay/goals-arc.js

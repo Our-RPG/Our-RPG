@@ -90,6 +90,7 @@ const ROUTES = {
   "POST /api/gen/delete":               gen.remove,
 
   "POST /api/npc/chat":                 npc.chat,
+  "GET /api/npc/status":                npc.status,
 
   "POST /api/profile/gallery/add":      profile.add,
   "GET /api/profile/gallery":           profile.mine,
