@@ -2,11 +2,12 @@
 // The instant-ship lane, front and centre. studio/tools/gen_gaps.mjs audits
 // the live game data for items with no icon and monsters stuck on one
 // billboard sprite, and writes the result to WORKSHOP_GAPS (gaps-data.js,
-// regenerated alongside every page rebuild). Filling one of these subjects
-// with a PixelLab generation SKIPS voting entirely — server/src/workshop.js
-// submitProposal's auto-accept lane reasons a gap nobody had art for yet
-// doesn't need a vote, just a maker. Everything else in the workshop still
-// goes through the ballot box as normal.
+// regenerated alongside every page rebuild). Any PixelLab-generated art ships
+// straight into the game with NO vote and NO curator queue — server/src/
+// workshop.js submitProposal routes an asset the client marks source:"pixellab"
+// to 'accepted' at once (the maintainer trusts PixelLab's pre-filtered output).
+// Hand-UPLOADED art still goes through the curator queue; pure data proposals
+// still go through the ballot box.
 //
 // Two sections:
 //   1. the flat WORKSHOP_GAPS manifest — gen_gaps.mjs, deliberately CURATED

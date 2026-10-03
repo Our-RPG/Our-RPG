@@ -459,23 +459,24 @@ function pixellabLibraryCard(galleryCard) {
     const picks = [...selected.values()];
     if (!picks.length) return;
     addBtn.disabled = true; loadBtn.disabled = true;
-    let ok = 0, fail = 0;
+    let ok = 0, fail = 0, lastErr = "";
     for (let i = 0; i < picks.length; i++) {
       const e = picks[i];
       note.textContent = "Fetching art " + (i + 1) + "/" + picks.length + " — " + (e.name || e.id) + "…";
       try {
         const dirs = e.kind === "character" ? await PixelLab.characterArt(e.id) : await PixelLab.objectArt(e.id);
         if (!dirs || !Object.keys(dirs).length) throw new Error("no art returned");
-        const thumb = dirs.south || Object.values(dirs)[0] || "";
+        const thumb = await thumbnailDataUrl(dirs.south || Object.values(dirs)[0] || "", 96);
         const r = await Taiao.galleryAdd({
           category: e.category, pixellabKind: e.kind, pixellabId: e.id,
           name: e.name || (e.prompt || "").slice(0, 80), prompt: e.prompt,
           createdAt: e.createdAt, thumb, result: { dirs },
         });
-        if (r && r.ok) { ok++; savedIds.add(e.id); } else { fail++; }
-      } catch (_) { fail++; }
+        if (r && r.ok) { ok++; savedIds.add(e.id); }
+        else { fail++; lastErr = (r && r.error) || "the server rejected it"; }
+      } catch (err) { fail++; lastErr = (err && err.message) || "couldn't fetch its art"; }
     }
-    note.textContent = "Added " + ok + " to your profile" + (fail ? " · " + fail + " failed" : "") + ".";
+    note.textContent = "Added " + ok + " to your profile" + (fail ? " · " + fail + " failed (" + lastErr + ")" : "") + ".";
     toast(ok ? "Saved " + ok + " to your profile." : "Nothing saved.", ok ? "ok" : "err", 5000);
     selected.clear(); refreshAddBtn();
     addBtn.disabled = false; loadBtn.disabled = false;

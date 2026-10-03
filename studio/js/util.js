@@ -131,6 +131,32 @@ function drawSprite(canvas, src, size) {
   return canvas;
 }
 
+// Downscale a sprite dataURL to a small square PNG for use as a gallery/catalog
+// thumbnail. Keeps the stored thumb well under the server's 64KB cap (a raw
+// 128px south frame can blow past it, which the server then drops). Resolves to
+// the original src if anything goes wrong, so a thumb is never lost to an error.
+function thumbnailDataUrl(src, size) {
+  const px = size || 96;
+  return new Promise(res => {
+    if (!src || typeof src !== "string") return res(src || "");
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const cv = document.createElement("canvas");
+        cv.width = px; cv.height = px;
+        const ctx = cv.getContext("2d");
+        ctx.imageSmoothingEnabled = false;
+        const s = Math.min(px / img.width, px / img.height);
+        const w = img.width * s, h = img.height * s;
+        ctx.drawImage(img, (px - w) / 2, (px - h) / 2, w, h);
+        res(cv.toDataURL("image/png"));
+      } catch (_) { res(src); }
+    };
+    img.onerror = () => res(src);
+    img.src = src;
+  });
+}
+
 // Lazily fill a thumb host with a shared proposal's south sprite once it
 // scrolls into view — keeps communal grids of many generations light.
 let _lazyObs = null;

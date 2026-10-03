@@ -380,6 +380,48 @@ const Taiao = (function () {
     return call("/api/code/review", { body: { id: Number(id), status, note: note || null } });
   }
 
+  // ---- bug reports (server/src/bugs.js — see js/pages/bugs.js) ----
+  // A player files a bug; others confirm "me too" (switchable vote) and add
+  // context (comments). Small text, no R2 payload.
+  async function reportBug(bug) {
+    if (!logged()) return { error: "Sign in to report a bug." };
+    return call("/api/bugs/report", { body: { title: bug.title, area: bug.area, body: bug.body } });
+  }
+  async function listBugs(opts = {}) {
+    const q = new URLSearchParams();
+    if (opts.area) q.set("area", opts.area);
+    if (opts.status) q.set("status", opts.status);
+    if (opts.sort) q.set("sort", opts.sort);
+    q.set("_", Date.now());
+    const r = await call("/api/bugs/list?" + q.toString());
+    // null (not []) on failure so the board can tell an outage from empty.
+    return r && r.ok && Array.isArray(r.bugs) ? r.bugs : null;
+  }
+  async function bugItem(id) {
+    const r = await call("/api/bugs/item?id=" + Number(id) + "&_=" + Date.now());
+    return r && r.ok ? r.bug : (r || null);
+  }
+  async function myBugs() {
+    if (!logged()) return { error: "Sign in first." };
+    return call("/api/bugs/mine");
+  }
+  async function voteBug(id) {
+    if (!logged()) return { error: "Sign in to confirm a bug." };
+    return call("/api/bugs/vote", { body: { id: Number(id) } });
+  }
+  async function commentBug(id, body) {
+    if (!logged()) return { error: "Sign in to comment." };
+    return call("/api/bugs/comment", { body: { id: Number(id), body } });
+  }
+  async function flagBug(id) {
+    if (!logged()) return { error: "Sign in to flag." };
+    return call("/api/bugs/flag", { body: { id: Number(id) } });
+  }
+  async function reviewBug(id, status, note) {
+    if (!curator()) return { error: "Curators only." };
+    return call("/api/bugs/review", { body: { id: Number(id), status, note: note || null } });
+  }
+
   // ---- generation jobs: a durable status board for PixelLab generations ---
   // (server/src/gen.js — see js/genjobs.js). The server never talks to PixelLab
   // and never sees the key: the browser runs the generation with the player's
@@ -476,6 +518,7 @@ const Taiao = (function () {
     curator, listMine, pendingQueue, review,
     submitCode, uploadCodeShot, codeShotUrl, listCode, codeItem, myCode,
     voteCode, myCodeVoted, flagCode, deleteCode, codePending, reviewCode,
+    reportBug, listBugs, bugItem, myBugs, voteBug, commentBug, flagBug, reviewBug,
     genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
     galleryAdd, galleryMine, galleryItem, galleryDelete,
     publishSprite, listPublishedSprites, publishedSpriteItem,

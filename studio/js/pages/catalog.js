@@ -95,63 +95,73 @@ function spriteRowDirs(r) {
   return 1;
 }
 
-// The public community catalogue on the Sprites hub — sprites players have
-// published from their profile gallery (server/src/profile.js published_sprites).
-// Direct-published, live under each maker's chosen sprite_id + tag. Distinct from
-// the game's built-in sprites listed below and from the proposals ballot box.
-function publishedSpritesCard() {
-  const c = el("div.card");
-  c.appendChild(el("div.sectitle", null, [el("h3", null, ["Community sprites ", el("span.hint", { text: "published by players" })])]));
-  const body = el("div");
-  c.appendChild(body);
-  (async () => {
-    body.appendChild(el("p.tagline", { text: "Loading…" }));
-    let items = [];
-    try { items = await Taiao.listPublishedSprites(); } catch (_) {}
-    clear(body);
-    if (!items.length) { body.appendChild(el("p.tagline", { text: "No community sprites published yet — generate one in the Workshop, then publish it from your profile gallery." })); return; }
-    const grid = el("div.grid-cards");
-    for (const it of items) grid.appendChild(publishedTile(it));
-    body.appendChild(grid);
+// Player-published community sprites (server/src/profile.js published_sprites):
+// direct-published from a profile gallery, live under each maker's chosen
+// sprite_id + tag. They are folded straight into the "All sprites" table below
+// (tagged "community" + @author) rather than a separate card, and the sprite_id
+// is offered as a default sprite when creating a new character / monster / object.
+
+// Cached once per page session — the published catalogue changes rarely and is
+// read by the sprites table, the creators' id datalists and their id previews.
+let _pubSpritesPromise = null;
+function publishedSpritesCached(force) {
+  if (force) _pubSpritesPromise = null;
+  if (!_pubSpritesPromise) _pubSpritesPromise = (async () => {
+    try { return (await Taiao.listPublishedSprites()) || []; } catch (_) { return []; }
   })();
-  return c;
+  return _pubSpritesPromise;
+}
 
-  function publishedTile(it) {
-    const t = el("div.tile", { style: "cursor:pointer", title: "View all directions" });
-    const thumb = el("div.thumb");
-    if (it.thumb) thumb.appendChild(el("img", { src: it.thumb, alt: it.name || it.sprite_id, loading: "lazy" }));
-    else thumb.appendChild(el("div.empty", { style: "font-size:1.6rem", text: (typeof _catIcon === "function" ? _catIcon(it.category) : "✨") }));
-    t.appendChild(thumb);
-    t.appendChild(el("div.meta", null, [
-      el("div.name", { style: "font-family:monospace;font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap", text: it.sprite_id }),
-      el("div.sub", null, [el("span.badge", { text: it.category }), document.createTextNode(" @" + (it.username || "someone"))]),
-    ]));
-    t.addEventListener("click", () => openPublishedView(it));
-    return t;
-  }
+// Published category → the "All sprites" table's type key (so a published sprite
+// shares a row shape with the built-in catalogue). Items are single icons (ui).
+function publishedRowType(category) {
+  return category === "item" ? "ui" : (category === "monster" ? "monster" : (category === "character" ? "character" : "object"));
+}
+function publishedRowDirs(category) { return (category === "item") ? 1 : 8; }
 
-  function openPublishedView(it) {
-    const bg = el("div.modal-bg", { onclick: e => { if (e.target === bg) bg.remove(); } });
-    const box = el("div.modal", { style: "width:min(560px,94vw)" });
-    box.appendChild(el("h3", { text: it.name || it.sprite_id }));
-    box.appendChild(el("p.tagline", null, [el("span.mono", { text: it.sprite_id }), document.createTextNode(" · " + it.category + " · @" + (it.username || "someone"))]));
-    const grid = el("div.dirgrid"); box.appendChild(grid);
-    grid.appendChild(el("div", { text: "Loading…" }));
-    box.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [el("button.btn.ghost", { text: "Close", onclick: () => bg.remove() })]));
-    bg.appendChild(box); document.body.appendChild(bg);
-    (async () => {
-      const full = await Taiao.publishedSpriteItem(it.id);
-      clear(grid);
-      const res = full && full.result;
-      const dirs = res && (res.dirs || (res.image ? { image: res.image } : null));
-      if (!dirs) { grid.appendChild(el("div.empty", { text: "Art unavailable." })); return; }
-      for (const [dir, url] of Object.entries(dirs)) {
-        const cv = el("canvas.spr", { width: 96, height: 96 });
-        drawSprite(cv, url, 96);
-        grid.appendChild(el("div.dircell", null, [cv, el("div.lbl", { text: dir })]));
-      }
-    })();
-  }
+// If `spriteId` names a published community sprite, fetch its full art so a new
+// entity that points at it actually carries that sprite's art. Returns a base-
+// art object ({south,…} or {image}) or null.
+async function publishedBaseArtFor(spriteId) {
+  if (!spriteId) return null;
+  const want = String(spriteId).toLowerCase();
+  try {
+    const hit = (await publishedSpritesCached()).find(it => String(it.sprite_id).toLowerCase() === want);
+    if (!hit) return null;
+    const full = await Taiao.publishedSpriteItem(hit.id);
+    const res = full && full.result;
+    if (!res) return null;
+    return res.dirs || (res.image ? { image: res.image } : null);
+  } catch (_) { return null; }
+}
+
+// View a published sprite's every direction, with a one-click "copy id" so it
+// can be pasted into a creator's Default sprite_id field.
+function openPublishedView(it) {
+  const bg = el("div.modal-bg", { onclick: e => { if (e.target === bg) bg.remove(); } });
+  const box = el("div.modal", { style: "width:min(560px,94vw)" });
+  box.appendChild(el("h3", { text: it.name || it.sprite_id }));
+  box.appendChild(el("p.tagline", null, [el("span.mono", { text: it.sprite_id }), document.createTextNode(" · " + it.category + " · @" + (it.username || "someone"))]));
+  const grid = el("div.dirgrid"); box.appendChild(grid);
+  grid.appendChild(el("div", { text: "Loading…" }));
+  const copyBtn = el("button.btn.sm.primary", { text: "⧉ Copy sprite_id", onclick: () => {
+    try { navigator.clipboard.writeText(it.sprite_id); } catch (_) {}
+    toast("Copied “" + it.sprite_id + "” — paste it into the Default sprite_id field when you create a character, monster or object.", "ok", 6000);
+  } });
+  box.appendChild(el("div.btn-row", { style: "margin-top:.6rem" }, [copyBtn, el("button.btn.ghost", { text: "Close", onclick: () => bg.remove() })]));
+  bg.appendChild(box); document.body.appendChild(bg);
+  (async () => {
+    const full = await Taiao.publishedSpriteItem(it.id);
+    clear(grid);
+    const res = full && full.result;
+    const dirs = res && (res.dirs || (res.image ? { image: res.image } : null));
+    if (!dirs) { grid.appendChild(el("div.empty", { text: "Art unavailable." })); return; }
+    for (const [dir, url] of Object.entries(dirs)) {
+      const cv = el("canvas.spr", { width: 96, height: 96 });
+      drawSprite(cv, url, 96);
+      grid.appendChild(el("div.dircell", null, [cv, el("div.lbl", { text: dir })]));
+    }
+  })();
 }
 
 function pageSprites(root) {
@@ -162,7 +172,6 @@ function pageSprites(root) {
   const genBoard = el("div");
   GenJobs.mountBoard(genBoard, {});
   page.appendChild(genBoard);
-  page.appendChild(publishedSpritesCard());
 
   const CATS = [["character", "Character"], ["object", "Object"], ["monster", "Monster"], ["ui", "Item"], ["tile", "Biome"], ["map", "Map icon"]];
   const rows = [];
@@ -226,16 +235,21 @@ function pageSprites(root) {
   // No top search bar — the per-column TableFilter controls replace it.
   const catCard = el("div.card");
   const countBadge = el("span.badge", { id: "spr-count", text: "…" });
-  catCard.appendChild(el("div.sectitle", null, [el("h3", null, ["All sprites ", el("span.hint", { text: "characters, objects, monsters & item icons" })]), countBadge]));
+  catCard.appendChild(el("div.sectitle", null, [el("h3", null, ["All sprites ", el("span.hint", { text: "characters, objects, monsters, item icons & community-published sprites" })]), countBadge]));
   const holder = el("div"); catCard.appendChild(holder);
   page.appendChild(catCard);
 
   const th = "border-bottom:1px solid var(--line,#333);padding:.4rem .55rem;text-align:left;font-size:.7rem;letter-spacing:.02em;color:var(--ink-dim);white-space:nowrap;position:sticky;top:0;background:var(--bg-1,#111)";
   const td = CAT_TD;
+  // Community-published sprites (loaded async below) are folded into this same
+  // table as extra rows, tagged "community" + @author and clickable to view all
+  // directions. Each carries a `community` flag so render() uses its thumbnail
+  // and published-view modal instead of a game provider's draw().
+  let pubRows = [];
   function render() {
     clear(holder);
-    const shown = rows;
-    countBadge.textContent = rows.length + " sprites";
+    const shown = rows.concat(pubRows);
+    countBadge.textContent = shown.length + " sprites" + (pubRows.length ? " · " + pubRows.length + " community" : "");
     if (!shown.length) { holder.appendChild(el("div.empty", { text: "No sprites in the game catalog." })); return; }
     const table = el("table", { style: "border-collapse:collapse;width:100%" });
     // TableFilter.enhance adds a filter field at the top of each column (incl.
@@ -243,6 +257,7 @@ function pageSprites(root) {
     table.appendChild(el("tr", null, ["Sprite id", "Category", "Sprite size", "Directions", "Human/AI", "Artist/Prompter"].map(h =>
       el("th", { style: th, text: h }))));
     for (const r of shown) {
+      if (r.community) { table.appendChild(communitySpriteRow(r, td)); continue; }
       const cv = el("canvas", { width: 64, height: 64, style: CAT_ICON });
       try { r.provider.draw(cv, r.e, 0); } catch (_) {}
       const idLink = el("a", { style: "color:inherit;text-decoration:none;font-family:monospace;font-size:.78rem;font-weight:600;cursor:pointer", text: String(r.id), href: "#/sprite?type=" + r.type + "&key=" + encodeURIComponent(r.e.key) });
@@ -267,7 +282,39 @@ function pageSprites(root) {
     holder.appendChild(el("div", { style: "overflow-x:auto" }, [TableFilter.enhance(table)]));
   }
   render();
+  // Fold in community-published sprites once they load, then repaint.
+  (async () => {
+    const items = await publishedSpritesCached();
+    pubRows = items.map(it => ({
+      community: true, pub: it, id: it.sprite_id, cat: "Community",
+      type: publishedRowType(it.category), categoryRaw: it.category,
+      name: it.name, thumb: it.thumb, username: it.username, dirs: publishedRowDirs(it.category),
+    }));
+    if (pubRows.length) render();
+  })();
   root.appendChild(page);
+}
+
+// One "All sprites" row for a community-published sprite: thumbnail, mono
+// sprite_id that opens the view-all-directions modal, a "community" origin tag
+// and the maker's @handle.
+function communitySpriteRow(r, td) {
+  const icon = r.thumb
+    ? el("img", { src: r.thumb, alt: r.id, style: CAT_ICON + ";object-fit:contain", loading: "lazy" })
+    : el("div", { style: CAT_ICON + ";display:flex;align-items:center;justify-content:center;font-size:1.3rem", text: (typeof _catIcon === "function" ? _catIcon(r.categoryRaw) : "✨") });
+  const idLink = el("a", { style: "color:inherit;text-decoration:none;font-family:monospace;font-size:.78rem;font-weight:600;cursor:pointer", text: String(r.id), href: "#", onclick: e => { e.preventDefault(); openPublishedView(r.pub); } });
+  const idBox = el("div", { style: "display:flex;flex-direction:column;gap:.1rem" }, [
+    el("div", { style: "display:flex;align-items:center;gap:.6rem" }, [icon, idLink]),
+    el("span.hint", { style: "font-size:.66rem;padding-left:calc(48px + .6rem)", text: r.categoryRaw }),
+  ]);
+  return el("tr", null, [
+    el("td", { style: td }, [idBox]),
+    el("td", { style: td }, [el("span.badge", { text: r.cat })]),
+    el("td", { style: td + ";font-family:monospace;color:var(--ink-dim)", text: "—" }),
+    el("td", { style: td + ";color:var(--ink-dim)", text: String(r.dirs) }),
+    el("td", { style: td }, [el("span.badge", { text: "community" })]),
+    el("td", { style: td }, ["@" + (r.username || "someone")]),
+  ]);
 }
 
 function pageCatalog(root, type, opts) {
@@ -1680,8 +1727,33 @@ function charSpriteDatalist() {
   const add = v => { if (v) dl.appendChild(el("option", { value: v })); };
   try { Roster.characters().forEach(e => add(e.snake || e.key)); } catch (_) {}
   try { Store.all("character").then(rows => rows.forEach(p => add(p.spriteId || p.folder))).catch(() => {}); } catch (_) {}
+  // community-published character sprites are selectable as a default sprite too
+  try { publishedSpritesCached().then(items => items.filter(it => it.category === "character").forEach(it => add(it.sprite_id))).catch(() => {}); } catch (_) {}
   document.body.appendChild(dl);
   return ID;
+}
+
+// Live preview under a Default sprite_id input: when the typed id names a
+// published community sprite, show its thumbnail + maker (so the player can see
+// the real art they're about to reuse). Debounced; art is bound on submit.
+function attachPublishedPreview(input, host) {
+  let t = null;
+  const update = () => {
+    const want = input.value.trim().toLowerCase();
+    clear(host);
+    if (!want) return;
+    publishedSpritesCached().then(items => {
+      if (input.value.trim().toLowerCase() !== want) return;   // input moved on
+      const hit = items.find(it => String(it.sprite_id).toLowerCase() === want);
+      if (!hit) return;
+      const cv = el("canvas", { width: 48, height: 48, style: "width:48px;height:48px;image-rendering:pixelated;flex:0 0 auto" });
+      if (hit.thumb) drawSprite(cv, hit.thumb, 48);
+      host.appendChild(el("div", { style: "display:flex;align-items:center;gap:.5rem;margin-top:.3rem" }, [
+        cv, el("small", { style: "color:#5bbd6b", text: "✓ community sprite by @" + (hit.username || "someone") + " — its art will be used" }),
+      ]));
+    }).catch(() => {});
+  };
+  input.addEventListener("input", () => { clearTimeout(t); t = setTimeout(update, 300); });
 }
 
 // ---------- create a character ENTITY (id + stats + a default sprite) ----------
@@ -1703,6 +1775,7 @@ function buildCharacterCreator(host, roster) {
   };
   sprIn.addEventListener("input", validateSpr);
   form.appendChild(el("label.field", null, [el("span", { text: "Default sprite_id" }), sprIn, sprNote]));
+  const sprPrev = el("div"); form.appendChild(sprPrev); attachPublishedPreview(sprIn, sprPrev);
   const stat = buildStatBlock({ aptitudes: roster !== "npc" });
   stat.nodes.forEach(n => form.appendChild(n));
   const btn = el("button.btn.primary", { text: "Create " + (roster === "npc" ? "NPC" : "player character") });
@@ -1715,7 +1788,13 @@ function buildCharacterCreator(host, roster) {
     const charId = cid.input.value.trim().toLowerCase();
     const p = Store.newProject("character", nameIn.value.trim() || charId);
     p.charId = charId; p.folder = charId; p.isEntity = true; p.roster = roster;
-    if (sprIn.value.trim()) p.spriteId = sprIn.value.trim().toLowerCase();
+    if (sprIn.value.trim()) {
+      p.spriteId = sprIn.value.trim().toLowerCase();
+      // If the sprite_id names a published community sprite, seed this draft's
+      // base art with it so the created character actually uses that sprite.
+      const art = await publishedBaseArtFor(p.spriteId);
+      if (art) { p.base = art; p.provenance = p.provenance || "pixellab"; }
+    }
     p.stats = stat.readStats();
     await Store.save(p); toast("Character created — saved to your drafts.", "ok"); App.go("#/edit/" + p.id);
   };
@@ -1746,6 +1825,8 @@ function entitySpriteDatalist(type) {
   const add = v => { if (v) dl.appendChild(el("option", { value: v })); };
   try { const p = Providers.get(type); if (p && p.list) p.list().forEach(e => add(e.snake || e.key)); } catch (_) {}
   try { Store.all(type).then(rows => rows.forEach(pr => add(pr.spriteId || pr.folder))).catch(() => {}); } catch (_) {}
+  // community-published sprites of this type are selectable as a default sprite too
+  try { publishedSpritesCached().then(items => items.filter(it => it.category === type).forEach(it => add(it.sprite_id))).catch(() => {}); } catch (_) {}
   document.body.appendChild(dl);
   return ID;
 }
@@ -1827,6 +1908,7 @@ function buildEntityCreator(host, type) {
   const validateSpr = () => { const raw = sprIn.value.trim(); if (raw && !/^[a-z0-9]+(_[a-z0-9]+)*$/.test(raw)) { sprNote.textContent = "Use lowercase snake_case."; sprNote.style.color = "#e06a6a"; return false; } sprNote.textContent = ""; return true; };
   sprIn.addEventListener("input", validateSpr);
   form.appendChild(el("label.field", null, [el("span", { text: "Default sprite_id" }), sprIn, sprNote]));
+  const sprPrev = el("div"); form.appendChild(sprPrev); attachPublishedPreview(sprIn, sprPrev);
 
   // Biome: monsters pick MANY (one monster is created per biome); objects pick one.
   let checkedBiomes = () => [], biomeSel = null;
@@ -1944,6 +2026,9 @@ function buildEntityCreator(host, type) {
     if (!validateSpr()) return toast("That sprite id isn't valid snake_case.", "warn");
     const baseName = nameIn.value.trim() || baseId;
     const sprId = sprIn.value.trim().toLowerCase();
+    // If the sprite_id names a published community sprite, its art seeds each
+    // created draft's base so the entity actually uses that sprite.
+    const sprArt = sprId ? await publishedBaseArtFor(sprId) : null;
 
     if (!isMon) {
       if (!cid.validate()) return toast("That id is invalid or already in use.", "warn");
@@ -1953,6 +2038,7 @@ function buildEntityCreator(host, type) {
       const p = Store.newProject("object", baseName);
       p.folder = baseId; p.objectId = baseId; p.isEntity = true;
       if (sprId) p.spriteId = sprId;
+      if (sprArt) { p.base = sprArt; p.provenance = p.provenance || "pixellab"; }
       if (biomeSel.value) p.biome = biomeSel.value;
       if (notes.value.trim()) p.notes = notes.value.trim();
       p.props = props; p.solid = props.solid;   // p.solid kept for back-compat
@@ -1985,6 +2071,7 @@ function buildEntityCreator(host, type) {
         const p = Store.newProject("monster", s.name);
         p.folder = s.id; p.monsterId = s.id; p.isEntity = true;
         if (sprId) p.spriteId = sprId;
+        if (sprArt) { p.base = sprArt; p.provenance = p.provenance || "pixellab"; }
         if (s.biome) p.biome = s.biome;
         if (notes.value.trim()) p.notes = notes.value.trim();
         p.aggro = aggro.checked;

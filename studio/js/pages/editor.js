@@ -828,9 +828,8 @@ async function publishProject(p) {
   const dirs = p.base || {};
   if (!Object.keys(dirs).length) return toast("Generate or upload the base art first.", "warn");
   if (!confirm(
-    "Publish \"" + p.name + "\" to the communal workshop for everyone to see and vote on?\n\n" +
-    "You licence the art under CC BY-SA 4.0. If the community votes it in it's credited to you, forever — " +
-    "a curator reviews every accepted generation before it reaches the game.")) return;
+    "Publish \"" + p.name + "\" to the communal workshop?\n\n" +
+    "You licence the art under CC BY-SA 4.0, credited to you forever. PixelLab-generated art goes live in the game right away; hand-uploaded art is checked by a curator first.")) return;
   const bundle = {
     schema: "taiao-costume/1",
     object: { type: p.kind, key: p.folder, name: p.name },
@@ -855,7 +854,7 @@ async function publishProject(p) {
   const r = await Taiao.submitProposal(p.kind, p.folder, p.name, bundle, source, provenance);
   if (r.ok) {
     toast(r.status === "accepted"
-      ? "⚡ Straight into the game — this filled a gap! It's now live for everyone, credited to you."
+      ? "⚡ Straight into the game — it's now live for everyone, credited to you."
       : r.status === "pending"
       ? "Submitted — a moderator will review your uploaded art before it appears for voting."
       : "Published! Everyone can see it now.", "ok", 6000);
@@ -877,8 +876,7 @@ async function shareCostume(p, st) {
   const noTrigger = st.part && !(st.items || []).filter(Boolean).length;
   if (!confirm(
     "Share \"" + st.name + "\" for " + p.name + " to the community workshop?\n\n" +
-    "By submitting you licence the art under CC BY-SA 4.0. If the community votes it in, it's credited to you, " +
-    "forever — a curator reviews every accepted costume before it reaches the game." +
+    "By submitting you licence the art under CC BY-SA 4.0, credited to you forever. PixelLab-generated art goes live in the game right away; hand-uploaded art is checked by a curator first." +
     (noTrigger ? "\n\nThis part has no trigger items set — it won't activate in-game until you add at least one." : "")
   )) return;
   const costume = { state: st.name, slot: st.slot || "", item: st.item || "", items: (st.items || []).filter(Boolean), note: st.note || "", dirs: st.dirs };
@@ -910,7 +908,7 @@ async function shareCostume(p, st) {
   const r = await Taiao.submitCostume(p.kind, p.folder, p.name + " — " + st.name, bundle, source, provenance);
   if (r.ok) {
     toast(r.status === "accepted"
-      ? "⚡ Straight into the game — this filled a gap! It's now live for everyone, credited to you."
+      ? "⚡ Straight into the game — it's now live for everyone, credited to you."
       : r.status === "pending"
       ? "Submitted — a moderator will review your uploaded art before it appears for voting."
       : "Shared! Find it in the character/asset page for voting.", "ok", 6000);

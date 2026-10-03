@@ -54,6 +54,10 @@ const GenJobs = (function () {
     const startRes = await Taiao.genStart(jobMeta);
     if (!startRes || !startRes.ok) throw new Error((startRes && startRes.error) || "Couldn't start the generation.");
     const jobId = startRes.id;
+    // Remember the style reference this job used, keyed by job id, so a later
+    // "Regenerate" from the board reruns it with the same reference instead of
+    // silently dropping it (jobMetaFromRow reads it back out).
+    if (jobMeta.reference) refCache.set(jobId, jobMeta.reference);
     inFlight.add(jobId); notifyBoards();
     try {
       const result = await runPixellab(jobMeta, ref => { Taiao.genProgress(jobId, ref); });
@@ -91,8 +95,9 @@ const GenJobs = (function () {
   // a re-run of the same job never duplicates.
   async function addToGallery(jobId, meta, result) {
     const dirs = result && result.dirs, image = result && result.image;
-    const thumb = image || (dirs && (dirs.south || Object.values(dirs)[0])) || "";
-    if (!thumb) return;
+    const raw = image || (dirs && (dirs.south || Object.values(dirs)[0])) || "";
+    if (!raw) return;
+    const thumb = await thumbnailDataUrl(raw, 96);
     return Taiao.galleryAdd({
       category: galleryCategoryFor(meta.spriteType),
       pixellabKind: meta.pixellabKind,
@@ -146,7 +151,7 @@ const GenJobs = (function () {
     };
   }
   function jobMetaFromRow(row) {
-    return { spriteType: row.sprite_type, spriteId: row.sprite_id, label: row.label, subject: row.subject || undefined, prompt: row.prompt, bodyType: row.body_type || undefined, seed: row.seed || undefined, pixellabKind: row.pixellab_kind };
+    return { spriteType: row.sprite_type, spriteId: row.sprite_id, label: row.label, subject: row.subject || undefined, prompt: row.prompt, bodyType: row.body_type || undefined, seed: row.seed || undefined, pixellabKind: row.pixellab_kind, reference: refCache.get(row.id) || undefined };
   }
   async function defaultRegenerate(row) {
     const reference = refCache.get(row.id);
@@ -180,7 +185,7 @@ const GenJobs = (function () {
       toast("Publishing…");
       const r = await Taiao.submitProposal("ui", id, itemName + " — icon", bundle, "pixellab", "pixellab");
       if (r && r.ok) {
-        toast(r.status === "accepted" ? "⚡ Straight into the game — this filled a gap!" : "Shared! The community can vote on it now.", "ok", 6000);
+        toast(r.status === "accepted" ? "⚡ Straight into the game — it's live now, credited to you." : "Shared! The community can vote on it now.", "ok", 6000);
         await Taiao.genDelete(job.id);
       } else toast((r && r.error) || "Couldn't publish.", "err", 6000);
       return;
