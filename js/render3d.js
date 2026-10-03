@@ -8189,7 +8189,6 @@ void main() {
 
   return {
     init, frame, resize, pickTile, buildAtlasAsync, preloadArt, snapshotTile, objArtFor, _diag, _structDetail, _meshLog: meshLog,
-    _atlasCells: () => atlas && atlas.cells, _atlasCanvas: () => atlas && atlas.canvas, // TEMP-VERIFY-REMOVE-ME
     _atmos: () => ({ biome: atmos.biome, dens: atmos.dens, parts: atParts.length, grOn: _grOn,
       fogW: +atmos.fogW.toFixed(3), r: +atmos.r.toFixed(3), sat: +atmos.sat.toFixed(3) }),
     _sunDebug: () => ({ ...sunState, bakeKey: sunBakeKey, mats: _shadowMats.size }),
