@@ -15,6 +15,7 @@ export async function recent(req, env) {
   const rows = await env.DB.prepare(
     `SELECT username, last_seen FROM users
      WHERE last_seen >= ? AND flags NOT LIKE '%banned%'
+       AND username NOT LIKE 'guest\\_%' ESCAPE '\\'
      ORDER BY last_seen DESC LIMIT 500`
   ).bind(cutoff).all();
   // send the server clock too, so the client shows "N ago" against our time,

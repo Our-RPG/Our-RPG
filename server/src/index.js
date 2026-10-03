@@ -13,6 +13,7 @@ import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
 import * as submissions from "./submissions.js";
 import * as bugs from "./bugs.js";
+import * as analytics from "./analytics.js";
 import * as gen from "./gen.js";
 import * as profile from "./profile.js";
 import * as npc from "./npc.js";
@@ -90,6 +91,12 @@ const ROUTES = {
   "POST /api/bugs/comment":             bugs.comment,
   "POST /api/bugs/flag":                bugs.flag,
   "POST /api/bugs/review":              bugs.review,
+
+  "POST /api/tutorial/summary":         analytics.tutorialSummary,
+  "GET /api/tutorial/stats":            analytics.tutorialStats,
+  "POST /api/pulse/report":             analytics.pulseReport,
+  "GET /api/pulse/stats":               analytics.pulseStats,
+  "GET /api/admin/tutorial":            analytics.adminTutorial,
 
   "POST /api/gen/start":                gen.start,
   "POST /api/gen/progress":             gen.progress,

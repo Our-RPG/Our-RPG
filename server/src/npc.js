@@ -86,8 +86,10 @@ export async function chat(req, env) {
     scene: bound(b.scene && typeof b.scene === "object" ? b.scene : {}),
     // Server-derived name goes AFTER the client spread so it always wins — a
     // client-supplied player.name must never override the authenticated user.
+    // Silent tutorial guests have a throwaway "guest_<rand>" username; NPCs
+    // should address them simply as "guest", never the random id.
     player: { ...bound(b.player && typeof b.player === "object" ? b.player : {}),
-              name: String(user.username || "friend").slice(0, 24) },
+              name: /^guest_/i.test(user.username || "") ? "guest" : String(user.username || "friend").slice(0, 24) },
     fills: bound(b.fills && typeof b.fills === "object" ? b.fills : {}),
   };
 

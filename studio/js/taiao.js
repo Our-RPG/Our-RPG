@@ -422,6 +422,18 @@ const Taiao = (function () {
     return call("/api/bugs/review", { body: { id: Number(id), status, note: note || null } });
   }
 
+  // ---- analytics (server/src/analytics.js — see js/pages/stats.js) ----
+  // Public aggregate statistics for the Statistics tab. Raw per-player data is
+  // ADMIN_TOKEN-only and never reachable here.
+  async function tutorialStats() {
+    const r = await call("/api/tutorial/stats?_=" + Date.now());
+    return r && r.ok ? r : null;
+  }
+  async function pulseStats() {
+    const r = await call("/api/pulse/stats?_=" + Date.now());
+    return r && r.ok ? r : null;
+  }
+
   // ---- generation jobs: a durable status board for PixelLab generations ---
   // (server/src/gen.js — see js/genjobs.js). The server never talks to PixelLab
   // and never sees the key: the browser runs the generation with the player's
@@ -519,6 +531,7 @@ const Taiao = (function () {
     submitCode, uploadCodeShot, codeShotUrl, listCode, codeItem, myCode,
     voteCode, myCodeVoted, flagCode, deleteCode, codePending, reviewCode,
     reportBug, listBugs, bugItem, myBugs, voteBug, commentBug, flagBug, reviewBug,
+    tutorialStats, pulseStats,
     genStart, genProgress, genComplete, genFail, genMine, genJob, genDelete,
     galleryAdd, galleryMine, galleryItem, galleryDelete,
     publishSprite, listPublishedSprites, publishedSpriteItem,
