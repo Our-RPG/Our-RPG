@@ -362,30 +362,70 @@ function animationsGridCard(type, key, stateRows, animMap, refresh) {
 }
 
 // mount the animations matrix for a set of state nodes (monster/object).
+// Community animations shared for this subject load into their cells — the same
+// path/id mapping the character page uses. The grid's refresh callback re-fetches,
+// so an animation just created here appears without a full reload.
 function animationsSection(page, type, key, nodes) {
   const rows = nodes.filter(n => !n.goTo).map(n => ({ id: n.id, path: n.path, node: n }));
   const host = el("div"); page.appendChild(host);
   let am = {};
-  const render = () => { clear(host); host.appendChild(animationsGridCard(type, key, rows, am, render)); };
-  render();
+  const paint = () => { clear(host); host.appendChild(animationsGridCard(type, key, rows, am, load)); };
+  async function load() {
+    paint();
+    let ex; try { ex = await fetchSubjectExtras(type, key); } catch (_) { return; }
+    const rootId = rows[0] && rows[0].id;
+    am = {};
+    for (const a of (ex.anims || [])) {
+      const match = rows.find(r => r.path === a.state || r.id === a.state);
+      const rid2 = match ? match.id : rootId;
+      if (rid2 == null) continue;
+      (am[rid2] = am[rid2] || {})[slug(a.action || "animation")] = a;
+    }
+    paint();
+  }
+  load();
 }
 
-// generate an animation for one (state, action) using the state's south sprite
+// Generate an animation for one (state, action) using the state's south sprite,
+// then publish it to the community as a costume proposal carrying the frames
+// (anims[]) attached to that state. PixelLab-sourced, so it lands live via the
+// pixellab lane (the server trusts PixelLab output); the detail page's
+// animations grid then shows it. (Previously this stranded the animation in a
+// baseless local draft that could never be published — the keyed state never
+// matched the editor's attach filter.)
 async function openCreateAnimationDialog(type, key, stateNode, action, onCreated) {
+  if (!Taiao.logged()) { toast("Sign in (Settings) to create animations for the community.", "warn"); App.go("#/settings"); return; }
   if (!PixelLab.hasKey()) { toast("Add your PixelLab key in Settings.", "warn"); App.go("#/settings"); return; }
-  toast("Animating “" + action + "”…");
+  const entry = (Providers.get(type) && Providers.get(type).entry(key)) || {};
+  const name = entry.name || key;
+  const stateName = stateNode.name || stateNode.path || "full";
+  const gt = toastLoading("Animating “" + action + "” for " + stateName + "…");
   try {
     const cv = el("canvas", { width: 128, height: 128 }); stateNode.draw(cv, 0); await sleep(320);
     const url = cv.toDataURL("image/png");
     const first = { type: "base64", base64: dataUrlToB64(url), format: "png" };
     const frames = await PixelLab.animate(first, action, 8);
-    const drafts = await Store.all(type);
-    let p = drafts.find(x => x.folder === key);
-    if (!p) { p = Store.newProject(type, (Providers.get(type).entry(key) || {}).name || key); p.folder = key; }
-    (p.anims || (p.anims = [])).push({ id: rid(), action, state: stateNode.path, frames });
-    await Store.save(p);
-    toast("Animation added to a draft.", "ok"); App.go("#/edit/" + p.id);
-  } catch (e) { toast(e.message, "err", 6000); }
+    if (!frames || !frames.length) throw new Error("no frames returned");
+    // The grid matches a community anim to a state row by `a.state` === row.path
+    // OR row.id, so key it by the state's path (what the grid rows carry).
+    const anim = { id: rid(), action, state: stateNode.path || stateName, frames, by: Taiao.username() };
+    const bundle = {
+      schema: "taiao-costume/1",
+      object: { type, key, name },
+      field: "anim:" + slug(action) + ":" + slug(stateName),
+      costume: { state: stateName, slot: "", item: "", note: "animation: " + action, dirs: { south: url } },
+      anims: [anim],
+      exportedAt: new Date().toISOString(),
+    };
+    gt.update("Publishing “" + action + "”…");
+    const r = await Taiao.submitCostume(type, key, name + " — " + action + " animation", bundle, "pixellab");
+    if (r && r.ok) {
+      gt.done(r.status === "accepted"
+        ? "⚡ “" + action + "” animation is live, credited to you."
+        : "Shared “" + action + "” — the community can vote on it now.", 6000);
+      onCreated && onCreated();
+    } else gt.fail((r && r.error) || "Couldn't publish the animation.");
+  } catch (e) { gt.fail("Animation failed: " + (e && e.message || e)); }
 }
 
 // nodes: [{ id, seg, name, parent, draw, goTo? }]; voteCtx = { type, key };
@@ -629,18 +669,19 @@ function renderCharacterArt(page, provider, entry) {
   const stateRows = nodes.filter(n => !n.goTo).map(n => ({ id: n.id, path: n.path, node: n }));
   const animHost = el("div"); page.appendChild(animHost);
   let lastAnimMap = {};
-  const renderAnims = () => { clear(animHost); animHost.appendChild(animationsGridCard("character", entry.folder, stateRows, lastAnimMap, renderAnims)); };
-  renderAnims();
-  (async () => {
-    const ex = await fetchSubjectExtras("character", entry.folder);
+  const paintAnims = () => { clear(animHost); animHost.appendChild(animationsGridCard("character", entry.folder, stateRows, lastAnimMap, loadAnims)); };
+  async function loadAnims() {
+    paintAnims();
+    let ex; try { ex = await fetchSubjectExtras("character", entry.folder); } catch (_) { return; }
     lastAnimMap = {};
     for (const a of ex.anims) {
       const match = stateRows.find(r => r.path === a.state || r.id === a.state);
       const rid2 = match ? match.id : rootId;
       (lastAnimMap[rid2] = lastAnimMap[rid2] || {})[slug(a.action || "animation")] = a;
     }
-    renderAnims();
-  })();
+    paintAnims();
+  }
+  loadAnims();
 }
 
 // ===== Sounds card — the real in-game clips an entity's actions play =====
@@ -1637,7 +1678,7 @@ function renderItemPreview(page, provider, entry, ctx) {
     const r = await Taiao.submitProposal("ui", id, name + " — icon", bundle, stagedSource, provenance);
     if (r && r.ok) {
       toast(r.status === "accepted"
-        ? "⚡ Straight into the game — this filled a gap! It's now live for everyone, credited to you."
+        ? "⚡ Straight into the game — it's now live for everyone, credited to you."
         : r.status === "pending"
         ? "Submitted — a moderator will review your uploaded icon before it appears for voting."
         : "Shared! The community can vote on it now.", "ok", 6000);

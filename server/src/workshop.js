@@ -92,26 +92,24 @@ export async function submitProposal(req, env) {
   const title = String(b.title || subject).slice(0, 120);
   if (!subject) return err("subject required");
 
-  // Provenance decides the moderation path, and the SERVER — not the client —
-  // decides provenance. The control: anything carrying a user-uploaded binary
-  // asset (a sprite strip / sound we'd host and serve to every player) waits
-  // at 'pending' for a curator. Pure data/value proposals (quests, recipes,
-  // skills, rules, votes — no binary) carry nothing to host, so they go
-  // straight to the voteable 'open' lane. b.source is advisory only and is
-  // NEVER consulted for the lane: a client can't opt a binary out of review by
-  // claiming "pixellab"/"data", because we detect the binary ourselves and
-  // store the derived provenance, not the claim.
+  // Moderation lane. Three outcomes:
+  //   • no binary asset (quests, recipes, rules, votes)            → 'open'     (voteable at once)
+  //   • binary asset the client declares PixelLab-generated        → 'accepted' (live in-game at once)
+  //   • binary asset otherwise (a hand-uploaded sprite/sound)      → 'pending'  (curator review)
+  //
+  // TRUST NOTE: the maintainer has chosen to trust the client's `source:
+  // "pixellab"` claim so that PixelLab generations ship straight into the game
+  // (the model's output is pre-filtered). This is a DELIBERATE trust decision,
+  // not an oversight. The server CANNOT verify that a given dataURL actually
+  // came from PixelLab — a crafted request could send hand-made art with
+  // source:"pixellab" and have it go live. The guard rails that remain: a
+  // logged-in account is required, the 10/day proposal rate limit applies, and
+  // every accepted proposal stays reversible by a curator. Uploaded art (no
+  // "pixellab" claim) still waits in the curator 'pending' queue.
   const carriesAsset = payloadCarriesAsset(b.payload, payload);
-  const source = carriesAsset ? "upload" : "data";
-  const status = carriesAsset ? "pending" : "open";
-
-  // The old PixelLab gap auto-accept (status 'accepted' with NO human review)
-  // is gone. There is no server-verifiable signal that a dataURL was produced
-  // by PixelLab rather than hand-uploaded — both arrive identically in the
-  // payload — and gaps.json is publicly readable, so an attacker could name
-  // any gap subject to self-accept arbitrary art. Gap-filling art, like every
-  // other uploaded asset, now lands in the curator 'pending' queue; a curator
-  // adopts it from there (review()), which is the only path to 'accepted'.
+  const claimsPixellab = b.source === "pixellab";
+  const source = carriesAsset ? (claimsPixellab ? "pixellab" : "upload") : "data";
+  const status = !carriesAsset ? "open" : (claimsPixellab ? "accepted" : "pending");
 
   const r = await env.DB.prepare(
     "INSERT INTO proposals (user_id, subject, kind, title, licence, size, status, source, created_at) VALUES (?,?,?,?,?,?,?,?,?)"

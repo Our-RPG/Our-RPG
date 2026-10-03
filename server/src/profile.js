@@ -45,7 +45,11 @@ export async function add(req, env) {
   if (payload.length > MAX_PAYLOAD) return err("Result too large.", 413);
   const name = String(b.name || "").slice(0, 120) || null;
   const prompt = String(b.prompt || "").slice(0, 2000) || null;
-  const thumb = String(b.thumb || "").slice(0, MAX_THUMB) || null;
+  // A thumb is a small south-facing dataURL. Slicing it to fit would corrupt the
+  // base64 mid-stream (a broken image), so an oversize one is dropped instead —
+  // the client downscales before sending, so this is only a backstop.
+  const thumbRaw = String(b.thumb || "");
+  const thumb = (thumbRaw && thumbRaw.length <= MAX_THUMB) ? thumbRaw : null;
   const spriteId = String(b.spriteId || "").slice(0, 80) || null;
   const subject = b.subject ? String(b.subject).slice(0, 120) : null;
   const bodyType = b.bodyType ? String(b.bodyType).slice(0, 20) : null;
