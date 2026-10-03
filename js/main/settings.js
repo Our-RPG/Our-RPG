@@ -37,7 +37,56 @@ function reducedMotion() {
   try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; }
 }
 
+// ---- Account: the ONE logout control in the game (user req) ------------
+// Pre-graduation there's no account yet, so this is really "abandon the
+// current local-only tutorial character"; post-graduation an account is
+// mandatory (js/gameplay/tutorial.js's graduate() gates on it), so this is
+// a real logout. Either way it clears the local save and reloads, which
+// lands back on the pre-boot chooser (js/net/boot-chooser.js) — "Start new
+// adventure" or "Log in" — since that chooser shows precisely when no local
+// save key is present.
+// A REAL, named account — NOT the tutorial's silent guest. The guest exists so
+// the isle's NPC engine works (serverapi.js), but to the player it's still "no
+// account yet": the control reads "Exit tutorial", and exiting abandons it.
+function accountLoggedIn() {
+  return typeof Server !== "undefined" && Server.enabled() && Server.logged() &&
+         !(Server.isGuest && Server.isGuest());
+}
+function renderAccountControl() {
+  const btn = document.getElementById("help-account-btn");
+  const hint = document.getElementById("help-account-hint");
+  const loggedIn = accountLoggedIn();
+  if (btn) btn.textContent = loggedIn ? "Log out" : "Exit tutorial";
+  if (hint) hint.textContent = loggedIn
+    ? "Your progress is safely stored in your account — log back in any time, on any device."
+    : (typeof Server !== "undefined" && Server.enabled()
+      ? "Finish the tutorial to create an account and keep your progress safe in the cloud."
+      : "This copy saves only to this browser — no account system in this build.");
+}
+function initAccountUi() {
+  const btn = document.getElementById("help-account-btn");
+  if (!btn) return;
+  btn.onclick = async () => {
+    const loggedIn = accountLoggedIn();
+    const warn = loggedIn
+      ? "Log out? Your progress is safely stored in your account — log back in any time to continue."
+      : "Exit the tutorial? This can't be undone: your progress only exists on this device and hasn't been saved to an account yet.";
+    if (!confirm(warn)) return;
+    if (loggedIn) await Server.logout(); // uploads one last save, then clears the session
+    // A tutorial guest isn't a "real" logout, but exiting must still forget it
+    // so the fresh start gets a clean, brand-new guest rather than resuming
+    // this abandoned character's throwaway account.
+    else if (typeof Server !== "undefined" && Server.isGuest && Server.isGuest() && Server.guestAbandon)
+      Server.guestAbandon();
+    try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+    location.reload();
+  };
+  renderAccountControl();
+  if (typeof Server !== "undefined") Server.onAuth(renderAccountControl);
+}
+
 function initSettingsUi() {
+  initAccountUi();
   applyFontScale();
   const fs = document.getElementById("fontscale");
   if (fs) {

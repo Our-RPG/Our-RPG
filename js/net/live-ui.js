@@ -93,9 +93,20 @@
   // bankers, the Weaver, quest-givers all share it) — otherwise this bar's
   // own "(Enter to send)" placeholder sits in the exact same corner as that
   // reply list, reading as a second, redundant "press Enter" prompt.
+  //
+  // One extra way in: the tutorial. Live (multiplayer) deliberately never
+  // connects on Tūhura Isle (livesync.js onIsle()), so Live.chatOn() is always
+  // false there — yet the isle is exactly where the NPC engine is showcased
+  // (Ravenna). So when a tutorial keeper has a live engine session (the silent
+  // guest account), the same bar opens to talk to the NPCs in earshot — there's
+  // no multiplayer chat to carry, so a tutorial line goes straight to
+  // npcBroadcast (see the Enter handler) and nowhere near the hub.
+  const inTutChat = () =>
+    typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active() &&
+    typeof npcEngineAvailable === "function" && npcEngineAvailable();
   const chatFieldOn = () =>
     !(window.__LUA && window.__LUA.dlgbar && window.__LUA.dlgbar.isOpen()) &&
-    Live.chatOn();
+    (Live.chatOn() || inTutChat());
 
   document.addEventListener("keydown", e => {
     if (e.key !== "/" || !chatFieldOn()) return;
@@ -112,7 +123,7 @@
         // "/w <name> <message>" whispers a direct message via the global hub;
         // anything else is local (proximity) chat.
         const wm = text.match(/^\/w(?:hisper)?\s+(\S+)\s+([\s\S]+)$/i);
-        if (wm && typeof Hub !== "undefined") {
+        if (wm && typeof Hub !== "undefined" && Live.chatOn()) {
           const id = Hub.idByName(wm[1]);
           if (id) Hub.sendDM(id, wm[2]);
           else if (typeof log === "function") log('No one online named "' + wm[1] + '".', "sys");
@@ -122,6 +133,12 @@
           // silent — the Live echo already puts the line in the log. Whispers
           // stay private.
           if (typeof npcBroadcast === "function") npcBroadcast(text, { silent: true });
+        } else if (inTutChat()) {
+          // tutorial: no multiplayer to carry the line — speak straight to the
+          // NPCs in earshot (Ravenna's "hear her answer" stage rides this).
+          // NOT silent: there's no Live echo here, so npcBroadcast itself puts
+          // the "You say" line in the log.
+          if (typeof npcBroadcast === "function") npcBroadcast(text);
         } else if (typeof log === "function") {
           log("Local chat isn't available right now — /w name message still whispers.", "sys");
         }

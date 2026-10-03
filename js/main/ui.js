@@ -4,7 +4,7 @@
 // ---------- UI ----------
 // Callers (4):
 //  main/ui.js:1,7,14,233
-const panels = ["inv", "equip", "skills", "goals", "account", "help", "cheats"];
+const panels = ["inv", "equip", "skills", "goals", "help", "cheats"];
 // Callers (11):
 //  main/ui.js:11,12,15,139,189,259,264,277,282,297,303
 function showPanel(name) {
@@ -1180,12 +1180,26 @@ function openBankAccountFor(net, npc) {
   };
   add("coins", perks.coins);
   for (const [id, q] of perks.gifts) if (ITEMS[id]) add(id, q);
+  // opening the FIRST mainland account (the Bank of Newhaven's "main" network)
+  // sweeps in every hermit vault banked before it — in practice Tūhura Isle's
+  // chest (Torvak's), sealed off at graduation and otherwise unreachable
+  // forever, so its contents would else be stranded for good (user req).
+  let strayMoved = 0;
+  if (net === "main" && player.banks) {
+    for (const k of Object.keys(player.banks)) {
+      if (k === net) continue;
+      for (const s of player.banks[k]) { add(s.id, s.qty); strayMoved += s.qty; }
+      delete player.banks[k];
+    }
+  }
   ensureBankPermanents(net);
   bankRev++;
   uiDirty = true;
   sfx("coins", 0.8);
   log(`${npc ? npc.name + " stamps the ledger — w" : "W"}elcome to the ${bankNetName(net)}! ` +
     `${perks.coins} coins and the bank's welcome gifts are waiting in your new vault.`, "gold");
+  if (strayMoved)
+    log(`${strayMoved} item${strayMoved === 1 ? "" : "s"} from your old travelling vault followed you into the ledger.`, "gold");
 }
 // the banker's counter pitch (main-branch signup dialog)
 let bankSignupEl = null;

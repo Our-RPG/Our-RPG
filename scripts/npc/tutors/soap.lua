@@ -12,7 +12,19 @@ local TOPICS = {
 on_npc("tut_soap", function()
   if tut_seen("soap") then
     if not tut_task_done("soap") then
-      chatnpc("Not yet — " .. tut_task_label("soap") .. ".")
+      -- Running (the sidebar Run toggle) can leave you stinkier than a
+      -- single tutorial-tier bar scrubs clean. Rather than walk the whole
+      -- charcoal/lye/tallow chain again for a top-up, Nala just hands over
+      -- another bar — repeatable until the metre reads clean.
+      if stink_total() > 0 then
+        if add_item("tallow_soap", 1) then
+          chatnpc("Still ripe, are you? Here — another bar. Back in the spring with you.")
+        else
+          chatnpc("Still ripe — but your pack's full. Make room for a bar and come back.")
+        end
+      else
+        chatnpc("Not yet — " .. tut_task_label("soap") .. ".")
+      end
     else
       chatnpc("Clean as a whistle — on you go.")
     end

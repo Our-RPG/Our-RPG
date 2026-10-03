@@ -131,15 +131,20 @@
     };
   }
 
-  // If a session appears by any route (passkey, a resumed token, another tab),
-  // an open account gate resolves itself.
-  Server.onAuth(u => { if (u && mode === "account") done(); });
+  // A REAL account, not the tutorial's throwaway guest — graduation is exactly
+  // where the guest is left behind for a named account.
+  const realAccount = () => Server.logged() && !(Server.isGuest && Server.isGuest());
+
+  // If a REAL session appears by any route (passkey, a resumed token, another
+  // tab), an open account gate resolves itself. The guest login that lit the
+  // tutorial fires onAuth too, so it must NOT count here.
+  Server.onAuth(() => { if (realAccount() && mode === "account") done(); });
 
   window.AccountGate = {
-    // Block until there's a logged-in session, then run onDone. Already logged
-    // in → immediate. Idempotent: calling again while open just keeps waiting.
+    // Block until there's a real-account session, then run onDone. Already on
+    // one → immediate. Idempotent: calling again while open just keeps waiting.
     require(onDone) {
-      if (Server.logged()) { if (onDone) onDone(); return; }
+      if (realAccount()) { if (onDone) onDone(); return; }
       pendingDone = onDone || pendingDone;
       if (mode !== "account") { mode = "account"; msg = ""; render(); }
     },

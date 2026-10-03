@@ -288,14 +288,20 @@ function saveGame() {
 // login, every 5 minutes, and on tab hide/logout); this is the shared
 // validate -> confirm -> reload path SaveSync.restore() calls after pulling
 // a vaulted save blob down. No manual file export/import UI anymore.
-function importSaveFromText(text) {
+// `opts.skipConfirm` — the pre-boot chooser (js/net/boot-chooser.js) pulls a
+// cloud save onto a fresh browser with nothing worth protecting yet; asking
+// to confirm "overwrite your current character" there would just be
+// confusing (there isn't one). The Settings tab's manual restore button
+// still confirms, since that one really can clobber a live character.
+function importSaveFromText(text, opts) {
   let d;
-  try { d = JSON.parse(text); } catch (e) { alert("That save isn't valid (bad JSON)."); return; }
-  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That doesn't look like a save from this game."); return; }
-  if (!confirm("Load this save? Your current in-browser character will be overwritten.")) return;
+  try { d = JSON.parse(text); } catch (e) { alert("That save isn't valid (bad JSON)."); return false; }
+  if (!d || typeof d !== "object" || !d.skills || !d.inv) { alert("That doesn't look like a save from this game."); return false; }
+  if (!(opts && opts.skipConfirm) && !confirm("Load this save? Your current in-browser character will be overwritten.")) return false;
   resetting = true; // prevent beforeunload autosave from clobbering the imported data before reload
-  try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) { alert("Couldn't write the save to browser storage: " + e.message); resetting = false; return; }
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) { alert("Couldn't write the save to browser storage: " + e.message); resetting = false; return false; }
   location.reload();
+  return true;
 }
 // ---------- Tūhura Isle relocation (2026-09-18) ----------
 // The tutorial isle moved from game (-760,1000) to (-6168,1736) — a far

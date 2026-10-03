@@ -1,34 +1,36 @@
-// ===== Our RPG — Account tab (optional accounts, without a shadow of pressure) =====
-// A sidebar tab in the cheats.js mould: grabs #panel-account, fills it, wires
-// itself. Hidden entirely unless this build carries a SERVER_URL. The copy
-// leads with what the vision demands: the account is OPTIONAL, email is
-// OPTIONAL, and logged out the game is exactly the offline game it always was.
+// ===== Our RPG — Account section, inside the Settings tab =====
+// Formerly a dedicated sidebar tab (js/net/account-ui.js); folded into
+// Settings (user req) since logging in/out and creating an account now each
+// have exactly ONE place they can happen: the pre-boot chooser (first visit
+// to /play, or after logging out — js/net/boot-chooser.js) creates/logs in,
+// the post-graduation Bifrost crossing is the only account-creation moment
+// (js/net/gate-ui.js, gameplay/tutorial.js's graduate()), and the universal
+// exit/logout button lives in js/main/settings.js right above the block this
+// file renders. So there is nothing left for THIS file to do but show the
+// rich, already-logged-in content: the save vault, passkeys, workshop link
+// code, leaderboard opt-in, and the world/digest/koha info blocks. Entirely
+// absent (renders nothing) when logged out — there's no form here to fill in.
 "use strict";
 
 (function () {
-  const tab = document.getElementById("accounttab");
-  const panelEl = document.getElementById("panel-account");
-  if (!tab || !panelEl || typeof Server === "undefined" || !Server.enabled()) {
+  const panelEl = document.getElementById("help-account-rich");
+  if (!panelEl || typeof Server === "undefined" || !Server.enabled()) {
     window.AccountUI = { refresh: () => {} };
     return;
   }
-  tab.style.display = "";
 
   const st = document.createElement("style");
   st.textContent = `
-#panel-account { padding: 10px 12px; font-size: 12px; line-height: 1.5; overflow-y: auto; }
-#panel-account h3 { margin: 12px 0 4px; color: #ffe97a; font-size: 13px; letter-spacing: 1px; }
-#panel-account .acc-hint { color: #a99cc4; font-size: 11px; margin: 4px 0 8px; }
-#panel-account input { display: block; width: 92%; margin: 4px 0; background: #171226; border: 1px solid #3a3050; color: #d8d2e8; border-radius: 4px; padding: 4px 8px; font-size: 12px; }
-#panel-account button { background: #241c38; border: 1px solid #3a3050; color: #d8d2e8; border-radius: 4px; cursor: pointer; font-size: 12px; padding: 4px 10px; margin: 3px 4px 3px 0; }
-#panel-account button:hover { background: #453a58; color: #fff; }
-#panel-account button.acc-primary { border-color: #6a5a2a; color: #ffd75e; }
-#panel-account .acc-err { color: #ff9d8f; margin: 6px 0; min-height: 1em; }
-#panel-account .acc-ok { color: #8fd18f; }
-#panel-account .acc-row { color: #d8d2e8; margin: 2px 0; }
-#panel-account .acc-sub { color: #7d90a8; font-size: 11px; }
-#panel-account label { display: flex; gap: 6px; align-items: flex-start; color: #d8d2e8; margin: 6px 0; cursor: pointer; }
-#panel-account label input { width: auto; display: inline; margin: 2px 0 0; }
+#help-account-rich { font-size: 12px; line-height: 1.5; }
+#help-account-rich h3 { margin: 12px 0 4px; color: #ffe97a; font-size: 13px; letter-spacing: 1px; }
+#help-account-rich button { background: #241c38; border: 1px solid #3a3050; color: #d8d2e8; border-radius: 4px; cursor: pointer; font-size: 12px; padding: 4px 10px; margin: 3px 4px 3px 0; }
+#help-account-rich button:hover { background: #453a58; color: #fff; }
+#help-account-rich .acc-err { color: #ff9d8f; margin: 6px 0; min-height: 1em; }
+#help-account-rich .acc-ok { color: #8fd18f; }
+#help-account-rich .acc-row { color: #d8d2e8; margin: 2px 0; }
+#help-account-rich .acc-sub { color: #7d90a8; font-size: 11px; }
+#help-account-rich label { display: flex; gap: 6px; align-items: flex-start; color: #d8d2e8; margin: 6px 0; cursor: pointer; }
+#help-account-rich label input { width: auto; display: inline; margin: 2px 0 0; }
 `;
   document.head.appendChild(st);
 
@@ -39,30 +41,17 @@
   const say = (m, ok) => { msg = m || ""; msgOk = !!ok; render(); };
 
   function render() {
-    const u = Server.user;
-    panelEl.innerHTML = u ? loggedInHtml(u) : loggedOutHtml();
-    wire(u);
-  }
-
-  function loggedOutHtml() {
-    return `
-<h3>Account (optional)</h3>
-<div class="acc-hint">The game never needs an account — everything works and saves on this device, logged out, forever. An account adds: your save kept in a <b>cloud vault</b> (browser storage dies with browsers), your workshop votes <b>counted with everyone else's</b>, and opt-in leaderboards. No email required.</div>
-<input id="acc-user" placeholder="username" maxlength="20" autocomplete="username">
-<input id="acc-pass" type="password" placeholder="password (8+ characters)" autocomplete="current-password">
-<input id="acc-pass2" type="password" placeholder="repeat password (only needed to create an account)" autocomplete="new-password">
-<input id="acc-email" placeholder="email — optional, only for account recovery" autocomplete="email">
-<div id="acc-ts"></div>
-<div class="acc-err${msgOk ? " acc-ok" : ""}">${esc(msg)}</div>
-<button id="acc-login" class="acc-primary">Log in</button>
-<button id="acc-register">Create account</button>
-<button id="acc-pklogin" title="Sign in with a passkey saved on this device">Passkey</button>
-${workshopHtml("Our RPG Workshop ↗ — the room this game is built in; same account as the game.")}`;
+    // The tutorial's silent guest (serverapi.js) is logged in as far as the
+    // server is concerned, but to the player it's "no account yet" — so show
+    // nothing, exactly as when logged out. The real panel appears once they
+    // claim a named account at graduation.
+    const u = (Server.isGuest && Server.isGuest()) ? null : Server.user;
+    panelEl.innerHTML = u ? loggedInHtml(u) : "";
+    if (u) wire(u);
   }
 
   // A door to the Workshop, hidden entirely when this build carries no
-  // TAIAO_WORKSHOP_URL (compile-time, tools/build.mjs). Wired once in wire()
-  // below regardless of which copy variant rendered it.
+  // TAIAO_WORKSHOP_URL (compile-time, tools/build.mjs).
   function workshopHtml(label) {
     if (typeof TAIAO_WORKSHOP_URL === "undefined" || !TAIAO_WORKSHOP_URL) return "";
     return `<button id="acc-workshop">${label}</button>`;
@@ -94,39 +83,13 @@ ${workshopHtml("Open Our RPG Workshop ↗")}
 <h3>Standing</h3>
 <div class="acc-sub" id="acc-ranks">…</div>
 <h3>Koha</h3>
-<div class="acc-sub" id="acc-koha">…</div>
-<h3></h3>
-<button id="acc-logout">Log out</button>`;
+<div class="acc-sub" id="acc-koha">…</div>`;
   }
 
   function wire(u) {
     const $ = id => panelEl.querySelector("#" + id);
     const wsBtn = $("acc-workshop");
     if (wsBtn) wsBtn.onclick = () => window.open(TAIAO_WORKSHOP_URL, "_blank");
-    if (!u) {
-      const go = async fn => {
-        const name = $("acc-user").value.trim(), pass = $("acc-pass").value;
-        say("Working…", true);
-        const r = await fn(name, pass);
-        say(r.ok ? "" : r.error || "Something went wrong.", false);
-      };
-      $("acc-login").onclick = () => go((n, p) => Server.login(n, p, $("acc-ts")));
-      $("acc-register").onclick = () => {
-        if ($("acc-pass").value !== $("acc-pass2").value) { say("Passwords don't match.", false); return; }
-        go((n, p) => Server.register(n, p, $("acc-email").value.trim(), $("acc-ts")));
-      };
-      $("acc-pass").onkeydown = e => { if (e.key === "Enter") $("acc-login").click(); };
-      $("acc-pass2").onkeydown = e => { if (e.key === "Enter") $("acc-register").click(); };
-      // typing it twice only catches a typo if neither copy can be a paste of the other
-      $("acc-pass2").addEventListener("paste", e => e.preventDefault());
-      $("acc-pass2").addEventListener("drop", e => e.preventDefault());
-      $("acc-pklogin").onclick = async () => {
-        say("Waiting for your passkey…", true);
-        const r = await Server.passkeyLogin($("acc-user").value.trim() || undefined);
-        say(r.ok ? "" : r.error || "Passkey sign-in failed.", false);
-      };
-      return;
-    }
     $("acc-push").onclick = async () => {
       say("Uploading…", true);
       const r = typeof SaveSync !== "undefined" && await SaveSync.uploadNow("manual");
@@ -149,7 +112,6 @@ ${workshopHtml("Open Our RPG Workshop ↗")}
       } else say(r.error || "Couldn't generate a code.", false);
     };
     $("acc-xp").onchange = e => { if (typeof SaveSync !== "undefined") SaveSync.setXpOptIn(e.target.checked); };
-    $("acc-logout").onclick = async () => { say("Logging out…", true); await Server.logout(); say("", false); };
 
     // Phase-2 shared-world status: region ledger + shop queue + seeds
     {

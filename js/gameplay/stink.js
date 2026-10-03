@@ -146,6 +146,19 @@ function monsterStinkFlavour(mon) {
   return "blood"; // fleshy default
 }
 
+// hooked from moveTo (gameplay/movement.js): running (the sidebar Run
+// toggle, window.runMode — character-stats.js charSpeedMul) works up a flat
+// sweat gain per step, same for everyone — no skill tier to scale by, unlike
+// addStink below.
+var RUN_SWEAT_GAIN = 0.15;
+function addMoveSweat() {
+  var s = stinkState();
+  s.fl.sweat = (s.fl.sweat || 0) + RUN_SWEAT_GAIN;
+  var tot = stinkTotal();
+  if (tot > STINK_MAX) { var sc = STINK_MAX / tot; for (var k in s.fl) s.fl[k] *= sc; }
+  uiDirty = true;
+}
+
 // hooked from addXp (main/state.js): work reeks, higher tiers exponentially so.
 function addStink(skill, xpAmt) {
   if (!xpAmt || xpAmt <= 0) return;

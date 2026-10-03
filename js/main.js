@@ -53,6 +53,16 @@ async function init() {
   // hidden tabs, where rAF never fires)
   const _paint = _bootYield;
   M("init");
+  // Pre-boot landing chooser (user req): the ONLY place to log in is a
+  // completely fresh browser (no local save yet) or right after Settings'
+  // Exit tutorial/Log out button clears the save and reloads — both are
+  // exactly "no SAVE_KEY present" at this exact point, before loadGame()
+  // ever runs. No-op in offline/dev builds and on any return visit with a
+  // save already on this device (BootChooser.run() checks Server.enabled();
+  // the save check happens right here since that's the one true gate).
+  let hasLocalSave = false;
+  try { hasLocalSave = !!localStorage.getItem(SAVE_KEY); } catch (e) {}
+  if (!hasLocalSave && typeof BootChooser !== "undefined") await BootChooser.run();
   const loaded = loadGame();
   M("loadGame");
   // The original Taiao renders in HD-2D with billboard sprites (the
@@ -93,6 +103,19 @@ async function init() {
     // regenerated the spawn chunk from scratch — dragging the road A* and
     // the full world-name pass into every warm reload (~14s of the old boot)
     log("Welcome back to Our RPG!", "gold");
+  }
+  // Tūhura's NPC engine needs a logged-in session, but the tutorial runs long
+  // before the player is ever asked to make an account (that's the Bifrost gate
+  // at graduation). So an active-tutorial keeper who isn't signed in gets a
+  // silent throwaway "guest_…" account — this is what lights the status pill,
+  // makes NPCs answer in their own words, and lets the "/" chat bar open on the
+  // isle. Fire-and-forget: it resolves a beat into play, no boot blocking, and
+  // no-ops in offline/dev builds (Server.enabled() false). A graduated player
+  // who is merely logged out is NOT given a guest — they go through the normal
+  // account gate (main loop below).
+  if (typeof Server !== "undefined" && Server.enabled() && !Server.logged() &&
+      typeof Tutorial !== "undefined" && Tutorial.active && Tutorial.active()) {
+    Server.guestLogin();
   }
   // Unconditional build beacon (stale-client diagnosis): shows in EVERY boot,
   // new save or old, and reports whether the current feature wiring is live.

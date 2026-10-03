@@ -12,7 +12,7 @@ local TOPICS = {
     a = "Before anything else you must take a BODY, e hoa — dozens of folk to choose from, each with their own build, pace and wardrobe." },
   { q = "How do I get around?",
     a = { "Click the ground to walk; click a tree, rock, fire or person to use it.",
-          "RIGHT-click anything for more choices, and press ENTER near anyone to talk in your own words — we truly answer." } },
+          "RIGHT-click anything for more choices, and tap / near anyone to open a chat line and talk in your own words — we truly answer." } },
   { q = "Where am I headed?",
     a = function()
       chatnpc("Follow the dirt path east. " .. tut_name("bush") .. " the Bushman is expecting you, and every keeper after equips you for their lesson — tool by tool — until you walk off my isle fully kitted.")

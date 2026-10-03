@@ -503,6 +503,10 @@ function moveTo(nx, ny) {
   }
   // no footstep audio for a ghost-ticked split body (gameplay/split.js)
   if (!(typeof Split !== "undefined" && Split.isGhost())) sfxStep(nx, ny, water, !!player.sailing);
+  // Running (sidebar Run toggle, window.runMode) works up a sweat on every
+  // step — stink is shared across all split selves, so this applies even
+  // while a ghost-ticked body is the one moving.
+  if (window.runMode && typeof addMoveSweat === "function") addMoveSweat();
   player.moving = { fx: player.x, fy: player.y, tx: nx, ty: ny, t: 0, dur, deck: deckNext };
   if (nx !== player.x) player.facing = nx > player.x ? 1 : -1;
   const d8 = dir8From(nx - player.x, ny - player.y); if (d8) player.dir8 = d8;

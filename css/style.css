@@ -101,6 +101,10 @@ input, textarea { user-select: text; -webkit-user-select: text; -moz-user-select
 #interactmodebtn:hover { filter: brightness(1.25); color: #fff; }
 #interactmodebtn.combat { background: #3a2020; color: #e6a3a3; border-color: #6e3a3a; }
 #interactmodebtn.husbandry { background: #203320; color: #a3d6a3; border-color: #3d6e3a; }
+#runmodebtn { width: 312px; margin-top: 4px; padding: 4px; background: #2a2335; color: #a99cc4; border: 1px solid #4c4160; cursor: pointer; font-size: 11px; }
+#runmodebtn:hover { filter: brightness(1.25); color: #fff; }
+#runmodebtn.walk { background: #203320; color: #a3d6a3; border-color: #3d6e3a; }
+#runmodebtn.run { background: #3a2e20; color: #e6c3a3; border-color: #6e5a3a; }
 
 #worldmap {
   position: absolute; inset: 0; display: none; z-index: 60;

@@ -226,6 +226,10 @@ js/net/gate-ui.js
 js/net/telemetry.js
 js/net/actionlog.js
 js/net/savesync.js
+# pre-boot landing chooser — after serverapi/savesync (uses Server.login/
+# passkeyLogin + SaveSync.restore), before main.js (awaited at the top of
+# init(), see js/main.js and js/net/gate-ui.js's header comment).
+js/net/boot-chooser.js
 js/net/worksync.js
 # Phase-2 shared-world layer: region mutation ledger, shop stock ledger,
 # server-issued seeds. Same rule: inert without SERVER_URL + a login.
@@ -250,7 +254,7 @@ js/net/social-ui.js
 # (now 72px). After social-ui (shares its styling convention) and
 # npc-engine-client.js (gameplay/, loaded earlier) for npcEngineAvailable().
 js/net/npc-engine-ui.js
-js/net/account-ui.js
+js/net/account-panel.js
 js/gameplay/koha.js
 js/gameplay/goals-arc.js
 js/gameplay/eggs.js

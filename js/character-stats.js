@@ -16,8 +16,11 @@
 //   speed  move speed          (faster / slower)   0.60 .. 1.45 for NPCs (race/class/
 //                                                   size derived, as below) — but EVERY
 //                                                   playable character is pinned to a
-//                                                   uniform ×1.45 (user request 2026-10-03):
-//                                                   see the CHAR_STATS override below.
+//                                                   uniform ×1.00 baseline (user request
+//                                                   2026-10-03): see the CHAR_STATS
+//                                                   override below. The sidebar Run
+//                                                   toggle (gameplay/input.js) multiplies
+//                                                   this up to ×1.45 on top (charSpeedMul).
 //   tough  incoming-damage soak (0 = none)         0.00 .. 0.45  → takes (1-tough)× dmg
 //   xp     per-skill xp multipliers                0.85 .. 1.60  (missing skill = 1)
 //
@@ -277,7 +280,8 @@
   }
   function deriveStats(desc) { return finalize(rawScores(desc)); }
 
-  const PLAYER_SPEED = 1.45; // every playable character moves at the same speed (user request 2026-10-03)
+  const PLAYER_SPEED = 1.00; // every playable character's baseline move speed (user request 2026-10-03) — walk
+  const PLAYER_RUN_MUL = 1.45; // the sidebar Run toggle (gameplay/input.js window.runMode) multiplies onto PLAYER_SPEED
   const NEUTRAL = { h: 1, w: 1, weight: 1, speed: PLAYER_SPEED, tough: 0, xp: {} };
 
   // Player characters: one stat block per CHAR_LIST entry (folder + name).
@@ -313,7 +317,10 @@
     window.playerCharStats = playerStats;
     window.charHeightMul = () => playerStats().h;
     window.charWidthMul = () => playerStats().w;
-    window.charSpeedMul = () => playerStats().speed;
+    // Walk (×1.00) by default; the sidebar Run toggle (gameplay/input.js) sets
+    // window.runMode, which multiplies up to PLAYER_RUN_MUL (×1.45) on top —
+    // running also works up a sweat (see movement.js's moveTo / stink.js).
+    window.charSpeedMul = () => playerStats().speed * (window.runMode ? PLAYER_RUN_MUL : 1);
     window.charToughness = () => playerStats().tough;
     window.charWeight = () => playerStats().weight;
     window.charXpMul = (skill) => { const x = playerStats().xp; return (x && x[skill]) || 1; };

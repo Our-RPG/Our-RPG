@@ -666,13 +666,14 @@ const Tutorial = (() => {
     cook:  { task: "cook fritters, cheese & flatbread", need: COOK_GOALS.length, done: t => allGoals(t, COOK_GOALS), num: t => numGoals(t, COOK_GOALS), items: goalItems(COOK_GOALS) },
     war:   { task: "clear the pit & slay 1 koreke", need: WAR_GOALS.length, done: t => allGoals(t, WAR_GOALS), num: t => numGoals(t, WAR_GOALS), items: goalItems(WAR_GOALS) },
     // the Skywatcher's stage also SHOWCASES the semantic chat (user req):
-    // say anything to her (Enter) and hear a real, un-canned answer
+    // tap / to open the chat line, say anything to her, and hear a real,
+    // un-canned answer
     sky:   { task: "climb the Sky Knoll & really talk to Ravenna", need: 2,
              done: t => !!t.reachedKnoll && cnt(t, "chatted") >= 1,
              num: t => (t.reachedKnoll ? 1 : 0) + (cnt(t, "chatted") >= 1 ? 1 : 0),
              items: t => [
                { on: !!t.reachedKnoll, num: t.reachedKnoll ? 1 : 0, need: 1, label: "climb the Sky Knoll" },
-               { on: cnt(t, "chatted") >= 1, num: Math.min(1, cnt(t, "chatted")), need: 1, label: "say something to Ravenna (Enter) & hear her answer" },
+               { on: cnt(t, "chatted") >= 1, num: Math.min(1, cnt(t, "chatted")), need: 1, label: "say something to Ravenna (press /) & hear her answer" },
              ] },
     candle:{ task: "dip a rushlight",          done: t => !!t.candleMade,
              items: t => [
@@ -1827,11 +1828,15 @@ const Tutorial = (() => {
   }
   function graduate() {
     // The crossing leads into the shared, live world — so on server builds it
-    // requires an account. AccountGate.require blocks with a create/login modal
-    // and re-enters graduate() once there's a session (a no-op, immediate
-    // pass-through in offline/dev builds). Guard against re-showing mid-wait.
+    // requires a REAL, named account. AccountGate.require blocks with a
+    // create/login modal and re-enters graduate() once there's a session (a
+    // no-op, immediate pass-through in offline/dev builds). The tutorial's
+    // silent guest account counts as "no account yet" here (Server.isGuest):
+    // this is the moment the player claims a real name, and the throwaway is
+    // left behind. Guard against re-showing mid-wait.
     if (typeof AccountGate !== "undefined" &&
-        typeof Server !== "undefined" && Server.enabled() && !Server.logged()) {
+        typeof Server !== "undefined" && Server.enabled() &&
+        (!Server.logged() || (Server.isGuest && Server.isGuest()))) {
       AccountGate.require(() => graduate());
       return;
     }

@@ -59,12 +59,15 @@
   }
 
   // Restore a vaulted save onto THIS browser. importSaveFromText handles
-  // validation, the overwrite confirm, and the reload.
-  async function restore(version) {
+  // validation, the overwrite confirm (unless opts.skipConfirm), and the
+  // reload. Returns true only once a save was actually written (the caller's
+  // page is about to reload out from under it); false otherwise, so a caller
+  // without a `log` UI yet (js/net/boot-chooser.js, pre-boot) can react.
+  async function restore(version, opts) {
     const q = "/api/save/blob?slot=" + encodeURIComponent(SLOT) + (version ? "&version=" + version : "");
     const r = await Server.call(q, { raw: true });
-    if (!r.ok) { if (typeof log === "function") log("Restore failed: " + (r.error || "no vaulted save."), "warn"); return; }
-    importSaveFromText(r.text);
+    if (!r.ok) { if (typeof log === "function") log("Restore failed: " + (r.error || "no vaulted save."), "warn"); return false; }
+    return !!importSaveFromText(r.text, opts);
   }
 
   // upload on login (first vault copy the moment an account exists)

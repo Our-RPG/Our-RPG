@@ -104,14 +104,14 @@
     // __dialog speaks its body through the bound npc (bubble + #log, same as
     // chatnpc) before the SAME docked picker choice() uses opens for the reply
     // list — one dialogue surface for every scripted NPC, tutors included.
-    __choice: async (cid, ...labels) => (L.dlgbar ? await L.dlgbar.choose(labels.map(String)) : 1),
+    __choice: async (cid, ...labels) => (L.dlgbar ? await L.dlgbar.choose(labels.map(String), npcOf(cid)) : 1),
     __dialog: async (cid, title, body, ...labels) => {
+      const n = npcOf(cid);
       if (body) {
-        const n = npcOf(cid);
         if (n && typeof npcSay === "function") npcSay(n, String(body));
         else if (typeof log === "function") log(String(body), "sys");
       }
-      return L.dlgbar ? await L.dlgbar.choose(labels.map(String)) : 1;
+      return L.dlgbar ? await L.dlgbar.choose(labels.map(String), n) : 1;
     },
 
     // inventory / progression

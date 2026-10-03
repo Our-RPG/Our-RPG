@@ -2446,6 +2446,11 @@ function createWorldChunks(ctx) {
             const s2 = TUT_VILLAGE.seats[id], vp = TUT_ISLE.pods[s2.pod];
             tutors.push({ x: vp.mx * 2 + s2.dx, y: vp.my * 2 + s2.dy });
           }
+        // crafting stations (campfire/anvil/furnace/bank/…) get the exact
+        // same clearance as tutors/seats — a station hidden behind a crown
+        // from the orbiting camera is just as bad as a hidden keeper (user
+        // req 2026-10-03)
+        for (const st of TUT_CONTENT.stamps) if (st.extra && st.extra.station) tutors.push({ x: st.x, y: st.y });
         const tutorNear = (x, y, r) => tutors.some(t =>
           Math.abs(x - t.x) <= r && Math.abs(y - t.y) <= r);
         let trees = 0, plants = 0;
@@ -2473,11 +2478,13 @@ function createWorldChunks(ctx) {
       }
       // KEEPER SIGHTLINES (user req): whatever planted a tree — the biome
       // scatter, the hand-stamped lesson thickets, the bush pass above — the
-      // orbiting camera must never lose a tutor behind a crown. Within 3
-      // tiles of a tutor's post trees go entirely; in the 3-7 band TALL
-      // natives are removed (labels stay truthful — no re-skinning a Kauri
-      // into a mānuka), while the modest generic "Tree" billboards (the
-      // Bushman's lesson thicket) may stand.
+      // orbiting camera must never lose a tutor (or a crafting station —
+      // user req 2026-10-03: no station hidden in any of the four cardinal
+      // views) behind a crown. Within 3 tiles of a tutor's post or a
+      // station tile, trees go entirely; in the 3-7 band TALL natives are
+      // removed (labels stay truthful — no re-skinning a Kauri into a
+      // mānuka), while the modest generic "Tree" billboards (the Bushman's
+      // lesson thicket) may stand.
       if (typeof TUT_TUTORS !== "undefined") {
         const tutors = TUT_TUTORS.map(tu => ({
           x: TUT_ISLE.pods[tu.pod].mx * 2 + tu.dx,
@@ -2487,6 +2494,7 @@ function createWorldChunks(ctx) {
             const s2 = TUT_VILLAGE.seats[id], vp = TUT_ISLE.pods[s2.pod];
             tutors.push({ x: vp.mx * 2 + s2.dx, y: vp.my * 2 + s2.dy });
           }
+        for (const st of TUT_CONTENT.stamps) if (st.extra && st.extra.station) tutors.push({ x: st.x, y: st.y });
         for (let i = nodes.length - 1; i >= 0; i--) {
           const n = nodes[i];
           const nt2 = NODE_TYPES[n.type];

@@ -257,6 +257,7 @@
 
 				</div>
 				<button id="interactmodebtn" title="Toggle the default action on animals: Combat (Attack first) or Husbandry (Tend/Feed first). Also the left-click default.">Mode: 🌾 Husbandry</button>
+				<button id="runmodebtn" title="Toggle Walk (×1.00) or Run (×1.45 — but you'll work up a sweat).">Mode: 🚶 Walk</button>
 			</div>
 			<div id="statbar">
 			  <div class="statline">
@@ -321,7 +322,6 @@
 			  <button class="tab" data-tab="equip">Equip</button>
 			  <button class="tab" data-tab="skills">Skills</button>
 			  <button class="tab" data-tab="goals">Goals</button>
-			  <button class="tab" data-tab="account" id="accounttab" style="display:none" title="Account: cloud save vault, community workshop, leaderboards. Required to leave Tūhura Isle on the hosted game; offline/self-built copies never need one.">Account</button>
 			  <button class="tab" data-tab="help" title="Accessibility, privacy, sound and save settings">Settings</button>
 			  <button class="tab" data-tab="cheats" id="cheattab" style="display:none" title="Developer overrides: time, weather, snow, flood (DEV_MODE builds only)">Dev</button>
 			</div>
@@ -334,9 +334,12 @@
 			</div>
 			<div id="panel-skills" class="panel"></div>
 			<div id="panel-goals" class="panel"><!-- built by js/main/ui.js renderGoals from the Tūhura Isle tutorial --></div>
-			<div id="panel-account" class="panel"><!-- built by js/net/account-ui.js in server-enabled builds --></div>
 			<div id="panel-cheats" class="panel"><!-- built by js/gameplay/cheats.js in DEV_MODE builds --></div>
 			<div id="panel-help" class="panel">
+				  <h4 style="margin:10px 0 4px">Account</h4>
+				  <p class="hint" id="help-account-hint"></p>
+				  <button id="help-account-btn"></button>
+				  <div id="help-account-rich"><!-- built by js/net/account-panel.js when logged in, server-enabled builds only --></div>
 				  <h4 style="margin:10px 0 4px">Accessibility</h4>
 				  <label style="display:flex;align-items:center;gap:8px;margin:4px 0">UI text size
 				    <input type="range" id="fontscale" min="70" max="200" step="5" style="flex:1"></label>

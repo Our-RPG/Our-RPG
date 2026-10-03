@@ -2,7 +2,7 @@
 -- TOPIC MENU (user req 2026-10-03): see js/lua/prelude.lua's topic_menu().
 local TOPICS = {
   { q = "What should I ask you?",
-    a = "Ask me what I love about my knoll. Ask about the rain that soaked you at the bank camp, or what I make of the Warden's slimes, or whether the stars go out. And understand what you hear: no script, no wheel of stock phrases, and no dream-machine inventing words nobody meant. Every answer is a thing a real soul once truly said, found because it fits YOUR words. Say something to me — and hear for yourself." },
+    a = "Ask me what I love about my knoll. Ask about the rain that soaked you at the bank camp, or what I make of the Warden's slimes, or whether the stars go out. And understand what you hear: no script, no wheel of stock phrases, and no dream-machine inventing words nobody meant. Every answer is a thing a real soul once truly said, found because it fits YOUR words. Tap / and say something to me — and hear for yourself." },
   { q = "Tell me about this sky, then.",
     a = function()
       add_item("coins", 30)
@@ -29,7 +29,7 @@ on_npc("tut_sky", function()
     topic_menu(TOPICS, "Thanks — I'm off")
     return
   end
-  chatnpc("Before the sky, a wonder closer to hand. Everyone you've met on this isle — everyone in this whole world — can be SPOKEN WITH. Not clicked. Spoken with. Press ENTER, say anything in your own words, and we answer.")
+  chatnpc("Before the sky, a wonder closer to hand. Everyone you've met on this isle — everyone in this whole world — can be SPOKEN WITH. Not clicked. Spoken with. When we're done here, step back and tap the / key — a chat line opens beneath your log. Type anything in your own words, press Enter, and we answer.")
   topic_menu(TOPICS, "I'll go and really talk to you now.")
   tut_complete("sky")
 end)

@@ -294,6 +294,32 @@ if (interactModeBtn) {
   syncInteractModeBtn();
 }
 
+// ---- run/walk toggle (sidebar button): Walk is the default move speed
+// (×1.00, same for every character); Run (×1.45, character-stats.js
+// charSpeedMul) covers ground faster but works up a sweat on every step
+// (gameplay/movement.js moveTo -> stink.js). Persisted as a client
+// preference in localStorage; default walk. ----
+window.runMode = (() => { try { return localStorage.getItem("taiao_runmode") === "run"; } catch (e) { return false; } })();
+const runModeBtn = document.getElementById("runmodebtn");
+function syncRunModeBtn() {
+  if (!runModeBtn) return;
+  const running = !!window.runMode;
+  runModeBtn.textContent = running ? "Mode: 🏃 Run" : "Mode: 🚶 Walk";
+  runModeBtn.classList.toggle("run", running);
+  runModeBtn.classList.toggle("walk", !running);
+}
+if (runModeBtn) {
+  runModeBtn.addEventListener("click", () => {
+    window.runMode = !window.runMode;
+    try { localStorage.setItem("taiao_runmode", window.runMode ? "run" : "walk"); } catch (e) {}
+    syncRunModeBtn();
+    if (typeof log === "function") log(window.runMode
+      ? "You break into a run — faster, but you'll work up a sweat."
+      : "You settle back into a walk.", "sys");
+  });
+  syncRunModeBtn();
+}
+
 // (The sidebar Character button was removed — the character/appearance chooser
 // is reachable only from the isle's first keeper or Newhaven's Registrar now.)
 // sidebar Soap button — same as Left-Shift+S (the soaps comparison menu).
