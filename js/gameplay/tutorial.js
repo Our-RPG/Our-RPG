@@ -70,9 +70,10 @@ const TUT_TUTORS = [
   { id: "sky",    name: "Ravenna",   role: "Skywatcher",  pod: 11, dx: 0,  dy: -2, look: 1, mix: 312 },
   { id: "candle", name: "Miles",     role: "Candlemaker", pod: 12, dx: 3,  dy: -3, look: 4, mix: 277 },
   { id: "lore",   name: "Runa",      role: "Loremaster",  pod: 13, dx: 3,  dy: -3, look: 4, mix: 284 },
-  // Sigrid stands at the PIER'S BASE (the deck runs seaward along pod 14's
-  // -108° radial from k=12) — her old (0,+26) seat was a stale serpentine-
-  // era offset that landed her INSIDE the middle ring, behind the fence
+  // Sigrid stands on the HARBOUR SHORE at the water's edge (pod 14's seaward
+  // -108° radial, just inshore of the coast ≈11 units out) — there's no pier
+  // or boat; her wayfinding song lifts you off the isle, so she sings from the
+  // open foreshore. Her old (0,+26) seat was a stale serpentine-era offset.
   { id: "ferry",  name: "Sigrid",    role: "Navigator",   pod: 14, dx: -3, dy: -10, look: 5, mix: 291 },
 ];
 
@@ -99,7 +100,7 @@ function TUT_MIX_DEF(i) {
 // the -90° spoke), tents scattered through both. `seats` is where each
 // keeper stands once they've come home for the evening (early keepers camp
 // by the Landing, later ones round the Harbour green; the Navigator keeps
-// her own post by the waka), `lamps` the stands lit at dusk — every entry
+// her own post on the shore), `lamps` the stands lit at dusk — every entry
 // carries its `pod` (0 or 14) plus game-tile offsets from that pod's centre.
 var TUT_VILLAGE = (() => {
   const seats = {};
@@ -130,7 +131,7 @@ var TUT_VILLAGE = (() => {
   // stamps these through the same stampBuilding pipeline natural settlements
   // use (floors, walls, roof, a south door). x0/y0 are game-tile offsets of
   // the footprint's NW corner from the pod centre; placed clear of the path,
-  // pier, seats, lamps and stamps.
+  // shore, seats, lamps and stamps.
   // MULTI-STOREY (user req 2026-09-17): kind "tut_house" (world.js
   // buildingMeta) gives each one a real upstairs reached by a ladder — a
   // hallway floor split into two bedroom alcoves, one per resident. The 14
@@ -451,14 +452,10 @@ const TUT_CONTENT = (() => {
     }
     stamps.push(at(6, 3, 0, { decor: "gate_wood" }));
   }
-  // pod 14 — the Harbour pier: a decked walk out over the water to the waka
-  // the Harbour PIER: decking from pod 14's camp straight out to sea, along
-  // its outward radial (the coast lies RO - podRadius ≈ 11 map units out)
-  {
-    const a = TUT_ISLE.pods[14].ang * Math.PI / 180;
-    for (let k = 12; k <= 30; k++)
-      stamps.push(at(14, Math.round(Math.cos(a) * k), Math.round(Math.sin(a) * k), { decor: "stone_bridge" }));
-  }
+  // pod 14 — the Harbour shore. No pier, no boat: Sigrid's wayfinding song
+  // lifts you off the isle (a pillar of light, not a hull), so the departure
+  // is just the open foreshore where she stands and sings. She waits at the
+  // water's edge (TUT_TUTORS ferry post) for the send-off.
   return { stamps };
 })();
 
@@ -1035,13 +1032,13 @@ const Tutorial = (() => {
       if (typeof sfx === "function") sfx("quest", 0.35);
     }
   }
-  // the morning after sleeping at Sigrid's — a fresh 6am, snapped to
+  // the morning after sleeping at Sigrid's — a fresh, bright morning, snapped to
   // instantly (the whole staged sky already works this way: every other
   // stage transition is an instant snap too, never real elapsed time) —
   // player.timeShiftMs (graduateCore's mechanism) is irrelevant here since
   // it only matters once graduated, when the staged sky stops overriding
   // dayPhase() entirely (user req 2026-09-17)
-  const MORNING_STAGE = { h: 6, wx: "clear", note: null };
+  const MORNING_STAGE = { h: 8, wx: "clear", note: null };
   const stage = () => {
     const t = state();
     if (t && t.sleptAtSigrids) return MORNING_STAGE;
@@ -1129,7 +1126,7 @@ const Tutorial = (() => {
   // Once the staged day reaches dusk (the Skywatcher met — h 17.75), every
   // keeper whose stage is DONE walks home to their seat in pod 14's village
   // (TUT_VILLAGE.seats); the frontier keeper and those ahead hold their
-  // posts, and the Navigator never leaves her waka. deriveNpcs (chunks.js)
+  // posts, and the Navigator never leaves the shore. deriveNpcs (chunks.js)
   // asks villageHome() so freshly hydrated chunks seat them right, and
   // _villageSync moves the LIVE npc objects when the state flips mid-session
   // (hooked into refreshBar, so any progress event settles them).
@@ -1164,9 +1161,18 @@ const Tutorial = (() => {
       n.level = n.level || 0;
     }
   }
+  // "Village time" = the keepers are gathered at the Harbour Village, not out
+  // at their lesson posts: from the staged dusk (Skywatcher met, h≥17.5)
+  // through the night AND into the morning after you sleep at Sigrid's. Without
+  // the morning clause every met keeper snapped back to their distant pod the
+  // instant the sky rolled to a fresh dawn, emptying the village (user report).
+  function villageMorning() {
+    const t = state();
+    return !!(t && !t.graduated && t.sleptAtSigrids);
+  }
   function villageAt() {
     const t = state();
-    return !!(t && !t.graduated && stage().h >= 17.5);
+    return !!(t && !t.graduated && (stage().h >= 17.5 || t.sleptAtSigrids));
   }
   function villageHome(id) {
     if (typeof TUT_VILLAGE === "undefined" || !villageAt()) return null;
@@ -1384,10 +1390,10 @@ const Tutorial = (() => {
     }
   }
   // Sigrid's post moves with the story (user req 2026-09-17): her fixed
-  // day/early-game/post-sleep spot is by the pier (her own dx/dy), but for
-  // the one evening stretch where the journey is otherwise done and she
-  // hasn't sent the player to bed yet, she's mingling by the Harbour
-  // green's campfire instead (tutorial.js:415's campfire_ring decor).
+  // day/early-game/post-sleep spot is down on the shore (her own dx/dy),
+  // where she sings the crossing; but for the one evening stretch where the
+  // journey is otherwise done and she hasn't sent the player to bed yet, she's
+  // mingling by the Harbour green's campfire instead (campfire_ring decor).
   function ferryPost() {
     const tu = TUT_TUTORS.find(t2 => t2.id === "ferry");
     const t = state();
@@ -1406,11 +1412,17 @@ const Tutorial = (() => {
       // mid-escort, walking her own two legs home, or already settled in
       // her own bed for the night — don't let a routine refreshBar() call
       // yank her back to a "post" position. Once sleptAtSigrids flips
-      // (morning), this no longer applies and she relocates to the pier.
+      // (morning), this no longer applies and she relocates to the shore.
       if (n.tutor === "ferry" && (n._escortTarget || (t && t.escorting) ||
           (t && t.sigridSettled && !t.sleptAtSigrids))) continue;
       const tu = TUT_TUTORS.find(t2 => t2.id === n.tutor);
       if (!tu) continue;
+      // Morning after the sleep: the keepers' teaching is done — they drop
+      // their tutor script and become ordinary villagers you chat with through
+      // the NPC engine (press /). Sigrid alone keeps hers, to sing you up.
+      // Done here (not only in offDutyIfy) because a keeper already settled at
+      // dusk won't "move" this sync, so offDutyIfy wouldn't re-run on them.
+      if (villageMorning() && tu.id !== "ferry" && n._script) n._script = null;
       const vh = villageHome(n.tutor);
       const pod = TUT_ISLE.pods[tu.pod];
       const post = n.tutor === "ferry" ? ferryPost() : { dx: tu.dx, dy: tu.dy };
@@ -1424,7 +1436,7 @@ const Tutorial = (() => {
         offDutyIfy(n, tu);
       }
     }
-    if (moved && villageAt()) {
+    if (moved && villageAt() && !villageMorning()) {
       const t = state();
       if (t && !t.villageAnnounced) {
         t.villageAnnounced = 1;
@@ -1436,7 +1448,8 @@ const Tutorial = (() => {
   // the village lamp stands, for daynight.js litCandlesNear: lit one by one
   // as the staged dusk deepens (thr staggering, same as settlement stands)
   function villageLamps() {
-    if (!villageAt() || typeof TUT_VILLAGE === "undefined") return [];
+    // lit only through the dusk/night gathering — never in the bright morning
+    if (!villageAt() || villageMorning() || typeof TUT_VILLAGE === "undefined") return [];
     const out = [];
     TUT_VILLAGE.lamps.forEach((L, i) => {
       const [px, py] = podXY(L.pod);   // stands light both halves of the shore
@@ -1987,7 +2000,7 @@ const Tutorial = (() => {
   return { START, maybeWelcome, graduate, state, onIsle, active,
     phaseOverride, weatherOverride, flatSky, barred, frontier, refreshBar, goalState,
     skillVisible, riverFlow, tick, onCraft, anvilRecipes,
-    villageHome, villageLamps, offDutyLine, villageBed, tutHouseUpperDecor,
+    villageHome, villageLamps, villageMorning, offDutyLine, villageBed, tutHouseUpperDecor,
     sigridSpareBedAt, sleepAtSigrids, ferryPost, onEscortArrive, onApproachArrive, tickEscort,
     // scripts/npc/tutors/*.lua bridge (js/lua/lua-host.js's __tut_*)
     seen, taskDone, taskLabel, tutorDisplayName, complete, journeyDone, slept,

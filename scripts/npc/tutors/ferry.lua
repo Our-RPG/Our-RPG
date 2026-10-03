@@ -11,8 +11,8 @@ on_npc("tut_ferry", function()
   -- she hosts, and offers to skip the rest of the journey outright
   if not tut_journey_done() then
     chatnpc("Haere mai to the village, traveller! This shore is where the keepers lay their heads when the day's teaching is done — walk among the tents; you're welcome here any hour.")
-    choice("When does your waka sail?")
-    chatnpc("She properly sails for Newhaven once every keeper on the path has sent you on — their lessons, tools and gifts yours along the way. But if you'd rather not wait, say the word and I'll sing you there right now: you'll land with empty hands, nothing learned, and no going back to finish what you skipped.")
+    choice("How do I get to Newhaven?")
+    chatnpc("No boat leaves Tūhura — I sing you there. My wayfinding song lifts you over the roof of the sky once every keeper on the path has sent you on, their lessons, tools and gifts yours along the way. But if you'd rather not wait, say the word and I'll sing you up right now: you'll land with empty hands, nothing learned, and no going back to finish what you skipped.")
     local r = choice("Skip ahead — sing me up now", "I'll earn it properly")
     if r == 1 then tut_graduate() end
     return

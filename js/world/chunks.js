@@ -478,8 +478,13 @@ function createWorldChunks(ctx) {
           // <role>" (mix-roster or Māori fallback, see below), which never
           // matches a plain on_npc(id, ...) registration, so a stable key
           // independent of the roster/name is required. scripts/npc/tutors/
-          // *.lua all register on this exact "tut_<id>" string.
-          _script: "tut_" + tu.id,
+          // *.lua all register on this exact "tut_<id>" string. In the morning
+          // after the sleep every keeper but Sigrid has dropped their lesson
+          // and become an ordinary engine-chat villager (Tutorial.villageMorning),
+          // so they carry NO script and talkTo falls through to normal chat.
+          _script: (typeof Tutorial !== "undefined" && Tutorial.villageMorning &&
+                    Tutorial.villageMorning() && tu.id !== "ferry")
+            ? undefined : "tut_" + tu.id,
           line: vh && typeof Tutorial !== "undefined" && Tutorial.offDutyLine
             ? Tutorial.offDutyLine(tu.id)
             : `"Haere mai! Come, let me show you something."`,
