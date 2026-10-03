@@ -33,6 +33,13 @@
     .stats td { padding: 6px 10px; border-bottom: 1px solid #2a2d3d; }
     .stats td:last-child { text-align: right; color: #ffd75e; font-weight: bold; }
     .credits { color: #8f96ad; font-size: 13px; line-height: 1.6; }
+    .shots-intro { color: #b8c4dd; font-size: 14px; margin: -6px 0 14px; }
+    .shots { column-count: 2; column-gap: 12px; }
+    @media (max-width: 560px) { .shots { column-count: 1; } }
+    figure.shot { break-inside: avoid; margin: 0 0 12px; }
+    figure.shot img { width: 100%; height: auto; display: block; border-radius: 8px;
+      border: 1px solid #2a2d3d; background: #0e1016; }
+    figure.shot figcaption { color: #8f96ad; font-size: 12.5px; line-height: 1.4; margin-top: 5px; }
     footer { margin-top: 56px; text-align: center; color: #5c6480; font-size: 12px; }
     code { background: #1c1f2c; padding: 1px 5px; border-radius: 3px; font-size: 13px; }
   </style>
@@ -53,7 +60,7 @@
     <p>Our RPG began life as <i>Taiao</i>, te reo Māori for the natural world
     — and the natural world is still what it's made of. It's a
     browser-native RPG in the spirit of old-school tile-based
-    MMOs — RPG MO, early RuneScape — rendered HD-2D: a WebGL world with a
+    MMOs — rendered HD-2D: a WebGL world with a
     tilted chase camera, depth fog, and billboarded pixel art.
     <b>No install.</b> Play it here and past the tutorial island it's a
     shared, live world — a free account is needed (no email required) and
@@ -69,6 +76,26 @@
     native birds of Aotearoa fly, perch, and sing — real field recordings,
     mixed spatially into a dawn chorus. Everyone plays the same seed: a
     place you find is a place a friend can visit.</p>
+
+    <h2>A look at the world</h2>
+    <p class="shots-intro">Every scene below is the live game, rendered in your browser — not concept art.</p>
+    <div class="shots">
+      <figure class="shot"><img src="home-shots/mushroom-forest-night.webp" loading="lazy" alt="The Giant Mushroom Forest glowing at night"><figcaption>The Giant Mushroom Forest, glowing after dark.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/aurora.webp" loading="lazy" alt="Aurora over a volcanic coast at night"><figcaption>An aurora over the volcanic coast.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/city.webp" loading="lazy" alt="A walled city on the coast seen from its gate"><figcaption>A walled city on the coast, seen from its gate.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/character-select.webp" loading="lazy" alt="The character selection grid of hundreds of pixel-art folk"><figcaption>Choose your character from the world's folk.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/canyon.webp" loading="lazy" alt="Red canyon country at golden hour"><figcaption>Red canyon country at golden hour.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/oasis.webp" loading="lazy" alt="A green oasis meeting orange desert sands"><figcaption>A green oasis meeting the desert sands.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/volcano.webp" loading="lazy" alt="Lava flows across black volcanic flats beside the sea"><figcaption>Lava flows across the volcanic flats.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/river.webp" loading="lazy" alt="A river carving through orange badlands"><figcaption>A river carves through the badlands.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/coral-reef.webp" loading="lazy" alt="Coral reefs beneath a shallow sea"><figcaption>Coral reefs beneath a shallow sea.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/gem-fields.webp" loading="lazy" alt="Gem and ore fields casting long shadows at golden hour"><figcaption>Gem fields and long shadows at golden hour.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/creatures.webp" loading="lazy" alt="Wilderness creatures roaming the badlands"><figcaption>Wilderness creatures — hawks, scorpions, giant beasts.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/portal.webp" loading="lazy" alt="A stone portal ringed with crystals in a town"><figcaption>Portals carry you across the world.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/map-weather.webp" loading="lazy" alt="World map with live weather: isobars, fronts, wind barbs and pressure centres"><figcaption>The world map: live weather on real isobars and fronts.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/map-timezones.webp" loading="lazy" alt="World map showing time-zone bands and the equator"><figcaption>The same map: time zones and the equator.</figcaption></figure>
+      <figure class="shot"><img src="home-shots/map-daynight.webp" loading="lazy" alt="World map of biomes and coastlines with the day/night cycle"><figcaption>And again: biomes, coasts and the day/night cycle.</figcaption></figure>
+    </div>
 
     <h2>How you play</h2>
     <ul>

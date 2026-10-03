@@ -48,6 +48,7 @@ cp index.html dist/site/play.html   # the game, now served at /play (same asset
                                      # trailing slash resolves relative paths
                                      # identically to "/")
 cp home.html dist/site/home.html    # marketing homepage, served at /home
+cp -r home-shots dist/site/home-shots   # homepage screenshot gallery (home.html refs home-shots/*.webp)
 cp koha.html dist/site/koha.html    # donations (Stripe Checkout), served at /koha
 cat > dist/site/index.html <<'EOF'  # root -> /home (overwrites the studio build's redirect page)
 <!doctype html>
