@@ -15,13 +15,15 @@
  *              sentAt, recvAt, country, dropped, events:[[t,type,...], ...]}
  */
 
-import { json, err, readJson, now, authUser, rateLimit } from "./util.js";
+import { json, err, readJson, now, authUser, rateLimit, clientIp, constantTimeEqual } from "./util.js";
 
 const MAX_BODY = 1024 * 1024;   // a full batch of ~3000 compact events is ~100 KB
 const MAX_EVENTS = 5000;        // per batch
 const MAX_FIELDS = 8;           // per event
 const MAX_STR = 80;             // per string field
-const BATCHES_PER_HOUR = 300;   // per device — the client sends ~2/min at most
+const BATCHES_PER_HOUR = 300;       // per device — the client sends ~2/min at most
+const BATCHES_PER_IP_HOUR = 600;    // per IP — several tabs/devices behind one NAT are fine; this is the real throttle (device id is client-chosen and freely rotated)
+const ANON_GLOBAL_PER_DAY = 100000; // global ceiling on anonymous batches/day — bounds total unauthenticated R2 write volume even across a swarm of rotating IPs
 
 function cleanEvents(raw) {
   if (!Array.isArray(raw)) return null;
@@ -46,8 +48,20 @@ export async function ingest(req, env) {
   const b = await readJson(req, MAX_BODY);
   if (!b || typeof b.device !== "string" || !/^[\w-]{4,64}$/.test(b.device))
     return err("Bad request body.");
+  // Three throttles, all single-row D1 upserts, so a rejected request never
+  // reaches the 1 MB R2 put. The per-device key is trivially evaded (the client
+  // chooses `device`), so the per-IP cap is the real throttle on write
+  // amplification; the per-day global ceiling bounds total ANONYMOUS R2 write
+  // volume even across many rotating IPs.
   if (!await rateLimit(env, `tele:${b.device}`, BATCHES_PER_HOUR, 3600))
     return err("Too many telemetry batches.", 429);
+  if (!await rateLimit(env, `tele-ip:${clientIp(req)}`, BATCHES_PER_IP_HOUR, 3600))
+    return err("Too many telemetry batches.", 429);
+  if (!user) {
+    const gday = new Date(now()).toISOString().slice(0, 10);
+    if (!await rateLimit(env, `tele-global:${gday}`, ANON_GLOBAL_PER_DAY, 86400))
+      return err("Anonymous telemetry is busy right now; sign in to keep sharing.", 429);
+  }
   const events = cleanEvents(b.events);
   if (!events || !events.length) return err("No events.");
 
@@ -80,15 +94,15 @@ export async function ingest(req, env) {
 
 // ---- maintainer analysis surface (ADMIN_TOKEN, curl-first like admin.js) ----
 
-function isAdmin(req, env) {
+async function isAdmin(req, env) {
   const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
-  return !!(env.ADMIN_TOKEN && m && m[1] === env.ADMIN_TOKEN);
+  return !!(env.ADMIN_TOKEN && m && await constantTimeEqual(m[1], env.ADMIN_TOKEN));
 }
 
 /* GET /api/admin/telemetry?day=YYYY-MM-DD[&cursor=...]  — list a day's batches.
  * GET /api/admin/telemetry?key=tele/.../....json         — fetch one batch. */
 export async function adminBrowse(req, env, url) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const key = url.searchParams.get("key");
   if (key) {
     if (!key.startsWith("tele/")) return err("Telemetry keys only.");

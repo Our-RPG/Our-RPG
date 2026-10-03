@@ -57,6 +57,26 @@ export async function tally(req, env, url) {
 
 // ---- proposals ------------------------------------------------------------
 
+// Server-side provenance: does this proposal carry a binary asset we'd host
+// and distribute? True when the payload inlines binary bytes (a data: URI —
+// the dataURL sprite strips / sounds MAX_PAYLOAD is sized for) or references a
+// sprite/sound asset the overlay fetches and patches into everyone's game
+// (costume.dirs image URLs, sound.src — the exact fields proposal-overlay.js
+// applies). Pure data/value proposals (quests, recipes, skills, rules, votes)
+// carry none of these. Derived from the payload itself, NEVER from a
+// client-asserted `source`, so the moderation lane can't be chosen by the
+// submitter. A false positive only means a trip to the curator queue, which
+// is the safe side to err on.
+function payloadCarriesAsset(obj, str) {
+  if (/data:[a-z0-9.+-]+\/[a-z0-9.+-]+\s*[;,]/i.test(String(str))) return true;  // inlined binary
+  if (!obj || typeof obj !== "object") return false;
+  const dirs = obj.costume && obj.costume.dirs;
+  if (dirs && typeof dirs === "object" &&
+      Object.values(dirs).some(v => typeof v === "string" && v.trim())) return true;
+  if (obj.sound && typeof obj.sound.src === "string" && obj.sound.src.trim()) return true;
+  return false;
+}
+
 export async function submitProposal(req, env) {
   const user = await authUser(req, env);
   if (!user) return err("Not logged in.", 401);
@@ -72,30 +92,26 @@ export async function submitProposal(req, env) {
   const title = String(b.title || subject).slice(0, 120);
   if (!subject) return err("subject required");
 
-  // Provenance decides the moderation path. Only user-UPLOADED binary assets
-  // wait at 'pending' for a curator; PixelLab-generated art (licensed by
-  // generation) and pure data/value proposals ('data' — quests, recipes,
-  // rules, votes: no uploaded binary) auto-publish for voting, as before.
-  const source = ["pixellab", "data", "upload"].includes(b.source) ? b.source : "upload";
-  let status = source === "upload" ? "pending" : "open";
+  // Provenance decides the moderation path, and the SERVER — not the client —
+  // decides provenance. The control: anything carrying a user-uploaded binary
+  // asset (a sprite strip / sound we'd host and serve to every player) waits
+  // at 'pending' for a curator. Pure data/value proposals (quests, recipes,
+  // skills, rules, votes — no binary) carry nothing to host, so they go
+  // straight to the voteable 'open' lane. b.source is advisory only and is
+  // NEVER consulted for the lane: a client can't opt a binary out of review by
+  // claiming "pixellab"/"data", because we detect the binary ourselves and
+  // store the derived provenance, not the claim.
+  const carriesAsset = payloadCarriesAsset(b.payload, payload);
+  const source = carriesAsset ? "upload" : "data";
+  const status = carriesAsset ? "pending" : "open";
 
-  // Trust model, rung 3: a PixelLab generation that FILLS A GAP (the studio's
-  // gen_gaps manifest — art that's missing or weak today) skips voting
-  // entirely and ships straight into the community layer. Nothing to
-  // moderate: it's trusted generation closing a hole nobody had opinions
-  // about yet. If the gap already got filled by someone else since the
-  // manifest was last regenerated, it's not a gap anymore — fall back to
-  // the normal 'open' voting lane instead of accepting a duplicate.
-  if (source === "pixellab") {
-    const gapsObj = await env.VAULT.get("workshop/gaps.json");
-    const subjects = gapsObj ? (JSON.parse(await gapsObj.text()).subjects || []) : [];
-    if (subjects.includes(subject)) {
-      const already = await env.DB.prepare(
-        "SELECT id FROM proposals WHERE subject = ? AND status = 'accepted' LIMIT 1"
-      ).bind(subject).first();
-      if (!already) status = "accepted";
-    }
-  }
+  // The old PixelLab gap auto-accept (status 'accepted' with NO human review)
+  // is gone. There is no server-verifiable signal that a dataURL was produced
+  // by PixelLab rather than hand-uploaded — both arrive identically in the
+  // payload — and gaps.json is publicly readable, so an attacker could name
+  // any gap subject to self-accept arbitrary art. Gap-filling art, like every
+  // other uploaded asset, now lands in the curator 'pending' queue; a curator
+  // adopts it from there (review()), which is the only path to 'accepted'.
 
   const r = await env.DB.prepare(
     "INSERT INTO proposals (user_id, subject, kind, title, licence, size, status, source, created_at) VALUES (?,?,?,?,?,?,?,?,?)"

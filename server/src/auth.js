@@ -34,9 +34,10 @@ const RESERVED = new Set(["admin", "taiao", "moderator", "curator", "system", "k
 
 export async function register(req, env) {
   const ip = clientIp(req);
-  // TEMPORARILY raised 5 -> 500 while debugging a signup report (2026-10-01)
-  // — revert to 5 once confirmed fixed. See memory/project notes.
-  if (!await rateLimit(env, `reg:${ip}`, 500, 3600)) return err("Too many signups from this address — try later.", 429);
+  // argon2id signup is CPU-heavy (~100-200 ms) plus a D1 insert, so cap new
+  // accounts hard: 5 per hour per IP. (Was briefly raised to 500 on 2026-10-01
+  // to chase a signup report; reverted now that it's resolved.)
+  if (!await rateLimit(env, `reg:${ip}`, 5, 3600)) return err("Too many signups from this address — try later.", 429);
   const b = await readJson(req);
   if (!b) return err("Bad request body.");
   const { username, password, email, turnstile } = b;
@@ -67,12 +68,26 @@ export async function login(req, env) {
   const b = await readJson(req);
   if (!b) return err("Bad request body.");
   const { username, password, turnstile } = b;
-  if (!await rateLimit(env, `login-u:${String(username).toLowerCase()}`, 10, 900))
-    return err("Too many attempts for this account — try later.", 429);
+  const uname = String(username || "").toLowerCase();
+  // Targeted-lockout defence: throttle FAILED logins per IP + username, keyed on
+  // the caller's IP (not the username alone) and counting only wrong passwords.
+  // A third party firing bad guesses at a victim's name therefore only fills
+  // THEIR own IP's bucket — it can never block the victim's correct-password
+  // login, which is checked before and independent of this counter. The read
+  // below mirrors rateLimit's fixed window (util.js) so we can reject without
+  // consuming budget; the increment happens only on a wrong password.
+  const failKey = `login-fail:${ip}:${uname}`;
+  const failWin = now() - (now() % (900 * 1000));
+  const fr = await env.DB.prepare("SELECT count FROM rate_limits WHERE key = ? AND win_start = ?")
+    .bind(failKey, failWin).first();
+  if (fr && (fr.count | 0) >= 10) return err("Too many attempts for this account — try later.", 429);
   if (!await verifyTurnstile(env, turnstile, ip)) return err("Bot check failed — reload and try again.", 403);
 
   const user = await env.DB.prepare("SELECT * FROM users WHERE username = ?").bind(username || "").first();
-  if (!user || !verifyPassword(password || "", user.pass_hash)) return err("Wrong name or password.", 401);
+  if (!user || !verifyPassword(password || "", user.pass_hash)) {
+    await rateLimit(env, failKey, 10, 900);   // count this failure toward the IP+username budget
+    return err("Wrong name or password.", 401);
+  }
   if ((user.flags || "").split(" ").includes("banned")) return err("This account is suspended.", 403);
   await env.DB.prepare("UPDATE users SET last_seen = ? WHERE id = ?").bind(now(), user.id).run();
   const token = await createSession(env, user.id);

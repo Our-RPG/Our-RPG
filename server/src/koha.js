@@ -48,7 +48,13 @@ export async function checkout(req, env) {
   const interval = b && b.interval === "month" ? "month" : "once";
   if (!Number.isFinite(amount) || amount < 1 || amount > 500)
     return err("Need {amount: 1-500, interval: 'once'|'month'}.");
-  const origin = req.headers.get("origin") || "https://our-rpg.com";
+  // Never reflect an unvalidated Origin into the Stripe redirect URLs: a
+  // third-party page could otherwise bounce the donor to its own domain after
+  // payment (phishing). Mirror index.js's ALLOWED_ORIGINS allowlist; anything
+  // off it — or a missing Origin — falls back to the canonical site.
+  const reqOrigin = req.headers.get("origin") || "";
+  const allowed = (env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
+  const origin = allowed.includes(reqOrigin) ? reqOrigin : "https://our-rpg.com";
   const priceData = {
     currency: "usd",
     unit_amount: Math.round(amount * 100),

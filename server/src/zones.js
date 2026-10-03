@@ -31,7 +31,7 @@
  * our-rpg.com/workshop/npc/* — static files pass straight through to Pages;
  * only 404s for live community zones get a synthesized shell. */
 
-import { json, err, readJson, now, authUser, rateLimit } from "./util.js";
+import { json, err, readJson, now, authUser, rateLimit, isCurator, escapeHtml, jsonForScript, randToken, constantTimeEqual } from "./util.js";
 
 const LEASE_MS = 3 * 60 * 1000;          // heartbeat every ~30s; 3 min silence = abandoned
 const COORD_MAX = 100;                    // |zx|,|zy| cap — plenty of world, bounds the keyspace
@@ -66,6 +66,40 @@ function pub(r) {
   };
 }
 const safeParse = s => { try { return JSON.parse(s); } catch { return null; } };
+
+/* ---- publish-time content validation (#1 belt-and-braces, #9 bounds) -----
+ * Output escaping in the page shells is the real XSS fix; this is a second
+ * gate so abusive player-authored manifests/pages never reach R2 in the first
+ * place. We cap the big arrays (reject implausibly large payloads) and clean
+ * every player-authored string in place: strip control characters and cap the
+ * length. Cleaning the parsed object is enough because publish re-serializes
+ * it (JSON.stringify(man)) rather than copying the raw bytes. */
+const ZLIMITS = { npcs: 20000, cities: 5000, villages: 20000, monsters: 50000 };
+const MAX_NAME = 200;      // NPC / city / village display names
+const MAX_TEXT = 4000;     // longer free-text fields (bio/description/dialogue)
+const CTRL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;   // control chars; keep \t \n \r
+const cleanStr = (s, max) => String(s == null ? "" : s).replace(CTRL_CHARS, "").slice(0, max);
+// clean the well-known string fields of an authored record, in place
+function cleanRecord(o) {
+  if (!o || typeof o !== "object") return;
+  for (const k of ["name", "title", "role"]) if (typeof o[k] === "string") o[k] = cleanStr(o[k], MAX_NAME);
+  for (const k of ["text", "bio", "desc", "description", "dialogue", "msg", "line"])
+    if (typeof o[k] === "string") o[k] = cleanStr(o[k], MAX_TEXT);
+}
+// Returns an error message when the manifest is implausibly large, else null.
+// Mutates `man` to strip control chars / cap string lengths on authored fields.
+function validateManifest(man) {
+  const npcs = man.npcs || [], cities = man.cities || [], monsters = man.monsters || [];
+  const villages = (man.feat && man.feat.villages) || [];
+  if (npcs.length > ZLIMITS.npcs) return "Manifest has too many NPCs.";
+  if (cities.length > ZLIMITS.cities) return "Manifest has too many cities.";
+  if (villages.length > ZLIMITS.villages) return "Manifest has too many villages.";
+  if (monsters.length > ZLIMITS.monsters) return "Manifest has too many monsters.";
+  for (const n of npcs) cleanRecord(n);
+  for (const c of cities) cleanRecord(c);
+  for (const v of villages) cleanRecord(v);
+  return null;
+}
 
 /* ---- public reads ------------------------------------------------------- */
 
@@ -143,6 +177,18 @@ export async function claim(req, env) {
       `INSERT INTO community_zones (zx, zy, status, stage, pct, msg, holder_user_id, holder_name, lease_until, contributors, created_at, updated_at)
        VALUES (?,?,'baking',0,0,'claimed',?,?,?,?,?,?)`
     ).bind(zx, zy, user.id, user.username, t + LEASE_MS, JSON.stringify([user.username]), t, t).run();
+  } else if (row.status === "removed") {
+    // a taken-down coord (moderation) is free — re-bake it from scratch
+    const r = await env.DB.prepare(
+      `UPDATE community_zones SET status = 'baking', stage = 0, pct = 0, msg = 'claimed',
+         holder_user_id = ?, holder_name = ?, lease_until = ?, contributors = ?, updated_at = ?,
+         npc_count = NULL, city_count = NULL, monster_count = NULL, quest_count = NULL, published_at = NULL
+       WHERE zx = ? AND zy = ? AND status = 'removed'`
+    ).bind(user.id, user.username, t + LEASE_MS, JSON.stringify([user.username]), t, zx, zy).run();
+    if (!r.meta.changes) {
+      const cur = await getRow(env, zx, zy);
+      return json({ error: "held", zone: cur ? pub(cur) : null }, 409);
+    }
   } else {
     const contrib = safeParse(row.contributors) || [];
     if (!contrib.includes(user.username)) contrib.push(user.username);
@@ -242,13 +288,24 @@ export async function publish(req, env) {
   for (const k of ["npcs", "cities"])
     if (!Array.isArray(man[k])) return err("Manifest is missing its " + k + " pass.", 422);
   if (!man.feat || !Array.isArray(man.feat.villages)) return err("Manifest is missing its features pass.", 422);
+  // #9 bounds + #1 belt-and-braces: reject implausibly large manifests and
+  // strip control chars / cap authored string lengths (mutates man in place).
+  const tooMuch = validateManifest(man);
+  if (tooMuch) return err(tooMuch, 422);
   const mapObj = await env.VAULT.get(bakeKey(zx, zy, "map.png"));
   if (!mapObj) return err("No map image checkpoint to publish.", 409);
   const pagesObj = await env.VAULT.get(bakeKey(zx, zy, "pages.json"));
 
   await env.VAULT.put(liveKey(zx, zy, "manifest.json"), JSON.stringify(man), { httpMetadata: { contentType: "application/json" } });
   await env.VAULT.put(liveKey(zx, zy, "map.png"), await mapObj.arrayBuffer(), { httpMetadata: { contentType: "image/png" } });
-  if (pagesObj) await env.VAULT.put(liveKey(zx, zy, "pages.json"), await pagesObj.arrayBuffer(), { httpMetadata: { contentType: "application/json" } });
+  if (pagesObj) {
+    // sanitize the NPC name index before it goes live — these names feed the
+    // NPC page <title> (escaped at output too, but clean the stored source as well)
+    const pages = safeParse(await pagesObj.text()) || {};
+    if (Array.isArray(pages.npcs))
+      for (const p of pages.npcs) if (p && typeof p.name === "string") p.name = cleanStr(p.name, MAX_NAME);
+    await env.VAULT.put(liveKey(zx, zy, "pages.json"), JSON.stringify(pages), { httpMetadata: { contentType: "application/json" } });
+  }
 
   const quests = Number(b?.quests) || (man.npcs.filter(n => n.role === "quest-giver" || n.role === "quest-anchor").length);
   const t = now();
@@ -273,13 +330,48 @@ export async function publish(req, env) {
  */
 export async function adminSetZoneMap(req, env, url) {
   const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
-  if (!env.ADMIN_TOKEN || !m || m[1] !== env.ADMIN_TOKEN) return err("Nope.", 403);
+  if (!env.ADMIN_TOKEN || !m || !(await constantTimeEqual(m[1], env.ADMIN_TOKEN))) return err("Nope.", 403);
   const c = coords(url); if (!c) return err("Bad zone coordinates.");
   const len = Number(req.headers.get("content-length") || 0);
   if (!len || len > KINDS.map.max) return err("Bad or oversized image.", 413);
   const body = await req.arrayBuffer();
   await env.VAULT.put(liveKey(c.zx, c.zy, "map.png"), body, { httpMetadata: { contentType: "image/png" } });
   return json({ ok: true, bytes: body.byteLength });
+}
+
+/* Moderation takedown (#9): pull a published (or in-flight) community zone back
+ * to 'removed', delete its live + checkpoint artifacts so the content stops
+ * serving, and free the coordinate so the community can re-bake it (claim()
+ * treats a 'removed' row as a fresh coord). Gated by a curator SESSION or the
+ * admin bearer token — the token is compared in constant time, never with ===.
+ * No migration needed: 'removed' is a new value of the existing status column.
+ *   curl -H "authorization: Bearer $ADMIN_TOKEN" -H "content-type: application/json" \
+ *     -d '{"zx":2,"zy":0}' "https://our-rpg.com/api/zones/takedown"
+ */
+export async function takedown(req, env) {
+  // accept either path: admin bearer token (constant-time) OR a curator session
+  const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
+  let authed = !!(m && env.ADMIN_TOKEN && await constantTimeEqual(m[1], env.ADMIN_TOKEN));
+  if (!authed) authed = isCurator(await authUser(req, env));
+  if (!authed) return err("Curator or admin only.", 403);
+  const b = await readJson(req);
+  const zx = Number(b?.zx), zy = Number(b?.zy);
+  if (!zoneOk(zx) || !zoneOk(zy)) return err("Bad zone coordinates.");
+  const row = await getRow(env, zx, zy);
+  if (!row) return err("No such zone.", 404);
+  const t = now();
+  // mark removed and clear the lease/holder/counts so the coord is free again
+  await env.DB.prepare(
+    `UPDATE community_zones SET status = 'removed', stage = 0, pct = 0, msg = 'removed',
+       holder_user_id = NULL, holder_name = NULL, lease_until = 0, published_at = NULL,
+       npc_count = NULL, city_count = NULL, monster_count = NULL, quest_count = NULL, updated_at = ?
+     WHERE zx = ? AND zy = ?`
+  ).bind(t, zx, zy).run();
+  // stop serving the taken-down content: live artifacts + any bake checkpoints
+  for (const f of ["manifest.json", "map.png", "pages.json"]) await env.VAULT.delete(liveKey(zx, zy, f));
+  for (const kind of Object.values(KINDS)) await env.VAULT.delete(bakeKey(zx, zy, kind.file));
+  await env.VAULT.delete(bakeKey(zx, zy, "monsters.json"));   // legacy checkpoint
+  return json({ ok: true, zx, zy, status: "removed" });
 }
 
 /* ---- synthesized page shells -------------------------------------------- */
@@ -290,28 +382,36 @@ export async function adminSetZoneMap(req, env, url) {
 
 const ICON = "<link rel=\"icon\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23060a08'/%3E%3Cpath d='M20 44 Q42 20 60 30 T92 22' stroke='%238f7ef0' stroke-width='5' fill='none' opacity='.55' stroke-linecap='round'/%3E%3Cpath d='M10 62 Q34 34 54 46 T94 38' stroke='%2356e39f' stroke-width='8' fill='none' stroke-linecap='round'/%3E%3Cpath d='M6 80 Q36 54 60 64 T96 58' stroke='%233ec6c0' stroke-width='5' fill='none' opacity='.75' stroke-linecap='round'/%3E%3Crect x='74' y='10' width='6' height='6' fill='%23eae4d2'/%3E%3Crect x='24' y='16' width='4' height='4' fill='%23eae4d2' opacity='.7'/%3E%3C/svg%3E\">";
 
-function shellHtml(title, root, cfg) {
+function shellHtml(title, root, cfg, nonce) {
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${title ? "Our RPG Workshop — " + title : "Our RPG Workshop"}</title>
+  <title>${title ? "Our RPG Workshop \u2014 " + escapeHtml(title) : "Our RPG Workshop"}</title>
   ${ICON}
-  <link rel="stylesheet" href="${root}css/studio.css">
+  <link rel="stylesheet" href="${escapeHtml(root)}css/studio.css">
 </head>
 <body>
   <noscript><p style="padding:2rem">Our RPG Workshop needs JavaScript.</p></noscript>
-  <script>window.STUDIO_ROOT = ${JSON.stringify(root)}; window.STUDIO_PAGE = ${JSON.stringify(cfg)};</script>
-  <script src="${root}dist/workshop-bundle.js"></script>
+  <script nonce="${nonce}">window.STUDIO_ROOT = ${jsonForScript(root)}; window.STUDIO_PAGE = ${jsonForScript(cfg)};</script>
+  <script src="${escapeHtml(root)}dist/workshop-bundle.js"></script>
 </body>
 </html>
 `;
 }
-const htmlResp = html => new Response(html, { headers: {
-  "content-type": "text/html; charset=utf-8",
-  "cache-control": "public, max-age=3600",
-} });
+// Synthesized HTML carries a per-response Content-Security-Policy (defense in
+// depth behind the output escaping): the single inline cfg <script> is allowed
+// only by a one-time nonce, every other script only from our own origin, and
+// <object>/<base> are forbidden outright.
+function shellResp(title, root, cfg) {
+  const nonce = randToken(16);
+  return new Response(shellHtml(title, root, cfg, nonce), { headers: {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "public, max-age=3600",
+    "content-security-policy": `script-src 'self' 'nonce-${nonce}'; object-src 'none'; base-uri 'none'`,
+  } });
+}
 
 // zone must be published for its shells to exist
 async function liveZoneRow(env, zx, zy) {
@@ -339,7 +439,7 @@ export async function pageShell(req, env, url) {
   if (m) {
     const zx = Number(m[1]), zy = Number(m[2]);
     if (await liveZoneRow(env, zx, zy))
-      return htmlResp(shellHtml(`Zone ${zx},${zy}`, "../", { kind: "zones", tab: "zones", zx, zy }));
+      return shellResp(`Zone ${zx},${zy}`, "../", { kind: "zones", tab: "zones", zx, zy });
     return origin || err("Not found.", 404);
   }
 
@@ -358,8 +458,8 @@ export async function pageShell(req, env, url) {
         if (hit) name = hit.name || null;
       }
       if (name != null || !pagesObj)   // no pages.json at all → serve anyway (page 404s client-side if bogus)
-        return htmlResp(shellHtml(name || `Zone ${zx},${zy} NPC`, "../../",
-          { kind: "npc", tab: "npc", zone: `${zx},${zy}`, id }));
+        return shellResp(name || `Zone ${zx},${zy} NPC`, "../../",
+          { kind: "npc", tab: "npc", zone: `${zx},${zy}`, id });
     }
     return origin || err("Not found.", 404);
   }

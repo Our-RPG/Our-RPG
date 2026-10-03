@@ -2,7 +2,12 @@
  * The fixed curve still governs gameplay (audit §8); this only starts the
  * data flywheel percentiles need. Everything here is public + cacheable.
  * "Qualifying" filtering by the level-16 floor is a query param so the
- * client (which owns the XP curve) supplies the floor value. */
+ * client (which owns the XP curve) supplies the floor value.
+ *
+ * Source is validated_xp (envelope.js), like ranks.js — NEVER the raw opt-in
+ * xp_snapshots, which are client-authoritative and forgeable by a single
+ * upload. The public board and distribution must reflect envelope-validated
+ * XP only; don't point these reads back at xp_snapshots. */
 
 import { json, err, now } from "./util.js";
 
@@ -16,7 +21,9 @@ export async function distribution(req, env, url) {
   if (!skill) return err("skill required");
   const min = Math.max(0, Number(url.searchParams.get("min") || 0));
   const rows = await env.DB.prepare(
-    "SELECT xp FROM xp_snapshots WHERE skill = ? AND xp >= ? AND updated_at >= ? ORDER BY xp LIMIT 100000"
+    `SELECT v.xp FROM validated_xp v JOIN users u ON u.id = v.user_id
+     WHERE v.skill = ? AND v.xp >= ? AND v.updated_at >= ?
+     AND u.flags NOT LIKE '%banned%' ORDER BY v.xp LIMIT 100000`
   ).bind(skill, min, now() - QUALIFY_WINDOW).all();
   const xs = rows.results.map(r => r.xp);
   const breakpoints = {};
@@ -34,7 +41,7 @@ export async function leaderboard(req, env, url) {
   if (!skill) return err("skill required");
   const n = Math.min(100, Math.max(1, Number(url.searchParams.get("n") || 25)));
   const rows = await env.DB.prepare(
-    `SELECT u.username, x.xp, x.updated_at FROM xp_snapshots x
+    `SELECT u.username, x.xp, x.updated_at FROM validated_xp x
      JOIN users u ON u.id = x.user_id
      WHERE x.skill = ? AND x.updated_at >= ? AND u.flags NOT LIKE '%banned%'
      ORDER BY x.xp DESC LIMIT ?`

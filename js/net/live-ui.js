@@ -84,15 +84,17 @@
     if (typeof logHTML === "function") logHTML(html, sys ? "sys" : "chat");
   }
 
-  // whispers ride the global hub, so the chat field opens whenever EITHER
-  // channel is up (zone chat may be off while DMs still work). Suppressed
-  // while a Tūhura Isle tutor conversation is open (gameplay/tutorial.js) —
-  // otherwise this bar's own "(Enter to send)" placeholder sits in the exact
-  // same corner as the tutorial's reply list, reading as a second, redundant
-  // "press Enter" prompt.
+  // The chat/DM field only opens when the SERVER advertises chat as on
+  // (Live.chatOn() — the LIVE_CHAT flag carried in the roster). Hub
+  // connectivity alone is NOT enough: offering the input while the server's
+  // chat/DM gate is off just lets a client send lines the server will reject
+  // (and whispers ride that same gate). Also suppressed while a Tūhura Isle
+  // tutor conversation is open (gameplay/tutorial.js) — otherwise this bar's
+  // own "(Enter to send)" placeholder sits in the exact same corner as the
+  // tutorial's reply list, reading as a second, redundant "press Enter" prompt.
   const chatFieldOn = () =>
     !(typeof Tutorial !== "undefined" && Tutorial.dialogueOpen && Tutorial.dialogueOpen()) &&
-    (Live.chatOn() || (typeof Hub !== "undefined" && Hub.connected()));
+    Live.chatOn();
 
   document.addEventListener("keydown", e => {
     if (e.key !== "/" || !chatFieldOn()) return;

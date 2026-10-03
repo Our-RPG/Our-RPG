@@ -28,6 +28,10 @@ const num = (v, lim = 1e12) => {
   return Number.isFinite(n) && Math.abs(n) <= lim ? n : 0;
 };
 const str = (v, max) => String(v == null ? "" : v).slice(0, max);
+// Actual UTF-8 byte length — the size cap is in bytes, not JS chars (a string
+// of multi-byte glyphs is far heavier than its .length suggests).
+const enc = new TextEncoder();
+const byteLen = s => enc.encode(s).length;
 
 export class GlobalHub {
   constructor(ctx, env) {
@@ -81,7 +85,8 @@ export class GlobalHub {
       if (!at) return null;
       st = { id: at.id, name: at.name, clvl: at.clvl | 0, zone: at.zone || "",
              character: at.character == null ? null : at.character,
-             hello: !!at.hello, nudged: false, tokens: 20, tAt: Date.now() };
+             hello: !!at.hello, nudged: false, tokens: 20, tAt: Date.now(),
+             dmTok: 5, dmAt: Date.now(), dmPair: null };
       this.p.set(ws, st);
     }
     return st;
@@ -123,8 +128,32 @@ export class GlobalHub {
     return any;
   }
 
+  // Resolve a DM target to exactly ONE account id. A numeric target is already
+  // an id (one id = one account), so it passes straight through. A name target
+  // is resolved HERE rather than on the client, so case variants can't misroute
+  // or impersonate: because `Alice` and `alice` are distinct, case-sensitive-
+  // unique accounts, an exact-case match wins outright; a case-insensitive
+  // match is honoured only when it is the single online candidate, and an
+  // ambiguous one is refused (returns 0).
+  resolveTo(to) {
+    if (typeof to === "number" || /^[0-9]+$/.test(String(to)))
+      return num(to, 1e12) | 0;
+    const name = str(to, NAME_MAX);
+    if (!name) return 0;
+    const lc = name.toLowerCase();
+    let ci = 0, nci = 0;
+    for (const [, st] of this.all()) {
+      if (st.name === name) return st.id;                 // unambiguous exact-case hit
+      if (String(st.name).toLowerCase() === lc) { ci = st.id; nci++; }
+    }
+    return nci === 1 ? ci : 0;                            // unique CI match, else refuse
+  }
+
   webSocketMessage(ws, msg) {
-    if (typeof msg !== "string" || msg.length > MAX_MSG_BYTES) return;
+    // .length is chars; the cap is bytes. The char pre-check short-circuits a
+    // pathologically long frame before we bother UTF-8-measuring it (chars can
+    // never outnumber bytes, so > cap chars is already > cap bytes).
+    if (typeof msg !== "string" || msg.length > MAX_MSG_BYTES || byteLen(msg) > MAX_MSG_BYTES) return;
     const st = this.state(ws);
     if (!st) return;
     // token bucket: 20 burst, 6/s refill — roster upkeep plus the odd DM stays
@@ -171,10 +200,31 @@ export class GlobalHub {
         return;
       }
       case "dm": {  // a direct message — reaches its target anywhere online
-        const to = num(m.to, 1e12) | 0;
+        // Free text is moderated: no DMs until LIVE_CHAT is staffed/on. The
+        // LiveZone gates zone chat the same way; the hub must gate DMs too, or
+        // the whole moderation hold is a side door away from being bypassed.
+        if (this.env.LIVE_CHAT !== "on")
+          return this.send(ws, { t: "err", code: "chat-disabled" });
+        // Deterministic target resolution (see resolveTo) — a numeric id or a
+        // name, never an ambiguous case variant.
+        const to = this.resolveTo(m.to);
         if (!to || to === st.id) return;
         const text = str(m.text, DM_MAX_CHARS).replace(/[\x00-\x1f\x7f]/g, " ").trim();
         if (!text) return;
+        // DM flood guard, tighter than the shared 6/s bucket above (which alone
+        // would still let a stream of whispers bury someone). Per-sender token
+        // bucket: 5 burst, ~0.5/s refill; plus a per-recipient floor so one
+        // target can't be singled out inside that budget. Over-rate drops the
+        // DM (an err notice, not a kick — the shared bucket handles true floods).
+        const dt = Date.now();
+        st.dmTok = Math.min(5, st.dmTok + (dt - st.dmAt) * 0.0005);
+        st.dmAt = dt;
+        if (--st.dmTok < 0) { st.dmTok = 0; return this.send(ws, { t: "err", code: "dm-too-fast" }); }
+        if (!st.dmPair) st.dmPair = new Map();
+        if (dt - (st.dmPair.get(to) || 0) < 1500)
+          return this.send(ws, { t: "err", code: "dm-too-fast" });
+        if (st.dmPair.size > 64) st.dmPair.clear();  // bound the per-pair map
+        st.dmPair.set(to, dt);
         const packet = { t: "dm", from: st.id, name: st.name, to, text };
         const reached = this.sendTo(to, packet);
         // echo to the sender's own sockets so their thread shows the sent line;

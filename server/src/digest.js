@@ -8,6 +8,25 @@ import { now } from "./util.js";
 
 const WEEK = 7 * 864e5;
 
+/* Player-controlled text flows into markdown that GitHub renders and may post
+ * as a Discussion. GitHub strips HTML (so this isn't XSS), but raw backticks,
+ * pipes, newlines, leading block markers (#/>/-), link syntax and @mentions let
+ * a player break the table, forge headings or misleading links/images, or ping
+ * arbitrary users. Flatten to one line and defang. `code` = destined for inside
+ * a `…` code span, where backticks must be removed (they'd close the span) and
+ * backslash escapes don't apply. */
+function mdSafe(s, { code = false, max = 200 } = {}) {
+  let t = String(s == null ? "" : s).replace(/[\r\n\t]+/g, " ").trim();
+  if (t.length > max) t = t.slice(0, max - 1) + "…";
+  t = t.replace(/^[\s#>*+\-]+/, "")      // strip leading heading/quote/list markers
+       .replace(/@/g, "@\u200b")         // defang @mentions with a zero-width space
+       .replace(/\|/g, "\\|");           // no table-cell breakout
+  t = code
+    ? t.replace(/`/g, "")                // no backtick can survive inside a code span
+    : t.replace(/`/g, "\\`").replace(/([\[\]])/g, "\\$1"); // literal backtick + no link/image
+  return t;
+}
+
 export async function buildAndPostDigest(env) {
   const since = now() - WEEK;
 
@@ -37,15 +56,14 @@ export async function buildAndPostDigest(env) {
   else {
     md += `| Object | Question | Community's pick | Votes |\n|---|---|---|---|\n`;
     for (const v of votes.results) {
-      const choice = v.choice.length > 60 ? v.choice.slice(0, 57) + "…" : v.choice;
-      md += `| \`${v.subject}\` | ${v.field} | ${choice.replace(/\|/g, "\\|")} | ${v.n} |\n`;
+      md += `| \`${mdSafe(v.subject, { code: true, max: 60 })}\` | ${mdSafe(v.field, { max: 60 })} | ${mdSafe(v.choice, { max: 60 })} | ${v.n} |\n`;
     }
   }
 
   md += `\n## New proposals\n\n`;
   if (!props.results.length) md += `None this week — submit one from any object's Edit panel in-game.\n`;
   else for (const p of props.results)
-    md += `- **${p.title}** (\`${p.subject}\`, ${p.kind}) by ${p.username} — ${p.endorsements} endorsements\n`;
+    md += `- **${mdSafe(p.title)}** (\`${mdSafe(p.subject, { code: true, max: 60 })}\`, ${mdSafe(p.kind, { max: 40 })}) by ${mdSafe(p.username, { max: 40 })} — ${p.endorsements} endorsements\n`;
 
   md += `\nEvery proposal is granted CC BY-SA 4.0 / GPL-3.0-or-later at submission, `;
   md += `so accepted work belongs to everyone, forever.\n`;

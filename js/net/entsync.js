@@ -189,7 +189,15 @@
       }
       const m = mi.get(key);
       if (!m) continue;
-      if (kind === "h") {           // anyone's hit lands on the shared bar
+      // Authority + proximity guard for EVERY monster op — hits and kills
+      // included. A lower-id sender within sim range outranks us and we replay
+      // their narration, but we REJECT anything aimed at an entity we are the
+      // authority over (we're lower-id and it sits inside our own SIM_R). Without
+      // this, a hostile peer could force-kill the monster we're fighting (also
+      // nulling player.act) or retarget it onto us. Was previously applied only
+      // to "p"/"t", so "h"/"k" landed unconditionally.
+      if (senderId > myId && cheb(m.x, m.y, player.x, player.y) <= SIM_R) continue;
+      if (kind === "h") {           // the authority's hit lands on the shared bar
         const dmg = Math.max(0, op[2] | 0), hp = Math.max(0, op[3] | 0);
         applying = true;
         try {
@@ -199,7 +207,7 @@
         } finally { applying = false; }
         continue;
       }
-      if (kind === "k") {           // someone landed the killing blow
+      if (kind === "k") {           // the authority landed the killing blow
         if (!m.alive) continue;
         applying = true;
         try {
@@ -210,8 +218,7 @@
         } finally { applying = false; }
         continue;
       }
-      // "p" / "t": positional authority — see the np rule above
-      if (senderId > myId && cheb(m.x, m.y, player.x, player.y) <= SIM_R) continue;
+      // "p" / "t": positional authority — same guard as above
       m._remoteUntil = now + HOLD_MS;
       if (kind === "p") {
         const x = op[2] | 0, y = op[3] | 0, hp = op[5];

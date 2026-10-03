@@ -71,6 +71,30 @@ const FX_KINDS = new Set(["lg", "ht", "hp", "fl", "pj"]);
 // a roadside hitchhiking offer reaches a bit past chat range, so a driver
 // trotting down the road spots a thumb out before they're on top of them
 const HH_RADIUS = 110;
+// feeding is a point-blank social action; gate it to chat range so a feed
+// can't be flung at an arbitrary victim across the zone (see the "fe" handler)
+const FEED_RADIUS = 80;
+// hard caps on a gift: a gift is a handful of items, not a bank dump. The
+// delivery is ultimately a client-side addItem (the client's inventory stays
+// the authority), so these only BOUND the per-event mint — they can't close it.
+const GIFT_MAX_STACKS = 8;
+const GIFT_MAX_QTY = 10000;        // per-stack ceiling, on top of itemList's clamp
+// most a single commission escrow may ever hold / pay out — "a few thousand
+// coins" on this file's commrate scale. Caps the per-event coin mint on a
+// cancel or a delivery (the payout is still a client-side addItem — bounded,
+// not fully closed without server-authoritative coin custody).
+const COMM_MAX_PRICE = 5000;
+// sane band for the coins-per-tile value fed into the persisted commrate EMA,
+// so one contrived trip can't poison the average that prefills offer panels
+const COMM_RATE_MIN = 0.1, COMM_RATE_MAX = 50;
+// per-sender standing caps on unacked escrow records, so one client can't
+// balloon the DO's storage (and slow every player's hello recovery scan)
+const GIFT_PENDING_CAP = 20, COMM_PENDING_CAP = 20;
+// upper bound on records a single hello's recovery scan will load; the caps
+// above keep realistic totals well under it — it only guards pathological bloat
+const RECOVER_SCAN_LIMIT = 1024;
+// reused for the byte-accurate message-size check (MAX_MSG_BYTES is in bytes)
+const MSG_ENC = new TextEncoder();
 
 const num = (v, lim = 1e7) => {
   const n = Number(v);
@@ -200,6 +224,18 @@ export class LiveZone {
     return false;
   }
 
+  // like sendTo, but only when the target's last-known position is within
+  // `radius` tiles of `origin` — for point-blank targeted actions (feeding),
+  // so they can't be aimed at a victim anywhere in the zone
+  sendToNear(origin, userId, obj, radius) {
+    for (const [ws, st] of this.all())
+      if (st.id === userId && st.hello &&
+          Math.abs(st.x - origin.x) <= radius && Math.abs(st.y - origin.y) <= radius) {
+        this.send(ws, obj); return true;
+      }
+    return false;
+  }
+
   // proximity broadcast: everyone (the origin included, unless excepted) whose
   // last-known position is within `radius` tiles of the origin. Positions come
   // from the attachment-backed states, kept fresh by every m/tp.
@@ -211,6 +247,22 @@ export class LiveZone {
         try { ws.send(msg); } catch (e) {}
       }
     }
+  }
+
+  // Per-socket leaky bucket on a NAMED action (tp / gift / comm), separate from
+  // the global token bucket: it throttles one specific action without tripping
+  // the whole-connection flood cut, so teleport-spam to hop near victims, or
+  // gift/commission-spam that balloons DO storage, is bounded on its own.
+  // Fields live on st as `<key>Tok` / `<key>At`. Returns false → drop the action.
+  bucketOk(st, key, burst, refillPerMs) {
+    const t = Date.now();
+    const tk = key + "Tok", ta = key + "At";
+    const tok = Math.min(burst,
+      (st[tk] == null ? burst : st[tk]) + (t - (st[ta] || t)) * refillPerMs);
+    st[ta] = t;
+    if (tok < 1) { st[tk] = tok; return false; }
+    st[tk] = tok - 1;
+    return true;
   }
 
   // ---- authoritative trade escrow -----------------------------------------
@@ -254,7 +306,7 @@ export class LiveZone {
   }
   async recoverTrades(ws, uid) {
     try {
-      const list = await this.ctx.storage.list({ prefix: "trade:" });
+      const list = await this.ctx.storage.list({ prefix: "trade:", limit: RECOVER_SCAN_LIMIT });
       const stale = Date.now() - 6 * 3600e3;
       for (const [k, rec] of list) {
         if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
@@ -272,6 +324,14 @@ export class LiveZone {
   // a gcommit the recipient applies idempotently and acks — re-delivered on
   // every hello until acked, exactly like a committed trade's missing half.
   async giveItems(st, to, items) {
+    // bound the sender's standing unacked gifts so a client can't balloon the
+    // DO's storage (the scan itself is capped by RECOVER_SCAN_LIMIT)
+    try {
+      const existing = await this.ctx.storage.list({ prefix: "gift:", limit: RECOVER_SCAN_LIMIT });
+      let mine = 0;
+      for (const [, r] of existing) if (r && r.from === st.id) mine++;
+      if (mine >= GIFT_PENDING_CAP) return false;
+    } catch (e) {}
     const gid = crypto.randomUUID();
     const rec = { gid, from: st.id, fromName: st.name, to, items, at: Date.now() };
     try { await this.ctx.storage.put("gift:" + gid, rec); } catch (e) {}
@@ -286,7 +346,7 @@ export class LiveZone {
   }
   async recoverGifts(ws, uid) {
     try {
-      const list = await this.ctx.storage.list({ prefix: "gift:" });
+      const list = await this.ctx.storage.list({ prefix: "gift:", limit: RECOVER_SCAN_LIMIT });
       const stale = Date.now() - 6 * 3600e3;
       for (const [k, rec] of list) {
         if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
@@ -316,20 +376,28 @@ export class LiveZone {
     return "";
   }
   async commStart(st, to, cid, price, dx, dy, dist) {
+    // one follower can't hold open an unbounded pile of escrow records
+    try {
+      const existing = await this.ctx.storage.list({ prefix: "comm:", limit: RECOVER_SCAN_LIMIT });
+      let mine = 0;
+      for (const [, r] of existing) if (r && r.f === st.id) mine++;
+      if (mine >= COMM_PENDING_CAP) return;
+    } catch (e) {}
     const orig = Math.max(1, dist | 0);
     const rec = { cid, f: st.id, l: to, fn: st.name, ln: this.nameById(to),
-                  price: Math.max(0, price | 0),
+                  price: Math.min(COMM_MAX_PRICE, Math.max(0, price | 0)),  // hard-cap the escrow
                   dx: dx | 0, dy: dy | 0, orig, rem: orig, arrF: false, arrL: false, at: Date.now() };
     try { await this.ctx.storage.put("comm:" + cid, rec); } catch (e) {}
     // tell the leader the trip is on (they track arrival + follower-gone)
     this.sendTo(to, { t: "cmstart", id: st.id, name: st.name, cid,
                       price: rec.price, dx: rec.dx, dy: rec.dy, dist: orig });
   }
-  async commProgress(cid, rem) {
+  async commProgress(cid, by, rem) {
     try {
       const rec = await this.ctx.storage.get("comm:" + cid);
       if (!rec) return;
-      rec.rem = Math.max(0, Math.min(rec.orig, rem | 0));
+      if (by !== rec.f && by !== rec.l) return;           // only a party may report progress
+      rec.rem = Math.max(0, Math.min(rec.rem, rem | 0));  // remaining only ever shrinks (monotonic)
       await this.ctx.storage.put("comm:" + cid, rec);
     } catch (e) {}
   }
@@ -337,6 +405,7 @@ export class LiveZone {
     try {
       const rec = await this.ctx.storage.get("comm:" + cid);
       if (!rec) return;
+      if (uid !== rec.f && uid !== rec.l) return;   // only a party may mark arrival
       if (uid === rec.f) rec.arrF = true;
       if (uid === rec.l) rec.arrL = true;
       if (rec.arrF && rec.arrL) {                       // delivered — whole fee to the leader
@@ -349,12 +418,18 @@ export class LiveZone {
       }
     } catch (e) {}
   }
-  async commCancel(cid, rem) {
+  async commCancel(cid, by, rem) {
     try {
       const rec = await this.ctx.storage.get("comm:" + cid);
       if (!rec) return;
+      if (by !== rec.f && by !== rec.l) return;   // only a party may cancel their own contract
       await this.ctx.storage.delete("comm:" + cid);
-      const r = Math.max(0, Math.min(rec.orig, rem | 0));
+      // the split comes from SERVER-tracked remaining distance (rec.rem, fed by
+      // cmprog), never a self-serving client number. The follower may NARROW it
+      // (they've travelled on past the last ping) but never widen it — rem is
+      // clamped monotonically non-increasing against the recorded value.
+      let r = Math.max(0, Math.min(rec.orig, rec.rem | 0));
+      if (by === rec.f && rem != null) r = Math.max(0, Math.min(r, num(rem, 1e7) | 0));
       const refund = Math.round((r / rec.orig) * rec.price);   // distance NOT covered → back to follower
       const lead = rec.price - refund;                          // distance covered → to the leader
       await this.payout(rec.f, cid, refund, "cancel", rec.ln);
@@ -371,6 +446,10 @@ export class LiveZone {
   // market rate" the offer panel pre-fills (served at hello via sendCommRate).
   async bumpCommRate(perTile) {
     if (!(perTile > 0)) return;
+    // clamp into a sane band so one contrived trip (tiny distance at max price,
+    // or a huge distance at a token price) can't drag the persisted EMA to an
+    // absurd value that then mis-prefills everyone's offer panel
+    perTile = Math.max(COMM_RATE_MIN, Math.min(COMM_RATE_MAX, perTile));
     try {
       const rec = await this.ctx.storage.get("commrate");
       const prev = rec && rec.r > 0 ? rec.r : perTile;
@@ -389,7 +468,7 @@ export class LiveZone {
   async recoverComms(ws, uid) {
     try {
       // re-deliver any unclaimed payouts addressed to us
-      const pays = await this.ctx.storage.list({ prefix: "cpay:" });
+      const pays = await this.ctx.storage.list({ prefix: "cpay:", limit: RECOVER_SCAN_LIMIT });
       const stale = Date.now() - 24 * 3600e3;
       for (const [k, rec] of pays) {
         if (rec.at < stale) { await this.ctx.storage.delete(k); continue; }
@@ -399,7 +478,11 @@ export class LiveZone {
   }
 
   webSocketMessage(ws, msg) {
-    if (typeof msg !== "string" || msg.length > MAX_MSG_BYTES) return;
+    if (typeof msg !== "string") return;
+    // the cap is in BYTES: .length counts UTF-16 code units, so a multibyte
+    // payload could be ~3× the intended cap. Char length is a cheap lower bound
+    // on byte length (UTF-8 is >= 1 byte/unit), so only encode near the limit.
+    if (msg.length > MAX_MSG_BYTES || MSG_ENC.encode(msg).length > MAX_MSG_BYTES) return;
     const st = this.state(ws);
     if (!st) return;
     // token bucket: 60 burst, 25/s refill — brisk play (a step every ~150 ms,
@@ -459,11 +542,26 @@ export class LiveZone {
         st.x = tx; st.y = ty; st.lvl = num(m.lvl, 40) | 0;
         if (m.clvl != null) st.clvl = num(m.clvl, 99) | 0;
         this.save(ws, st);
-        this.bcast({ t: "m", id: st.id, fx, fy, tx, ty, dur,
-                     d8: str(m.d8, 10), lvl: st.lvl, clvl: st.clvl }, ws);
+        // Proximity-filtered like fx/entity-sync: a tile step is only visible to
+        // players who can see the mover, so sending it zone-wide was pure O(N²)
+        // waste. st was just moved to the step's destination, so FX_RADIUS around
+        // it reaches everyone in (and comfortably beyond) view range. tp/s/a stay
+        // on full bcast — tp is also the idle heartbeat that keeps far players
+        // from being stale-pruned, and s carries appearance identity; both are
+        // low-frequency, so proximity-filtering them would risk stale remotes for
+        // no real throughput win.
+        this.bcastNear(st, { t: "m", id: st.id, fx, fy, tx, ty, dur,
+                     d8: str(m.d8, 10), lvl: st.lvl, clvl: st.clvl }, FX_RADIUS, ws);
         return;
       }
       case "tp": {  // teleport/respawn/door — discontinuous, remotes snap
+        // rate-limit teleports: doors/respawn are occasional, but unbounded tp
+        // lets an attacker hop the whole zone every message to park next to
+        // victims and fire proximity-gated payloads (fe/fx/chat). 6 burst,
+        // refill 1 / 1.5s — legit play never hits it, and distance stays
+        // unclamped so a long respawn across the zone still works. Overflow
+        // silently drops the hop (position just doesn't advance remotely).
+        if (!this.bucketOk(st, "tp", 6, 1 / 1500)) return;
         st.x = num(m.x); st.y = num(m.y); st.lvl = num(m.lvl, 40) | 0;
         if (m.clvl != null) st.clvl = num(m.clvl, 99) | 0;
         this.save(ws, st);
@@ -567,14 +665,18 @@ export class LiveZone {
         const to = num(m.to, 1e12) | 0;
         const item = str(m.item, 64);
         if (!to || to === st.id || !item) return;
-        this.sendTo(to, { t: "fe", id: st.id, name: st.name, item });
+        // proximity gate: feeding is point-blank, so it can't be aimed at an
+        // arbitrary victim across the zone (pairs with the tp rate-limit above)
+        this.sendToNear(st, to, { t: "fe", id: st.id, name: st.name, item }, FEED_RADIUS);
         return;
       }
       case "gv": {  // give items (one-sided escrow — see giveItems above)
         const to = num(m.to, 1e12) | 0;
         if (!to || to === st.id) return;
-        const items = itemList(m.items, 24);
+        const items = itemList(m.items, GIFT_MAX_STACKS);
         if (!items || !items.length) return;
+        for (const it of items) if (it[1] > GIFT_MAX_QTY) it[1] = GIFT_MAX_QTY;  // per-stack hard cap
+        if (!this.bucketOk(st, "gift", 5, 1 / 3000)) return;   // a gift is occasional, not a firehose
         this.giveItems(st, to, items);
         return;
       }
@@ -593,7 +695,8 @@ export class LiveZone {
         const to = num(m.to, 1e12) | 0;
         if (!to || to === st.id) return;
         this.sendTo(to, { t: "cm", id: st.id, name: st.name,
-          price: num(m.price, 1e9) | 0, dx: num(m.dx) | 0, dy: num(m.dy) | 0 });
+          price: Math.min(COMM_MAX_PRICE, num(m.price, 1e9) | 0),  // same ceiling the escrow enforces
+          dx: num(m.dx) | 0, dy: num(m.dy) | 0 });
         return;
       }
       case "cmok": { // guide accepts — relay to the follower (who then escrows)
@@ -610,12 +713,22 @@ export class LiveZone {
         const to = num(m.to, 1e12) | 0;
         const cid = str(m.cid, 64);
         if (!to || to === st.id || !cid) return;
+        if (!this.bucketOk(st, "comm", 6, 1 / 2000)) return;   // bound escrow churn per sender
         this.commStart(st, to, cid, num(m.price, 1e9) | 0, num(m.dx) | 0, num(m.dy) | 0, num(m.dist, 1e7) | 0);
         return;
       }
-      case "cmprog": { const cid = str(m.cid, 64); if (cid) this.commProgress(cid, num(m.rem, 1e7) | 0); return; }
+      // these mutate/settle an escrow, so the sender (st.id) MUST be a party to
+      // it — the party check lives in the comm* methods below
+      case "cmprog": { const cid = str(m.cid, 64); if (cid) this.commProgress(cid, st.id, num(m.rem, 1e7) | 0); return; }
       case "cmarr": { const cid = str(m.cid, 64); if (cid) this.commArrive(st.id, cid); return; }
-      case "cmcancel": { const cid = str(m.cid, 64); if (cid) this.commCancel(cid, num(m.rem, 1e7) | 0); return; }
+      case "cmcancel": {
+        const cid = str(m.cid, 64);
+        // rate-limit with cmstart so cancel-spam can't churn payouts; the raw
+        // client rem is passed through but only honoured from the follower and
+        // clamped against server-tracked progress in commCancel
+        if (cid && this.bucketOk(st, "comm", 6, 1 / 2000)) this.commCancel(cid, st.id, m.rem);
+        return;
+      }
       case "cmpayack": { const cid = str(m.cid, 64); if (cid) this.ackPay(st.id, cid); return; }
       case "hh": {   // public hitchhiking offer — proximity-broadcast to drivers
         this.bcastNear(st, { t: "hh", id: st.id, name: st.name,

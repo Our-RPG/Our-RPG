@@ -4,12 +4,12 @@
  *   curl -H "authorization: Bearer $ADMIN_TOKEN" -d '{"month":"2026-09","usd_cents":1100,"note":"Workers paid plan + R2"}' .../api/admin/cost
  */
 
-import { json, err, readJson } from "./util.js";
+import { json, err, readJson, constantTimeEqual } from "./util.js";
 import { setShockEvent } from "./shops.js";
 
-function isAdmin(req, env) {
+async function isAdmin(req, env) {
   const m = /^Bearer (.+)$/.exec(req.headers.get("authorization") || "");
-  return !!(env.ADMIN_TOKEN && m && m[1] === env.ADMIN_TOKEN);
+  return !!(env.ADMIN_TOKEN && m && await constantTimeEqual(m[1], env.ADMIN_TOKEN));
 }
 
 /* Supply-shock story events (docs/shopkeeper-economy.md §19):
@@ -17,7 +17,7 @@ function isAdmin(req, env) {
  *     -d '{"town":"12,-7","tag":"metal","kind":"mine_trouble","floor_mult":0.2,"demand_mult":1.5,"days":7}' \
  *     .../api/admin/shopevent          ({"clear":true} with town+tag removes) */
 export async function setShopEvent(req, env) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const b = await readJson(req);
   if (!b) return err("Bad JSON.");
   const r = await setShockEvent(env, b);
@@ -25,7 +25,7 @@ export async function setShopEvent(req, env) {
 }
 
 export async function setCost(req, env) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const b = await readJson(req);
   if (!b || !/^\d{4}-\d{2}$/.test(b.month || "") || !Number.isFinite(b.usd_cents))
     return err("Need {month: 'YYYY-MM', usd_cents, note?}.");
@@ -37,7 +37,7 @@ export async function setCost(req, env) {
 }
 
 export async function flaggedQueue(req, env) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const rows = await env.DB.prepare(
     `SELECT p.id, p.subject, p.kind, p.title, p.flags, p.status, p.created_at, u.username
      FROM proposals p JOIN users u ON u.id = p.user_id
@@ -52,7 +52,7 @@ export async function flaggedQueue(req, env) {
  * fills a hole (auto-accept) or just adds another option to an already-
  * covered subject (normal voting lane). */
 export async function setGaps(req, env) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const b = await readJson(req, 1024 * 1024);
   if (!b || !Array.isArray(b.subjects) || b.subjects.length > 5000)
     return err("Need {subjects: string[]} (max 5000).");
@@ -68,7 +68,7 @@ export async function setGaps(req, env) {
 }
 
 export async function setProposalStatus(req, env) {
-  if (!isAdmin(req, env)) return err("Nope.", 403);
+  if (!await isAdmin(req, env)) return err("Nope.", 403);
   const b = await readJson(req);
   if (!b || !["open", "flagged", "accepted", "declined"].includes(b.status))
     return err("Need {id, status: open|flagged|accepted|declined}.");

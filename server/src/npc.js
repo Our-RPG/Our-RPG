@@ -11,6 +11,34 @@ import { json, err, readJson, authUser, rateLimit, now } from "./util.js";
 
 const MAX_TEXT = 300;
 
+// Bounds on the free-form context a client forwards to the engine. The 16 KB
+// body cap (readJson) limits the whole, but these keep any single field from
+// being pathological — an unbounded blob of scene/fills/player is both a
+// prompt-injection surface and a resource one. Anything over the bound is
+// truncated/dropped rather than rejected (a soft miss is never player-facing).
+const MAX_STR = 500;     // any one forwarded string value
+const MAX_ARR = 32;      // entries kept per array
+const MAX_KEYS = 32;     // keys kept per object
+const MAX_DEPTH = 4;     // nesting descended before we drop the rest
+
+// Recursively clamp a client-supplied value to the bounds above. Strings are
+// truncated, arrays/objects capped in size, deep nesting dropped; non-JSON
+// values become null.
+function bound(v, depth = 0) {
+  if (v == null) return null;
+  if (typeof v === "string") return v.slice(0, MAX_STR);
+  if (typeof v === "number" || typeof v === "boolean") return v;
+  if (depth >= MAX_DEPTH) return null;
+  if (Array.isArray(v)) return v.slice(0, MAX_ARR).map(x => bound(x, depth + 1));
+  if (typeof v === "object") {
+    const out = {};
+    for (const [k, val] of Object.entries(v).slice(0, MAX_KEYS))
+      out[String(k).slice(0, 64)] = bound(val, depth + 1);
+    return out;
+  }
+  return null;
+}
+
 // ---------- engine reachability (the top-right status dot) ----------
 // Cached module-scope (a warm isolate keeps this between requests) so a
 // roomful of clients polling every ~20s doesn't turn into a roomful of
@@ -55,10 +83,12 @@ export async function chat(req, env) {
       persona: String(b.npc.persona || "plain").slice(0, 60),
       mood: String(b.npc.mood || "calm").slice(0, 20),
     },
-    scene: b.scene && typeof b.scene === "object" ? b.scene : {},
-    player: { name: String(user.username || "friend").slice(0, 24),
-              ...(b.player && typeof b.player === "object" ? b.player : {}) },
-    fills: b.fills && typeof b.fills === "object" ? b.fills : {},
+    scene: bound(b.scene && typeof b.scene === "object" ? b.scene : {}),
+    // Server-derived name goes AFTER the client spread so it always wins — a
+    // client-supplied player.name must never override the authenticated user.
+    player: { ...bound(b.player && typeof b.player === "object" ? b.player : {}),
+              name: String(user.username || "friend").slice(0, 24) },
+    fills: bound(b.fills && typeof b.fills === "object" ? b.fills : {}),
   };
 
   try {

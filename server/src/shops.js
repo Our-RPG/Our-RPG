@@ -36,6 +36,9 @@ const MAX_QTY = 10000;               // per line
 const MAX_TOWN_ITEM_QTY = 50000;     // ledger cap per (town, item)
 const MAX_UNITS_LISTED = 8;          // provenance batches shown per item
 const MAX_LINE_COINS = 5e6;          // absolute sanity cap on a line's coins
+const PRICE_SANITY_MULT = 2;         // accepted per-unit ≤ this × the worker's
+                                     // own scarcity-quote mid (see trade() #6)
+const RANK_CAP = 32;                 // crafting ranks top out at 32 (combat scale)
 const STALE_DAYS = 120;              // unsold player stock quietly rots
 const CACHE = { "cache-control": "public, max-age=30" };
 
@@ -135,24 +138,35 @@ async function moveTill(env, town, delta, operating, reserve, t) {
   ).bind(reserve, Econ.tillCapOf(operating), Math.round(delta), t, town).run();
 }
 
-/* Coin-amount budget window on the shared rate_limits table (count = coins).
- * Bounds how much one account can DRAW from one town's till per day — the
- * value-table-free defence of the shared cash. Returns coins allowed. */
+/* Coin-amount budget window on the shared rate_limits table (count = coins
+ * ATTEMPTED this window). Bounds how much one account can DRAW from one town's
+ * till per day — the value-table-free defence of the shared cash. Returns the
+ * coins actually GRANTED (the share that fits under the cap).
+ *
+ * ATOMIC (#7, was TOCTOU): the old form did SELECT used → compute allow →
+ * upsert as separate steps, so N concurrent draws all read the same stale
+ * `used` and were each granted the full remaining cap — blowing the per-account
+ * daily bound. This is now ONE upsert that increments the window counter and
+ * RETURNS the post-increment total (mirroring util.rateLimit); the grant is
+ * derived from that total, so the increment and the test are a single statement.
+ * The counter may overshoot the cap (we always add the full attempted amount) —
+ * harmless: once it reaches the cap every later draw derives a grant of 0, and
+ * it resets with the window. */
 async function takeBudget(env, key, amount, cap, windowSec) {
+  const amt = Math.max(0, Math.round(amount));
+  if (amt <= 0) return 0;
   const t = now(), winStart = t - (t % (windowSec * 1000));
   const row = await env.DB.prepare(
-    "SELECT win_start, count FROM rate_limits WHERE key = ?").bind(key).first();
-  const used = row && row.win_start === winStart ? row.count : 0;
-  const allow = Math.max(0, Math.min(amount, cap - used));
-  if (allow > 0) {
-    await env.DB.prepare(
-      `INSERT INTO rate_limits (key, win_start, count) VALUES (?,?,?)
-       ON CONFLICT(key) DO UPDATE SET
-         count = CASE WHEN win_start = ? THEN count + ? ELSE ? END,
-         win_start = ?`
-    ).bind(key, winStart, allow, winStart, allow, allow, winStart).run();
-  }
-  return allow;
+    "INSERT INTO rate_limits (key, win_start, count) VALUES (?, ?, ?) " +
+    "ON CONFLICT(key) DO UPDATE SET " +
+    "  count = CASE WHEN rate_limits.win_start = ? THEN rate_limits.count + ? ELSE ? END, " +
+    "  win_start = ? " +
+    "RETURNING count"
+  ).bind(key, winStart, amt, winStart, amt, amt, winStart).first();
+  // post = total coins attempted this window (incl. this draw's full amt); the
+  // coins that fit under the cap = cap − (post − amt), clamped into [0, amt].
+  const post = row ? Number(row.count) : amt;
+  return Math.max(0, Math.min(amt, cap - (post - amt)));
 }
 
 // ---- flow beliefs ---------------------------------------------------------
@@ -276,6 +290,15 @@ export async function trade(req, env) {
     shelves.set(item, Math.max(0, (shelves.get(item) || 0) + d));
     shelfDelta.set(item, (shelfDelta.get(item) || 0) + d);
   };
+  // maker rank is a per-(user, skill) read that never changes mid-request, so
+  // memoize it — a trade selling many lines of the same skill hit the ranks
+  // table once per line before.
+  const ranks = new Map();              // skill -> maker rank
+  const rankFor = async skill => {
+    const key = String(skill || "");
+    if (!ranks.has(key)) ranks.set(key, await makerRank(env, user.id, key));
+    return ranks.get(key);
+  };
 
   for (const line of (Array.isArray(b.sells) ? b.sells : []).slice(0, MAX_LINES)) {
     const item = cleanItem(line?.item);
@@ -292,7 +315,20 @@ export async function trade(req, env) {
     // draw today — goods beyond that stay with the player (client reconciles).
     // Big-ticket backstop: one line draws at most the trader's appetite for
     // a single kind of stock (the client walk enforces the same rule).
-    const unit = add > 0 ? coins(line.paid) / qty : 0;
+    // #6 the client-dictated per-unit is bounded to a sane multiple of the
+    // worker's OWN scarcity quote on the authoritative shelf/till/flow. Item
+    // base values are client-side, so the worker can't reprice — it treats the
+    // client's per-unit as the value proxy and refuses a payout its own curve
+    // won't justify (e.g. full price dumped onto a glutted shelf). This is a
+    // bounding clamp, not exact repricing: a single plausibly-priced fake item
+    // on a neutral shelf still pays out — the per-account daily-draw cap (#7),
+    // the big-ticket line cap and the finite till are the backstops on coin out.
+    const rawUnit = add > 0 ? coins(line.paid) / qty : 0;
+    const unit = rawUnit > 0
+      ? Math.min(rawUnit, PRICE_SANITY_MULT * Econ.quote(
+          { value: rawUnit, stock: have, base: Econ.baselineDemand(town, item), emaOut: flow.out },
+          { cash: cashAvail, operating: till.operating }, pp).mid)
+      : 0;
     let pay = 0;
     if (unit > 0 && add > 0) {
       const lineCap = Math.max(25, Math.round(pp.bigTicketFrac * (cashAvail - reserve)));
@@ -308,9 +344,15 @@ export async function trade(req, env) {
     cashAvail -= pay; tillDelta -= pay;
     believe(flow, town, item, add, "in");
     moveLocal(item, add);                 // the sold goods join the finite shelf
-    const maker = String(line.maker || user.username).slice(0, 40);
-    const quality = Number.isFinite(line.q) ? Math.max(0, Math.min(100, Math.round(line.q))) : null;
-    const rank = await makerRank(env, user.id, line.skill);
+    // #6 provenance is server-stamped, never client-supplied: the maker is the
+    // authenticated seller (seller_id already records the account), and quality
+    // is capped at what their SERVER-held crafting rank could plausibly produce
+    // (ranks top out at RANK_CAP → quality 0-100). Until a skill has rank data
+    // (null) we can't verify, so the plain 0-100 clamp stands (Phase-2 backfill).
+    const maker = String(user.username || "").slice(0, 40);
+    const rank = await rankFor(line.skill);
+    const qCap = rank == null ? 100 : Math.max(0, Math.min(100, Math.round((rank + 2) * 100 / RANK_CAP)));
+    const quality = Number.isFinite(line.q) ? Math.max(0, Math.min(qCap, Math.round(line.q))) : null;
     const same = await env.DB.prepare(
       `SELECT id FROM shop_units WHERE town = ? AND item = ? AND maker = ?
        AND quality IS ? AND seller_id = ? LIMIT 1`
@@ -332,15 +374,41 @@ export async function trade(req, env) {
     const item = cleanItem(line?.item);
     let want = Math.min(MAX_QTY, Math.floor(Number(line?.qty) || 0));
     if (!item || want <= 0) continue;
-    // a purchase can only take what's actually on the finite shelf
-    const have = await shelfFor(item);
-    const got = Math.min(want, have);
+    // #E the finite shelf is the AUTHORITY on how many a buy actually gets, so
+    // two concurrent buys of the last unit can't both be served. Read-and-
+    // decrement in ONE atomic transaction (a D1 batch is one SQLite txn): the
+    // SELECT sees the true current stock and the clamped UPDATE removes up to
+    // `want`, so `got` is the shelf's own before→after delta — never a stale
+    // read. Fail-soft to the plain read while shop_stock is unmigrated.
+    const have = await shelfFor(item);   // seeds the shelf row on first touch
+    const flow = await flowFor(item);
+    let got = Math.min(want, have);
+    try {
+      const res = await env.DB.batch([
+        env.DB.prepare("SELECT qty FROM shop_stock WHERE town = ? AND item = ?").bind(town, item),
+        env.DB.prepare(
+          `UPDATE shop_stock SET qty = MAX(0, qty - ?), updated_at = ?
+           WHERE town = ? AND item = ?`).bind(want, t, town, item),
+      ]);
+      const rows = res[0] && res[0].results;
+      if (rows && rows.length) got = Math.min(want, Math.max(0, rows[0].qty));
+    } catch (e) { /* table not yet migrated — stock simply doesn't persist */ }
+    // the DB decrement above is authoritative, so buys do NOT route through
+    // shelfDelta/moveShelf (only sells do); just keep the in-memory shelf (the
+    // trade's reported stock) in lockstep by the amount actually taken.
+    shelves.set(item, Math.max(0, (shelves.get(item) || 0) - got));
     if (got <= 0) { bought[item] = 0; continue; }
-    moveLocal(item, -got);               // the shelf shrinks
-    // refill the till for the coin actually spent (client-priced, scaled to
-    // what the shelf covered) and feed the demand belief with real sales
-    tillDelta += Math.round(coins(line.paid) * got / want);
-    believe(await flowFor(item), town, item, got, "out");
+    // #6 bound the client-priced per-unit to a sane multiple of the worker's own
+    // scarcity quote (see the sell note) before it refills the shared till, so a
+    // fake-expensive buy can't pump the town's cash past what the curve allows.
+    const rawUnit = coins(line.paid) / want;
+    const unit = Math.min(rawUnit, PRICE_SANITY_MULT * Econ.quote(
+      { value: rawUnit, stock: have, base: Econ.baselineDemand(town, item), emaOut: flow.out },
+      { cash: cashAvail, operating: till.operating }, pp).mid);
+    // refill the till for the coin actually spent (server-sane per-unit × the
+    // units the shelf truly gave) and feed the demand belief with real sales
+    tillDelta += Math.round(unit * got);
+    believe(flow, town, item, got, "out");
     // keep provenance tidy: retire the oldest player-sold batches first
     // (cosmetic only — the opening stock lives in shop_stock, not here)
     let dec = got;
@@ -350,7 +418,7 @@ export async function trade(req, env) {
     for (const batch of batches.results) {
       if (!dec) break;
       const take = Math.min(dec, batch.qty);
-      await env.DB.prepare("UPDATE shop_units SET qty = qty - ? WHERE id = ?")
+      await env.DB.prepare("UPDATE shop_units SET qty = MAX(0, qty - ?) WHERE id = ?")
         .bind(take, batch.id).run();
       dec -= take;
     }
@@ -362,12 +430,14 @@ export async function trade(req, env) {
   for (const [item, flow] of flows) await putFlow(env, town, item, flow, t);
 
   // Refreshed counts (the authoritative finite shelf) for every touched item.
+  // The post-trade shelf already lives in `shelves`: sells keep it in lockstep via
+  // moveLocal (same delta moveShelf applies, both clamping to the shelf's room),
+  // and buys subtract exactly what their authoritative DB decrement took. No need
+  // to re-SELECT every item we just wrote.
   const touched = [...new Set([...Object.keys(sold), ...Object.keys(bought)])];
   const stockNow = {}, flowNow = {};
   for (const item of touched) {
-    const row = await env.DB.prepare(
-      "SELECT qty FROM shop_stock WHERE town = ? AND item = ?").bind(town, item).first();
-    stockNow[item] = row ? row.qty : (shelves.get(item) || 0);
+    stockNow[item] = shelves.get(item) || 0;
     const f = flows.get(item);
     if (f) flowNow[item] = { in: f.in, out: f.out };
   }

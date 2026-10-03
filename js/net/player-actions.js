@@ -743,7 +743,19 @@
       if (healed > 0) player.hp += healed;
     }
     if (def.wellFed) player.wellFedUntil = Math.max(player.wellFedUntil || 0, now + def.wellFed);
-    if (def.drinkBuff) player.buffs[def.drinkBuff.skill] = { amt: def.drinkBuff.amt, until: now + def.drinkBuff.dur };
+    if (def.drinkBuff) {
+      // A FORCED feed must never downgrade a buff you already have: apply the
+      // incoming drinkBuff only when nothing stronger-or-longer is active for
+      // that skill. "Stronger" = higher amt, "longer" = later until (eff() in
+      // main/state.js adds b.amt while now < b.until), so we overwrite only
+      // when the new buff is at least as strong AND at least as long — a weaker
+      // or shorter buff from a hostile peer is ignored.
+      const b = def.drinkBuff;
+      const nb = { amt: b.amt, until: now + b.dur };
+      const cur = player.buffs[b.skill];
+      if (!cur || now >= cur.until || (nb.amt >= cur.amt && nb.until >= cur.until))
+        player.buffs[b.skill] = nb;
+    }
     say(who + " feeds you " + itemName(m.item).toLowerCase() + "." +
       (healed ? " It heals " + healed + " HP." : "") +
       (def.wellFed ? " You feel well fed." : ""), "gold");
