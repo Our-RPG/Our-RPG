@@ -399,7 +399,7 @@ const TUT_CONTENT = (() => {
     at(12, -5, 2, { node: "spinning_wheel", extra: { station: true } }),
     at(12, 5, -2, { node: "chandlery", extra: { station: true } }),
     // pod 13 — the Portal Crown: the ancient portal + a RUNESTONE ALTAR —
-    // Runa's lesson is RUNECRAFTING (her 50 gifted state runes become 50
+    // Runa's lesson is RUNECRAFTING (her 10 gifted state runes become 10
     // air runes here; no spellcasting is taught on the isle, user req)
     at(13, 0, -6, { node: "portal", extra: { portal: true } }),
     at(13, -4, 2, { node: "altar", extra: { station: true } }),
@@ -483,6 +483,11 @@ const Tutorial = (() => {
 
   let _seenCount = 0;
   let _offStreak = 0; // consecutive tick()s spent reading as "off the isle"
+  // Ravenna's parting beat: once you first speak with her and hear a real
+  // answer, hold her at the knoll for a breath + a goodbye line BEFORE the
+  // evening village-sync walks her home (onChatReply + villageHome). In-memory
+  // only — if the session reloads mid-farewell she just settles home normally.
+  let _skyHolding = false;
   function state() {
     if (typeof player === "undefined") return null;
     // A character standing OFF the isle can only be a graduate: veteran saves
@@ -631,7 +636,7 @@ const Tutorial = (() => {
   // Second goal (user req 2026-09-16): equip a rushlight — the isle's sky
   // holds at dusk until BOTH goals are done (skyIdx/maybeLoreNight below),
   // so the player always has light to work the altar by.
-  const LORE_GOALS = [["airRunes", 50, "craft 50 air runes at the altar"], ["rushlightEquipped", 1, "equip a rushlight"]];
+  const LORE_GOALS = [["airRunes", 10, "craft 10 air runes at the altar"], ["rushlightEquipped", 1, "equip a rushlight"]];
   const GOALS = {}; // counter -> [cap, label]
   for (const arr of [BUSH_GOALS, FISH_GOALS, BANK_GOALS, FARM_GOALS, WOOD_GOALS, COOK_GOALS, WAR_GOALS, SWIM_GOALS, LORE_GOALS])
     for (const [c, n, label] of arr) GOALS[c] = [n, label];
@@ -679,7 +684,7 @@ const Tutorial = (() => {
              items: t => [
                { on: !!(t && t.candleMade), num: (t && t.candleMade) ? 1 : 0, need: 1, label: "dip a rushlight" },
              ] },
-    lore:  { task: "craft 50 air runes at the altar & equip a rushlight", need: LORE_GOALS.length, done: t => allGoals(t, LORE_GOALS), num: t => numGoals(t, LORE_GOALS), items: goalItems(LORE_GOALS) },
+    lore:  { task: "craft 10 air runes at the altar & equip a rushlight", need: LORE_GOALS.length, done: t => allGoals(t, LORE_GOALS), num: t => numGoals(t, LORE_GOALS), items: goalItems(LORE_GOALS) },
     // sleep at Sigrid's before the crossing (user req 2026-09-17) — a real
     // task now, so it shows in the journey/goals panel like every other stage
     ferry: { task: "sleep at Sigrid's spare room, then find her again", done: t => !!(t && t.sleptAtSigrids) },
@@ -768,7 +773,25 @@ const Tutorial = (() => {
   // moment happens where her dialogue set it up
   function onChatReply(npc) {
     if (!active() || !npc || npc.tutor !== "sky") return;
+    // First real answer heard: don't let the dusk village-sync yank her off
+    // the knoll the instant her stage ticks done. She replied (that bubble is
+    // playing now) — hold her, let it land, then a goodbye, THEN she walks the
+    // shore road home (user req 2026-10-03). _skyHolding gates villageHome, and
+    // MUST be set before bumpGoal — the bump's refreshBar() runs _villageSync
+    // synchronously, which would otherwise relocate her the same frame.
+    const first = cnt(state(), "chatted") < 1 && !_skyHolding;
+    if (first) _skyHolding = true;
     bumpGoal("chatted");
+    if (first) {
+      setTimeout(() => {
+        if (typeof npcSay === "function")
+          npcSay(npc, "There — a true answer, no script in sight. The sky's yours to read now; I'll be down in the village when you need me. Go well.");
+        setTimeout(() => {
+          _skyHolding = false;
+          refreshBar();   // -> _villageSync now relocates her home
+        }, 5000);
+      }, 3500);
+    }
   }
   // farm crop key → goal counter (caps + labels live in FARM_GOALS)
   const CROP_TASK = {
@@ -994,7 +1017,7 @@ const Tutorial = (() => {
     { h: 21,    wx: "clear",   note: "Night proper — the stars wheel above the isle. Time to think about the crossing." }, // Navigator
   ];
   // the sky holds at dusk through the Loremaster's runecrafting lesson —
-  // night proper falls only once BOTH her goals (LORE_GOALS: 50 air runes +
+  // night proper falls only once BOTH her goals (LORE_GOALS: 10 air runes +
   // equip a rushlight) are done, not the moment you meet her (user req
   // 2026-09-16; see maybeLoreNight below, called from onCraft's "air_rune"
   // case and onEquip — whichever goal is completed last triggers it)
@@ -1147,6 +1170,9 @@ const Tutorial = (() => {
   }
   function villageHome(id) {
     if (typeof TUT_VILLAGE === "undefined" || !villageAt()) return null;
+    // Ravenna lingers at the knoll through her goodbye beat (onChatReply)
+    // before she's allowed to settle into the village for the evening.
+    if (id === "sky" && _skyHolding) return null;
     const seat = TUT_VILLAGE.seats[id];
     if (!seat) return null;
     const i = TUT_TUTORS.findIndex(tu => tu.id === id);
