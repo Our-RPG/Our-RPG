@@ -142,6 +142,33 @@ function validateEquip(raw) {
   }
   return out;
 }
+// ---------- seen-chunk spread memo (PERF) ----------
+// `seen: [...seenChunks]` was the largest field in the save blob and got
+// re-spread (thousands of short keys) on every save. seenChunks mostly grows
+// (many markSeen callers) but ALSO shrinks during tutorial graduation / isle
+// teardown (gameplay/tutorial.js seenChunks.delete), so a plain size check is
+// NOT a safe invalidation — a net-zero delete+add between two saves would
+// persist a stale array. Instead we install a one-time, transparent membership
+// hook on the set's add/delete the first time we build (seenChunks is always
+// defined by save time): it flips a dirty flag on any REAL change, so the memo
+// rebuilds exactly when the contents change — persisted data is identical. The
+// hook passes every call straight through to the original, returning the same
+// value, so add/delete behaviour is unchanged. If the hook can't install we
+// fall back to spreading every time (the old behaviour), never a stale array.
+let _seenArr = null, _seenDirty = true, _seenHooked = false;
+function seenArray() {
+  if (!_seenHooked && typeof seenChunks !== "undefined" && seenChunks && typeof seenChunks.add === "function") {
+    const _add = seenChunks.add.bind(seenChunks);
+    seenChunks.add = function (v) { if (!seenChunks.has(v)) _seenDirty = true; return _add(v); };
+    const _del = seenChunks.delete.bind(seenChunks);
+    seenChunks.delete = function (v) { if (seenChunks.has(v)) _seenDirty = true; return _del(v); };
+    _seenHooked = true;
+    _seenDirty = true; // adds that landed before the hook aren't reflected yet
+  }
+  if (!_seenHooked) return [...seenChunks]; // can't track changes — never cache
+  if (_seenDirty || _seenArr === null) { _seenArr = [...seenChunks]; _seenDirty = false; }
+  return _seenArr;
+}
 // Callers (2):
 //  storage.js:20,25
 function buildSaveData() {
@@ -160,7 +187,7 @@ function buildSaveData() {
     // one's own xp. Motion/action/queues are session-only, like player.act.
     num: player.num || 1,
     bodies: (typeof Split !== "undefined" ? (player.bodies || []).map(Split.serializeBody) : []),
-    seen: [...seenChunks],
+    seen: seenArray(), // memoized spread — rebuilt only when seenChunks changes (see above)
     // production economy: recipe-family mastery, passive jobs, provenance registry
     mastery: player.mastery, jobs: player.jobs,
     prov: typeof provRegistry !== "undefined" ? provRegistry : {},
@@ -194,17 +221,66 @@ function buildSaveData() {
     stationHeat: typeof stationHeat !== "undefined" ? [...stationHeat] : [],
   };
 }
-// Callers (4):
-//  gameplay/world.js:35 main.js:30 storage.js:115,150
-function saveGame() {
-  if (resetting || !gameReady) return;
+// ---------- autosave: coalescing debounce (PERF) ----------
+// saveGame() used to buildSaveData() + JSON.stringify a large blob (incl.
+// thousands of seen-chunk keys) straight into localStorage on the calling
+// frame. It fires from a 15 s timer AND ~18 event sites (every quest step,
+// placed object, portal attune, split, …), so bursts hitched the frame. The
+// heavy write now lives in saveGameNow(); the public saveGame() just marks the
+// save dirty and (re)arms a trailing flush that runs during browser idle time.
+// A hard maxWait guarantees a dirty save can never be starved by continuous
+// activity (this replaces the every-15s guarantee the timer gave), and page
+// unload/hide flushes synchronously so nothing is ever lost.
+const SAVE_TRAILING_MS = 1000;  // batch a burst: wait this long after the last request
+const SAVE_MAX_WAIT_MS = 6000;  // ...but never defer a dirty save longer than this
+let saveDirty = false;          // a save was requested but hasn't been flushed yet
+let saveDeadline = 0;           // Date.now() by which a pending save MUST flush (maxWait)
+let saveDelayTimer = null;      // setTimeout handle for the trailing debounce
+let saveIdleHandle = null;      // requestIdleCallback (or setTimeout) handle for the flush
+const _hasRIC = typeof requestIdleCallback === "function";
+const _ric = _hasRIC ? requestIdleCallback : (cb) => setTimeout(cb, 0);
+const _cic = _hasRIC ? cancelIdleCallback : clearTimeout;
+function _clearSaveTimers() {
+  if (saveDelayTimer != null) { clearTimeout(saveDelayTimer); saveDelayTimer = null; }
+  if (saveIdleHandle != null) { _cic(saveIdleHandle); saveIdleHandle = null; }
+}
+// The heavy, SYNCHRONOUS write. Call this directly when a save MUST land right
+// now (page unload/hide) — a scheduled flush would be lost if the page closes.
+// Same guards & body saveGame() always had.
+function saveGameNow() {
+  _clearSaveTimers();
+  if (resetting || !gameReady) { saveDirty = false; return; }
   // mid-ghost-tick the global player holds an INACTIVE split body's fields —
-  // defer to the end of Split.tick() so the save reads the true active body
+  // defer to the end of Split.tick() so the save reads the true active body.
+  // Leave the request pending (split.js re-calls saveGame() when the tick ends);
+  // in practice idle/unload callbacks never run inside a synchronous ghost tick.
   if (typeof Split !== "undefined" && Split.deferSave()) return;
+  saveDirty = false;
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(buildSaveData())); } catch (e) {}
   // flush every loaded chunk's live node state (planted crops, depleted/respawning
   // nodes) to IDB so a refresh keeps them even before the chunk is evicted.
   try { if (world && world.flushChunks) world.flushChunks(); } catch (e) {}
+}
+function _scheduleSave() {
+  if (saveDelayTimer != null) clearTimeout(saveDelayTimer);
+  // clamp the trailing delay so the flush can never slip past the hard deadline
+  const delay = Math.max(0, Math.min(SAVE_TRAILING_MS, saveDeadline - Date.now()));
+  saveDelayTimer = setTimeout(() => {
+    saveDelayTimer = null;
+    if (!saveDirty) return;
+    // do the serialize during idle, but cap the wait so constant load can't
+    // starve it — the idle timeout fires the callback even with no idle period
+    if (saveIdleHandle != null) _cic(saveIdleHandle);
+    saveIdleHandle = _ric(() => { saveIdleHandle = null; if (saveDirty) saveGameNow(); },
+      { timeout: Math.max(0, saveDeadline - Date.now()) });
+  }, delay);
+}
+// Callers (4):
+//  gameplay/world.js:35 main.js:30 storage.js:115,150
+function saveGame() {
+  if (resetting || !gameReady) return; // reset path writes its own blob; don't schedule
+  if (!saveDirty) { saveDirty = true; saveDeadline = Date.now() + SAVE_MAX_WAIT_MS; }
+  _scheduleSave();
 }
 
 // ---------- save import (account cloud restore, js/net/savesync.js) ----------
@@ -508,7 +584,15 @@ function migrateBankNets() {
   }
   player.bank = player.banks.main;
 }
-window.addEventListener("beforeunload", saveGame);
+// The page may be closing — a scheduled/debounced flush would be lost, so write
+// synchronously right now. visibilitychange→hidden also covers mobile/tab-switch
+// teardown, where beforeunload is unreliable (and is the point browsers may
+// freeze/discard the tab). Both go through saveGameNow() so the debounce can
+// never swallow the last save.
+window.addEventListener("beforeunload", () => { try { saveGameNow(); } catch (e) {} });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { try { saveGameNow(); } catch (e) {} }
+});
 
 // ---------- init ----------
 // Callers (2):

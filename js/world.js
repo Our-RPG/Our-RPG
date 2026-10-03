@@ -309,6 +309,45 @@ function genWorld() {
     return s;
   }
 
+  // ---- cached pure terrain queries (biomeAt / heightAt) --------------------
+  // biomeAtTile recomputes ~130 valueNoise evals per call and elevation ~19;
+  // both are PURE of their map-coord args and WORLD_SEED, yet they're hammered
+  // per-monster-per-move and in the per-tick ambience ring on the SAME tiles,
+  // so a bounded memo keyed on the exact game-tile args the caller passes
+  // collapses the repeats (far-LOD/monster/weather queries are world-anchored,
+  // so hit rates are high). The ONE mutable input anywhere in their dependency
+  // tree is TUT_ISLE.islet — the tutorial Swim-Master's motu, re-seated per
+  // character (terrain.js tutElev reads it): capture its identity and flush
+  // BOTH memos whenever it changes, so a re-seat can never serve a stale isle
+  // height/biome. Everywhere else the result is a timeless function of (x,y).
+  const TERR_MEMO_MAX = 8192;        // bounded; evicts oldest (insertion order)
+  const _biomeMemo = new Map(), _heightMemo = new Map();
+  let _isletTok = (typeof TUT_ISLE !== "undefined") ? TUT_ISLE.islet : null;
+  const _terrMemoCheck = () => {
+    const tok = (typeof TUT_ISLE !== "undefined") ? TUT_ISLE.islet : null;
+    if (tok !== _isletTok) { _isletTok = tok; _biomeMemo.clear(); _heightMemo.clear(); }
+  };
+  const biomeAtCached = (x, y) => {
+    _terrMemoCheck();
+    const k = x + "," + y;
+    let v = _biomeMemo.get(k);
+    if (v !== undefined) return v;                 // classify() always returns a number
+    v = biomeAtTile(x / 2, y / 2);
+    _biomeMemo.set(k, v);
+    if (_biomeMemo.size > TERR_MEMO_MAX) _biomeMemo.delete(_biomeMemo.keys().next().value);
+    return v;
+  };
+  const heightAtCached = (x, y) => {
+    _terrMemoCheck();
+    const k = x + "," + y;
+    let v = _heightMemo.get(k);
+    if (v !== undefined) return v;                 // elevation() always returns a number
+    v = elevation(x / 2, y / 2);
+    _heightMemo.set(k, v);
+    if (_heightMemo.size > TERR_MEMO_MAX) _heightMemo.delete(_heightMemo.keys().next().value);
+    return v;
+  };
+
   return {
     obstacles,
     npcs,
@@ -320,7 +359,7 @@ function genWorld() {
     npcAt(x, y, level) { return npcs.find(n => n.x === x && n.y === y && (level == null || (n.level | 0) === (level | 0))); },
     playerStart: { x: 1, y: 2 },
     inMap: () => true,
-    biomeAt: (x, y) => biomeAtTile(x / 2, y / 2),
+    biomeAt: biomeAtCached,   // memoized (pure; islet-aware flush) — see above
     getGround(x, y) { const ch = chunkAt(x, y); return ch.ground[lidx(ch, x, y)]; },
     getDecor(x, y) { const ch = chunkAt(x, y); return ch.decor[lidx(ch, x, y)]; },
     isBlocked(x, y) { const ch = chunkAt(x, y); return ch.blocked[lidx(ch, x, y)] === 1; },
@@ -379,6 +418,10 @@ function genWorld() {
     // point query in GAME-tile coords → settlements whose footprint you're in/near
     // (returns v.x/y/R in game tiles). Used by the day/night candle lighting.
     villagesNearPt(x, y, pad) { return villagesNear(x / 2, y / 2, x / 2, y / 2, pad == null ? 40 : pad); },
+    // light target-candidate scan (cheap villageNode probe, no citygrow/road A*)
+    // — MAP-tile coords in, same cell range/order as villagesNear; callers pass
+    // map coords directly (see quests.js pickTargetVillage).
+    villagesNearLight: features.villagesNearLight,
     // TERRAIN-flood component id (landmass pocket) — see features.js bankNetId
     bankNetId: features.bankNetId,
     // bank network for a chest at GAME-tile (x,y): the ROAD-web component of
@@ -485,7 +528,7 @@ function genWorld() {
     BIOME_NAMES,
     riverSourceAt,
     riverFlowAt,
-    heightAt: (x, y) => elevation(x / 2, y / 2),
+    heightAt: heightAtCached,   // memoized (pure; islet-aware flush) — see above
     // Tūhura Isle pocket (gameplay/tutorial.js): the tutorial's staged sky
     // pins the isle at a flat mid latitude for sun geometry and the HUD
     latitudeAt: (x, y) => (typeof Tutorial !== "undefined" && Tutorial.flatSky())

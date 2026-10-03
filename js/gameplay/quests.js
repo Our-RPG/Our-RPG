@@ -110,6 +110,28 @@
   // nearest village that is NOT the giver's own, else the giver's own
   function pickTargetVillage(gx, gy) {
     if (!(typeof world !== "undefined" && world.villagesNearPt)) return null;
+    // PERF: the old path ran world.villagesNearPt(gx,gy,2000) — ~784 cells each
+    // running full villageInfo (citygrow + road A*) just to compare positions.
+    // When a light candidate scan is available, select over it (same cells,
+    // same x/y/kind/name, so the pick is identical) and run the one expensive
+    // villageInfo only for the WINNER — which still needs .buildings downstream
+    // (pickBuilding). Falls back to the original heavy scan when absent, so
+    // behaviour is unchanged until the facade exposes the light scan.
+    if (world.villagesNearLight) {
+      try {
+        // mirror villagesNearPt's map-coord scaling (it does villagesNear(gx/2,…))
+        const cand = world.villagesNearLight(gx / 2, gy / 2, gx / 2, gy / 2, 2000) || [];
+        if (cand.length) {
+          cand.sort((a, b) => ((a.x - gx) ** 2 + (a.y - gy) ** 2) - ((b.x - gx) ** 2 + (b.y - gy) ** 2));
+          const sel = cand.find(v => Math.hypot(v.x - gx, v.y - gy) > 40) || cand[0];
+          // re-fetch the WINNER at full fidelity (pad 0 → just its own cell);
+          // sel.x/.y are map coords, villagesNearPt wants game coords (×2)
+          const full = world.villagesNearPt(sel.x * 2, sel.y * 2, 0) || [];
+          const match = full.find(v => v.x === sel.x && v.y === sel.y);
+          if (match) return match;
+        } else return null; // no candidates in range — same as the heavy path
+      } catch (e) { /* fall through to the heavy path on any mismatch */ }
+    }
     let near = [];
     try { near = world.villagesNearPt(gx, gy, 2000) || []; } catch (e) { return null; }
     if (!near.length) return null;

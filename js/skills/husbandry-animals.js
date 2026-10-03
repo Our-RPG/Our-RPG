@@ -227,6 +227,11 @@
 
   // ---- helpers ----
   const COOLDOWN = 300000; // 300s after tending before you can feed again
+  // PERF: soonest growAt among pending babies, so growBabies() (called every
+  // frame) can early-return without scanning the whole monsters array until a
+  // baby is actually due. Lowered when a baby is born (spawnBaby) and recomputed
+  // during each real growBabies scan. 0 forces the first scan to initialise it.
+  let _nextGrowAt = 0;
   const baseKind = k => (k || "").replace(/_v$/, "");
   const aniName = mon => (MONSTERS[mon.kind] && MONSTERS[mon.kind].name) || mon.kind;
   function husbActions(mon) {
@@ -255,16 +260,31 @@
       facing: 1, dir8: "south", spr: MONSTERS[bk].spr, lungeT: -9999,
       spawnBiome: world.biomeAt(nx, ny), growTo: adultKind, growAt: now + COOLDOWN,
     });
+    // keep the soonest-maturation hint current so growBabies wakes in time
+    if (now + COOLDOWN < _nextGrowAt) _nextGrowAt = now + COOLDOWN;
     return MONSTERS[bk].name;
   }
   // grow babies into adults once their timer elapses (called from updateWorldStuff)
   function growBabies() {
+    // PERF: skip the full-array scan until the soonest baby is actually due.
+    // _nextGrowAt is the min growAt over all pending babies, so `now < it` means
+    // none can have matured yet — maturation still fires on the exact same frame
+    // as before (when now >= that min, we fall through and scan).
+    if (now < _nextGrowAt) return;
+    let soonest = Infinity; // recompute the min over whatever babies remain
     for (const m of monsters) {
-      if (!m.alive || !m.growTo || now < (m.growAt || 0)) continue;
-      const adult = MONSTERS[m.growTo]; if (!adult) { m.growTo = null; continue; }
-      m.kind = m.growTo; m.spr = adult.spr; m.hp = adult.hp; m.growTo = null; m.growAt = 0;
-      if (typeof uiDirty !== "undefined") uiDirty = true;
+      if (!m.growTo) continue;                                   // not a maturing baby
+      if (m.alive && now >= (m.growAt || 0)) {                   // due — mature it now
+        const adult = MONSTERS[m.growTo]; if (!adult) { m.growTo = null; continue; }
+        m.kind = m.growTo; m.spr = adult.spr; m.hp = adult.hp; m.growTo = null; m.growAt = 0;
+        if (typeof uiDirty !== "undefined") uiDirty = true;
+        continue;                                                // matured → no longer pending
+      }
+      // still pending (alive-but-early, or dead awaiting respawn): track soonest
+      // so a dead-and-overdue baby keeps us scanning until it respawns & matures
+      if ((m.growAt || 0) < soonest) soonest = (m.growAt || 0);
     }
+    _nextGrowAt = soonest; // Infinity when no babies remain → cheap early-returns
   }
 
   // ---- perform a tier action ----

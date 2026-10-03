@@ -35,9 +35,13 @@
   const BACKLOG_CAP = 4000;               // LS ceiling across refreshes
   const CAM_SETTLE_MS = 700;              // a zoom/turn logs once it stops
 
-  function optedOut() {
-    try { return localStorage.getItem(LS_OPT) === "off"; } catch (e) { return false; }
-  }
+  // Cache the opt-out once (PERF): ev() fires on every xp/item/kill/move tick —
+  // a synchronous localStorage.getItem per event hitched tight crafting/combat
+  // bursts. Read it once here; the settings toggle below keeps it in sync, which
+  // is the only place the value ever changes in-session.
+  let _optedOut = false;
+  try { _optedOut = localStorage.getItem(LS_OPT) === "off"; } catch (e) {}
+  function optedOut() { return _optedOut; }
 
   // ---------- identity ----------
   let device = null;
@@ -393,6 +397,7 @@
         if (sel.value === "off") localStorage.setItem(LS_OPT, "off");
         else localStorage.removeItem(LS_OPT);
       } catch (e) {}
+      _optedOut = sel.value === "off"; // keep the cached flag in sync with the setting
       if (sel.value === "off") { Q = []; saveBacklog(); }
     });
   }

@@ -561,11 +561,22 @@ const R3D = (() => {
   }
   let sea = null;
 
+  // FIX B: persistent scratch arrays for the per-chunk geometry builders.
+  // buildChunkMesh used to allocate fresh pos/uvs/idx/snw (and wall pos/uv/idx)
+  // on every build — a chunk's worth of GC churn per chunk. It is synchronous
+  // and non-reentrant (only ever called from syncChunks on the main thread, and
+  // nothing it calls re-enters it), so these can be shared and reset per build.
+  // THREE.Float32BufferAttribute/setIndex COPY the array into a typed array, so
+  // the finished geometry is byte-identical and resetting the scratch for the
+  // next build can't touch it — pure allocation savings, no behaviour change.
+  const _bcmPos = [], _bcmUV = [], _bcmIdx = [], _bcmSnw = [];
+  const _bcmWPos = [], _bcmWUV = [], _bcmWIdx = [];
   function buildChunkMesh(cx, cy) {
     const CS = world.CHUNK;
     const ch = world.getChunk(cx, cy);
     const group = new THREE.Group();
-    const pos = [], uvs = [], idx = [], snw = [];
+    const pos = _bcmPos, uvs = _bcmUV, idx = _bcmIdx, snw = _bcmSnw;
+    pos.length = 0; uvs.length = 0; idx.length = 0; snw.length = 0;
     let n = 0;
     const AW = atlas.canvas.width, AH = atlas.canvas.height;
     function quad(x, z, key, y, sn, must) {
@@ -718,7 +729,8 @@ const R3D = (() => {
     const shBlocks = group.userData.shBlocks = [];   // {x0, z0, x1, z1, len}
     // static wall blocks (bare maze/ruins wall decor) share the atlas material,
     // so their quads are appended straight into a second baked geometry
-    const wpos = [], wuvs = [], widx = [];
+    const wpos = _bcmWPos, wuvs = _bcmWUV, widx = _bcmWIdx;   // FIX B: shared scratch (reset per build)
+    wpos.length = 0; wuvs.length = 0; widx.length = 0;
     let wn = 0;
     const wallQuad = (key, ax, ay, az, bx2, by2, bz2, cx2, cy2, cz2, dx2, dy2, dz2) => {
       const cell = atlas.cells[key];
@@ -1818,6 +1830,11 @@ void main() {
   const FLOOD_AMP = 4 * STEP_H; // full-flood rise: 4 terrain steps
   let floodLvl = 0;
   const _floodRebuild = [];
+  // FIX A: budgeted drain queues for the sun-step shadow rebake (see frame()).
+  // A sun step used to rebake EVERY chunk + struct shadow in one frame; these
+  // spread that over a few frames instead, mirroring _floodRebuild.
+  const _shadowChunkQ = [];
+  const _shadowStructQ = [];
   function waterLevelAt(wx, wy) {
     const v = waterLevelBase(wx, wy);
     if (floodLvl > 0) {
@@ -3279,7 +3296,7 @@ void main() {
   // ---------- per-frame sync ----------
   function syncNodes() {
     for (const n of (world.nodesNearLoaded || world.nodesNear)(player.x, player.y, viewRadius())) {
-      const id = "n" + n.id;
+      const id = n._mid || (n._mid = "n" + n.id);   // FIX F: build the mesh id once, not every frame (n.id is stable)
       let key = null, scale = 1, flat = false, treeMul = 1;
       if (n.portal) { key = "archway_stone"; scale = 1.7; }
       else if (n.station) key = STATIONS[n.type].spr;
@@ -3405,7 +3422,20 @@ void main() {
     _bioLights.length = 0;
     const pBio = (typeof bioBiomeGlow === "function" && world.biomeNameAt)
       ? bioBiomeGlow(world.biomeNameAt(player.x, player.y)) : null;
-    for (const [, group] of chunkMeshes) {
+    // FIX E: only visit the chunks whose tiles can hold a decor item inside the
+    // view radius, instead of walking EVERY loaded chunk and distance-culling.
+    // The chunk box is exactly the bounding box of the per-item cull circle (an
+    // item draws iff (o.wx-px)^2+(o.wz-py)^2<=R2, so o.wx∈[px-_vr,px+_vr] → its
+    // chunk index is in the floored range), i.e. a superset of every chunk that
+    // draws decor — identical output, far fewer empty chunks touched. The
+    // per-item cull below is unchanged.
+    const _CS = world.CHUNK;
+    const _cx0 = Math.floor((px - _vr) / _CS), _cx1 = Math.floor((px + _vr) / _CS);
+    const _cy0 = Math.floor((py - _vr) / _CS), _cy1 = Math.floor((py + _vr) / _CS);
+    for (let _cy = _cy0; _cy <= _cy1; _cy++)
+      for (let _cx = _cx0; _cx <= _cx1; _cx++) {
+      const group = chunkMeshes.get(_cx + "," + _cy);
+      if (!group) continue;
       const list = group.userData.decorObjs;
       if (!list) continue;
       for (const o of list) {
@@ -3430,7 +3460,7 @@ void main() {
         const ff = o.fr !== undefined
           ? (o.fr + (((o.fdir || 0) - camDir + 8) & 7)) & 7
           : 0;
-        const om = getObjMesh("dc" + o.wx + "_" + o.wz, o.idx, ff);
+        const om = getObjMesh(o._mid || (o._mid = "dc" + o.wx + "_" + o.wz), o.idx, ff);   // FIX F: id built once
         if (om) place(om, o.wx, o.wz, 1, o.scale, false, false, liftAt(o.wx, o.wz));
       }
     }
@@ -3440,13 +3470,32 @@ void main() {
     for (const rec of structs.values()) {
       const list = rec.upperDecor;
       if (!list || !list.length) continue;
+      // FIX E: skip a whole building whose upper furniture is entirely beyond the
+      // cull radius. The bounding box is derived from the items THEMSELVES (cached
+      // once — upperDecor is static), so the nearest-point test is an exact
+      // superset: if the box's closest point is past R2, every item is too and
+      // all would be culled anyway. Never skips a building the player is inside
+      // (that box is within one building's span of the player, well under _vr).
+      if (rec._udBox === undefined) {
+        let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+        for (const o of list) {
+          if (o.wx < x0) x0 = o.wx; if (o.wx > x1) x1 = o.wx;
+          if (o.wz < z0) z0 = o.wz; if (o.wz > z1) z1 = o.wz;
+        }
+        rec._udBox = { x0, z0, x1, z1 };
+      }
+      const bb = rec._udBox;
+      const nx = px < bb.x0 ? bb.x0 : px > bb.x1 ? bb.x1 : px;
+      const nz = py < bb.z0 ? bb.z0 : py > bb.z1 ? bb.z1 : py;
+      const bdx = nx - px, bdz = nz - py;
+      if (bdx * bdx + bdz * bdz > R2) continue;
       const inside = rec.vols && rec.vols.some(vv =>
         player.x >= vv.x0 && player.x < vv.x1 && player.y >= vv.z0 && player.y < vv.z1);
       for (const o of list) {
         if (inside && o.s > lv) continue;
         const dx = o.wx - px, dy = o.wz - py;
         if (dx * dx + dy * dy > R2) continue;
-        const om = getObjMesh("ud" + o.wx + "_" + o.wz + "_" + o.s, o.idx, 0); // south sprite only
+        const om = getObjMesh(o._mid || (o._mid = "ud" + o.wx + "_" + o.wz + "_" + o.s), o.idx, 0); // FIX F: id once; south sprite only
         if (om) place(om, o.wx, o.wz, 1, o.scale, false, false, o.y);
       }
     }
@@ -5229,6 +5278,14 @@ void main() {
     if (liftAt(tx, ty) > groundY(tx, ty) + 1.2) return false;
     return true;
   }
+  // FIX D: cap how many NPCs run a fresh BFS replan in one frame. Dusk/doorway
+  // rushes used to let dozens of NPCs each run a 1600-node BFS on the same frame
+  // (the "replan storm"). _npcPathBudget is refilled each frame (top of
+  // syncMixNpcs) and decremented per fresh npcPath; NPCs over budget keep their
+  // existing path (or wait a tick) and retry next frame — a route computed a
+  // frame later is invisible, and no NPC ever teleports or stops permanently.
+  const NPC_PATH_BUDGET = 3;
+  let _npcPathBudget = NPC_PATH_BUDGET;
   // bounded BFS pathfinder for town NPCs. Door/archway tiles are NOT blocked,
   // so the route naturally threads the one doorway gap in a wall — this is what
   // makes NPCs walk THROUGH doorways instead of the old greedy stepper giving
@@ -5241,28 +5298,39 @@ void main() {
     if (sx === gx && sy === gy) return [];
     const goalBlocked = !npcTilePassable(npc, gx, gy);
     const BUDGET = 1600;
-    const prev = new Map(); // "x,y" -> previous "x,y" (null at the start)
-    prev.set(sx + "," + sy, null);
+    // FIX D: pack the visited/prev keys as integers RELATIVE to the start tile
+    // instead of "x,y" strings — same BFS, no per-node string allocation. At
+    // most BUDGET nodes are processed, so no explored tile is more than ~BUDGET+1
+    // away from the start; OFF/STRIDE below cover a ±4095-tile window, so the key
+    // can never collide regardless of the NPC's absolute world coordinates. prev
+    // maps packedKey -> previous packedKey (-1 marks the start). Pathing result
+    // is identical to the string-keyed version.
+    const OFF = 4096, STRIDE = 16384;
+    const packed = (x, y) => (x - sx + OFF) * STRIDE + (y - sy + OFF);
+    const START = packed(sx, sy);
+    const prev = new Map();
+    prev.set(START, -1);
     const q = [[sx, sy]];
-    let head = 0, found = null;
+    let head = 0, found = null;   // found = [x,y] of the goal (or near-goal) tile
     while (head < q.length && head < BUDGET) {
       const cx = q[head][0], cy = q[head][1]; head++;
       if ((cx === gx && cy === gy) ||
-          (goalBlocked && Math.max(Math.abs(cx - gx), Math.abs(cy - gy)) <= 1)) { found = cx + "," + cy; break; }
+          (goalBlocked && Math.max(Math.abs(cx - gx), Math.abs(cy - gy)) <= 1)) { found = [cx, cy]; break; }
+      const ck = packed(cx, cy);
       for (const d of DIR8_DELTA) {
-        const nx = cx + d[0], ny = cy + d[1], k = nx + "," + ny;
+        const nx = cx + d[0], ny = cy + d[1], k = packed(nx, ny);
         if (prev.has(k)) continue;
         if (!npcTilePassable(npc, nx, ny)) continue;
         if (d[0] && d[1] && (!npcTilePassable(npc, cx + d[0], cy) || !npcTilePassable(npc, cx, cy + d[1]))) continue;
-        prev.set(k, cx + "," + cy);
+        prev.set(k, ck);
         q.push([nx, ny]);
       }
     }
     if (found == null) return null;
     const path = [];
-    for (let cur = found; cur && cur !== sx + "," + sy; cur = prev.get(cur)) {
-      const c = cur.indexOf(",");
-      path.push([+cur.slice(0, c), +cur.slice(c + 1)]);
+    for (let k = packed(found[0], found[1]); k !== undefined && k !== START; k = prev.get(k)) {
+      const a = Math.floor(k / STRIDE), b = k % STRIDE;   // decode packed → world tile
+      path.push([a - OFF + sx, b - OFF + sy]);
     }
     path.reverse();
     return path;
@@ -5282,8 +5350,18 @@ void main() {
     if (!path || npc._pathGoal !== gk || npc._pathI >= path.length) {
       // recompute unless we recently failed to find a route to this same goal
       if (!(npc._pathGoal === gk && npc._pathFailAt && T < npc._pathFailAt)) {
-        npc._path = npcPath(npc, tx, ty); npc._pathGoal = gk; npc._pathI = 0; npc._pathWait = 0;
-        npc._pathFailAt = npc._path ? 0 : T + 1200;
+        // FIX D: only a few NPCs replan per frame. Over budget this tick: if an
+        // existing path still has steps left, follow it one more tile (identical
+        // route, just a frame stale when the goal changed); otherwise wait a tick
+        // and retry. Never teleports, never stops for good.
+        const canFollowStale = path && npc._pathI < path.length;
+        if (_npcPathBudget > 0 || !canFollowStale) {
+          if (_npcPathBudget <= 0) return true;   // nothing to follow yet — wait a tick
+          _npcPathBudget--;
+          npc._path = npcPath(npc, tx, ty); npc._pathGoal = gk; npc._pathI = 0; npc._pathWait = 0;
+          npc._pathFailAt = npc._path ? 0 : T + 1200;
+        }
+        // else: over budget but a usable stale path exists — fall through and follow it
       }
       path = npc._path;
       // no route within the BFS budget (goal far off, or genuinely walled off):
@@ -5297,8 +5375,12 @@ void main() {
     const nx = step[0], ny = step[1];
     // next tile blocked by a live entity? wait for it to clear; after a while
     // give up on this route and replan around the obstacle next tick.
-    if ((nx === player.x && ny === player.y && (player.level | 0) === (npc.level | 0)) ||
-        (world.npcAt && world.npcAt(nx, ny, npc.level)) || !npcTilePassable(npc, nx, ny)) {
+    // FIX G: test the cheap CACHED terrain predicate (npcTilePassable) and the
+    // player tile BEFORE the O(n) world.npcAt scan — same OR result, but most
+    // tiles short-circuit out without the linear occupancy walk.
+    if (!npcTilePassable(npc, nx, ny) ||
+        (nx === player.x && ny === player.y && (player.level | 0) === (npc.level | 0)) ||
+        (world.npcAt && world.npcAt(nx, ny, npc.level))) {
       if ((npc._pathWait = (npc._pathWait || 0) + 1) > 18) { npc._path = null; npc._pathWait = 0; }
       return true;
     }
@@ -5745,8 +5827,28 @@ void main() {
       }
     }
   }
+  // FIX C: throttle state for the settlement-membership management inside
+  // syncMixNpcs. _mixMgmtCell starts null so the first call always runs.
+  let _mixMgmtCell = null, _mixMgmtAt = 0;
   function syncMixNpcs() {
     if (!MIXR.ok || !MIXR.list.length) return;
+    // FIX D: refill the per-frame BFS replan budget before any NPC steps below.
+    _npcPathBudget = NPC_PATH_BUDGET;
+    // FIX C: the settlement-membership management below (shop-tagging every
+    // world.npc, the villagesNear/iconsNear spawn queries, and the O(n²) owner
+    // reconciliation) only changes as the player crosses into new terrain or on
+    // the order of seconds. Re-run it only when the player enters a new ~8-tile
+    // cell, with a ~300ms safety net so a stationary player still picks up a
+    // shopkeeper that just chunk-loaded. The first visit to a cell (and the very
+    // first call — _mixMgmtCell starts null) runs immediately so NPCs populate
+    // with no visible delay. Per-NPC movement (stepMixNpc) and door ticking run
+    // EVERY frame below, unthrottled, so motion stays frame-smooth. (The gated
+    // block keeps its original indentation to minimise the diff / regression risk.)
+    const _mnow = performance.now();
+    const _mcell = (player.x >> 3) + "," + (player.y >> 3);
+    if (_mcell !== _mixMgmtCell || _mnow >= _mixMgmtAt) {
+    _mixMgmtCell = _mcell;
+    _mixMgmtAt = _mnow + 300;
     // 1) every shopkeeper (and main-branch banker) becomes a mix character
     //    (appearance only; keeps its trader/banker role, name and shop).
     //    These are placed/removed by the chunk system, so we just tag any we
@@ -5936,6 +6038,7 @@ void main() {
         }
       }
     }
+    }   // FIX C: end throttled settlement-membership management (sections 1–2.4)
     // 2.5) lamplighters: at dusk the townsfolk carry candles out from the store
     //    and fan across the settlement; at dawn they gather back to it. Candle
     //    lighting itself is time-driven (daynight.settlementLights) so it stays
@@ -5984,7 +6087,10 @@ void main() {
     monsters.forEach((mon, i) => {
       if (!mon.alive || mon.dormant) return; // dormant: a nocturnal bird sleeping out the day
       if (Math.abs(mon.x - player.x) > _vr || Math.abs(mon.y - player.y) > _vr) return;
-      const id = "mob" + (mon.uid || i);
+      // FIX F: build the mesh id once when the monster has a stable uid (cached
+      // on the monster). Without a uid we keep the live-index form (unchanged),
+      // since the array index isn't a stable identity to cache.
+      const id = mon._mid || (mon.uid ? (mon._mid = "mob" + mon.uid) : "mob" + i);
       const def = MONSTERS[mon.kind];
       let dispDir = mon.dir8 || "south";
       if (def.dirSpr && camDir) {
@@ -7785,10 +7891,29 @@ void main() {
     updateSun();
     updateShadowFade();
     _fpMark("sun");
+    // FIX A: a sun step used to rebake EVERY chunk + struct shadow in a single
+    // frame — a multi-hundred-ms burst on a dense city, on every (multi-minute)
+    // sun step. Instead, a new step refills two persistent drain queues and we
+    // rebake only a handful per frame. A fresh step REPLACES the queues, so the
+    // shadows can never trail the sun by more than one quantized step; finishing
+    // the rebake a few frames (~tens of ms) later is imperceptible. Stale queue
+    // entries (chunk/struct unloaded before we got to it) are detached from the
+    // scene — skip them, exactly as the original values()-walk never saw them.
     if (sunState.key !== sunBakeKey) {
       sunBakeKey = sunState.key;
-      for (const g of chunkMeshes.values()) if (g.userData.shSprites) buildChunkShadow(g);
-      for (const rec of structs.values()) if (rec.shadowFeet) buildStructShadow(rec);
+      _shadowChunkQ.length = 0; _shadowStructQ.length = 0;
+      for (const g of chunkMeshes.values()) if (g.userData.shSprites) _shadowChunkQ.push(g);
+      for (const rec of structs.values()) if (rec.shadowFeet) _shadowStructQ.push(rec);
+    }
+    for (let i = 0; i < 4 && _shadowChunkQ.length; ) {
+      const g = _shadowChunkQ.pop();
+      if (!g.parent) continue;           // chunk was pruned since the step — skip (no count)
+      buildChunkShadow(g); i++;
+    }
+    for (let i = 0; i < 2 && _shadowStructQ.length; ) {
+      const rec = _shadowStructQ.pop();
+      if (!rec.group || !rec.group.parent) continue;   // struct pruned since the step — skip
+      buildStructShadow(rec); i++;
     }
     _fpMark("shadowBake");
     // snow cover: one uniform, all patched materials follow (no rebakes)

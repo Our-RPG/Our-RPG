@@ -1715,6 +1715,25 @@ function createWorldFeatures(ctx) {
       }
     return out;
   }
+  // Candidate-only scan for callers that just need each settlement's
+  // position/kind/name (e.g. quest target selection) — NOT its buildings or
+  // road graph. Identical cell range and iteration order to villagesNear, but
+  // built on villageNode (a cheap cached probe) instead of villageInfo
+  // (citygrow + road A* per cell). The candidate SET is byte-identical:
+  // villageNode and villageInfo both yield a village exactly when villageHead
+  // exists, and take x/y/kind/name from the same head — so selecting over this
+  // list and re-fetching the chosen cell via villageInfo gives the same pick.
+  function villagesNearLight(tx0, ty0, tx1, ty1, pad) {
+    const out = [];
+    const c0x = Math.floor((tx0 - pad) / VCELL), c1x = Math.floor((tx1 + pad) / VCELL);
+    const c0y = Math.floor((ty0 - pad) / VCELL), c1y = Math.floor((ty1 + pad) / VCELL);
+    for (let cy = c0y; cy <= c1y; cy++)
+      for (let cx = c0x; cx <= c1x; cx++) {
+        const v = villageNode(cx, cy);
+        if (v) out.push({ x: v.x, y: v.y, kind: v.kind, name: v.name });
+      }
+    return out;
+  }
 
   // ---------- points of interest (exact Map.html port) ----------
   // These biome sets match Map.html exactly for POI dispatch (differ from GRASS_LIKE_B etc.)
@@ -2462,7 +2481,7 @@ function createWorldFeatures(ctx) {
     DEEP_E, GRID8, ROAD_W, gridRoute, shapePath, polyBBox, waterBody, riverTrace,
     lakeFill, lakeOutflows, riversNear, roadsNear, roadsNearCached, nearPoly, riverNearPt, riverSourceAt,
     riverAtPt, solidDoorX, riverDoors, riverFlowAt, _roadWarm, _roadCellInject, _roadCacheSize,
-    roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, genZoneNamesData, _zoneNamesInject, zoneNamed, macroPixels, genName, villageInfo, villagesNear,
+    roadNearPt, riverNear, roadNear, bankNetId, bankNetAt, bankNetInfo, roadNetId, mainBranchFor, _roadNetTrace, _edgeSeaSpans, zoneOf, _zoneNameDump, preloadZoneNames, genZoneNamesAsync, genZoneNamesData, _zoneNamesInject, zoneNamed, macroPixels, genName, villageInfo, villagesNear, villagesNearLight,
     poiInfo, wildIcon, atlasVariantAt, personalityAt, biomeGround, BIOME_VEG,
     dreamGateSite, dreamGatesNear, dreamGateClearAt,
     GRASS_LIKE_B, FOREST_LIKE_B, DESERT_LIKE_B, ROCK_LIKE_B, SWAMP_LIKE_B,

@@ -2666,18 +2666,49 @@ function createWorldChunks(ctx) {
   // even though the chunk is still in memory and hasn't been evicted.
   function persistAt(x, y) { persistChunk(Math.floor(x / CHUNK), Math.floor(y / CHUNK)); }
   // write EVERY in-memory chunk back to IDB (called on save/autosave) so all
-  // loaded crop/node state survives a reload without waiting for eviction —
-  // batched into ONE transaction so a large loaded set stays cheap.
+  // loaded crop/node state survives a reload without waiting for eviction.
+  // PERF: the structured-clone IndexedDB does at store.put() time over ~49
+  // loaded chunks used to land in one synchronous burst (a multi-second
+  // main-thread freeze during streaming). We can't dirty-track safely — chunk
+  // data is also mutated outside this module (world.setBlocked writes
+  // ch.blocked; node records are depleted via nodeAt/nodesNear), so a missed
+  // mutation would silently drop saved state. Instead we write the SAME data,
+  // amortised a few chunks per idle slice so the clone cost never stalls a
+  // single frame. Each slice opens its own short readwrite txn (an IDB txn
+  // auto-commits once it goes idle between slices, so one txn can't straddle
+  // them). Chunk objects are held by reference, so each put clones the LATEST
+  // state. _flushBusy coalesces overlapping saves into one drain + one re-run.
+  let _flushBusy = false, _flushPending = false;
   function flushChunks() {
+    if (!chunks.size) return;
+    if (_flushBusy) { _flushPending = true; return; } // a drain is already running
+    _flushBusy = true;
     const list = [...chunks.values()];
-    if (!list.length) return;
+    const BATCH = 4;
+    // yield to rendering between slices; requestIdleCallback with a timeout so a
+    // busy streaming frame can't starve the write indefinitely
+    const idle = (typeof requestIdleCallback === "function")
+      ? (fn => requestIdleCallback(fn, { timeout: 200 }))
+      : (fn => setTimeout(fn, 1));
     _openDB().then(db => {
-      const store = db.transaction('c', 'readwrite').objectStore('c');
-      for (const ch of list) store.put({
-        g: ch.ground, d: ch.decor, b: ch.blocked,
-        n: ch.nodes, s: ch.spawnDefs, bl: ch.buildings, la: ch.labels,
-      }, _ck(ch.cx, ch.cy));
-    }).catch(() => {});
+      let i = 0;
+      const step = () => {
+        const store = db.transaction('c', 'readwrite').objectStore('c');
+        const end = Math.min(i + BATCH, list.length);
+        for (; i < end; i++) {
+          const ch = list[i];
+          store.put({
+            g: ch.ground, d: ch.decor, b: ch.blocked,
+            n: ch.nodes, s: ch.spawnDefs, bl: ch.buildings, la: ch.labels,
+          }, _ck(ch.cx, ch.cy));
+        }
+        if (i < list.length) { idle(step); return; }
+        _flushBusy = false;
+        // a save arrived mid-drain — run once more to capture the latest set
+        if (_flushPending) { _flushPending = false; flushChunks(); }
+      };
+      step();
+    }).catch(() => { _flushBusy = false; });
   }
   return { chunks, obstacles, npcs, getChunk, preloadSeen, persistChunk, persistAt, flushChunks, pruneChunks, dropChunkRect, genLog, _fieldInject };
 }

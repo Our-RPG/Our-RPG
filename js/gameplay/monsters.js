@@ -33,6 +33,10 @@ function updateMonsters(dt) {
   // there — and on Tūhura Isle, permanently (terrain.js onTutIsle)
   const peaceful = (world.inPeacefulZone && world.inPeacefulZone(player.x, player.y)) ||
     (typeof onTutIsle === "function" && onTutIsle(player.x, player.y));
+  // PERF: hoist the local player's combat level once per frame — it can't change
+  // mid-updateMonsters, so monCandidates() reuses this instead of recomputing it
+  // (5 skill lookups) on every aggro/attack-turn call. See monCandidates below.
+  _frameClvl = combatLevel();
   for (const m of monsters) {
     const def = MONSTERS[m.kind];
     if (!m.alive) {
@@ -210,12 +214,20 @@ function updateMonsters(dt) {
 // Callers (3):
 //  gameplay/monsters.js:42,61,63
 function mobPassable(m, nx, ny) {
-  if (monsterAt(nx, ny)) return false;
-  // swimmers are water-locked but SWIM: underwater terraces and shelf drops
-  // that wall a walker don't stop a body gliding over them (its depth just
-  // follows the column — swimTick clamps to waterDepthAt on arrival)
-  if (m.canSwim)
-    return world.isWater(nx, ny) && world.getDecor(nx, ny) !== "stone_bridge#p";
+  // PERF: cheap CACHED terrain rejections run FIRST; the linear monsterAt()
+  // occupancy scan (O(|monsters|)) runs LAST — only on tiles the terrain hasn't
+  // already walled off. mobPassable is called ~7x per stepping monster per
+  // frame, so most candidate tiles now never pay for that scan. Behaviour is
+  // UNCHANGED: every predicate here is side-effect-free, so reordering can't
+  // alter the returned boolean — monsterAt remains the final gate immediately
+  // before each passable (return-true) result, on BOTH the swim and land paths.
+  if (m.canSwim) {
+    // swimmers are water-locked but SWIM: underwater terraces and shelf drops
+    // that wall a walker don't stop a body gliding over them (its depth just
+    // follows the column — swimTick clamps to waterDepthAt on arrival)
+    if (!(world.isWater(nx, ny) && world.getDecor(nx, ny) !== "stone_bridge#p")) return false;
+    return !monsterAt(nx, ny);
+  }
   // creatures can't scale terraces: no more than half a step up OR down
   if (typeof REN !== "undefined" && REN && REN.groundLevel &&
       Math.abs(REN.groundLevel(nx, ny) - REN.groundLevel(m.x, m.y)) > 0.51) return false;
@@ -225,6 +237,7 @@ function mobPassable(m, nx, ny) {
   const s = world.structAt && world.structAt(nx, ny);
   if (s && s.plug) return false;
   if (m.spawnBiome !== undefined && world.biomeAt(nx, ny) !== m.spawnBiome) return false;
+  if (monsterAt(nx, ny)) return false; // finally: never step onto another live body
   return true;
 }
 // Callers (1):
@@ -276,18 +289,39 @@ function dir8From(dx, dy) {
   if (dx < 0) return dy > 0 ? "south-west" : dy < 0 ? "north-west" : "west";
   return dy < 0 ? "north" : "south";
 }
+// PERF: the LOCAL player's combat level can't change mid-frame, so
+// updateMonsters hoists it into _frameClvl once per frame and monCandidates
+// reuses it instead of re-running combatLevel() (5 skill lookups) on every call
+// — monCandidates runs ~2x per eligible monster per frame. In single-player the
+// one candidate (the local player) is a reused mutable scratch object+array, so
+// the aggro/attack scans stop allocating fresh each call.
+let _frameClvl = 0;
+const _spCand = { ent: null, local: true, id: 0, clvl: 0, x: 0, y: 0, lvl: 0 };
+const _spCandArr = [_spCand];
 // Candidate victims for a monster: the local player plus (in multiplayer)
 // every remote player sharing the zone (net/livesync.js keeps their position
 // and combat level fresh). Offline / on Tūhura Isle this is just the player,
 // so single-player aggro behaves exactly as it always has.
 function monCandidates() {
+  const mp = typeof Live !== "undefined" && Live.connected && Live.connected();
+  if (!mp) {
+    // single-player / Tūhura Isle: one candidate (the local player). Reuse the
+    // scratch object+array rather than allocating per call — callers only ever
+    // read `.ent` off the chosen winner, they never retain the array itself.
+    _spCand.ent = player;
+    _spCand.id = (typeof Live !== "undefined" && Live.myId && Live.myId()) || 0;
+    _spCand.clvl = _frameClvl;
+    _spCand.x = player.x; _spCand.y = player.y; _spCand.lvl = player.level | 0;
+    return _spCandArr;
+  }
+  // multiplayer: positions/levels vary per remote player, so build a fresh list
+  // (it must not alias shared scratch). Local player's combat level is hoisted.
   const out = [{ ent: player, local: true,
     id: (typeof Live !== "undefined" && Live.myId && Live.myId()) || 0,
-    clvl: combatLevel(), x: player.x, y: player.y, lvl: player.level | 0 }];
-  if (typeof Live !== "undefined" && Live.connected && Live.connected())
-    for (const rp of Live.players.values())
-      out.push({ ent: rp, local: false, id: rp.id, clvl: rp.clvl | 0,
-        x: rp.x, y: rp.y, lvl: rp.level | 0 });
+    clvl: _frameClvl, x: player.x, y: player.y, lvl: player.level | 0 }];
+  for (const rp of Live.players.values())
+    out.push({ ent: rp, local: false, id: rp.id, clvl: rp.clvl | 0,
+      x: rp.x, y: rp.y, lvl: rp.level | 0 });
   return out;
 }
 

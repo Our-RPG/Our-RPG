@@ -74,6 +74,7 @@ function growSettlement(opts) {
 
   const markRoom = (b, bi, r) => {
     b.rooms.push(r);
+    b._portals = null;              // geometry changed → rebuild door-capable cache (hasDoorCached)
     blocks[b.block].roomCount++;
     const bit = 1 << b.block;
     for (let y = r.y; y < r.y + r.h; y++)
@@ -198,6 +199,42 @@ function growSettlement(opts) {
     return true;
   }
 
+  // Flood-independent "door-capable" cells of a building: for each wall tile
+  // with the building's OWN interior on one orthogonal side, the cell on the
+  // OTHER side is where a door to the outside can open. This is exactly the set
+  // of outside-cells doorSpots() tests against the flood, but derived purely
+  // from geometry (same bounds as doorSpots). A candidate placed elsewhere can
+  // only write a DIFFERENT building's id or new wall tiles — rectLegal (line
+  // ~109) forbids a legal rect from covering ANY existing interior — so a given
+  // building's door-capable geometry is invariant until IT ITSELF gains a room
+  // (markRoom clears _portals). Caching it lets the per-candidate accessibility
+  // sweep skip the four live intG probes per wall tile and short-circuit on the
+  // first flooded cell: identical accept/reject, far less work.
+  function buildPortals(b, bi) {
+    const out = [];
+    for (const k of b.wallSet) {
+      const kx = k % N, ky = (k / N) | 0;
+      if (ky > 0 && ky < N - 1) {
+        if (intG[k + N] === bi + 1) out.push(k - N); // interior S of k → door opens N
+        if (intG[k - N] === bi + 1) out.push(k + N);
+      }
+      if (kx > 0 && kx < N - 1) {
+        if (intG[k + 1] === bi + 1) out.push(k - 1);
+        if (intG[k - 1] === bi + 1) out.push(k + 1);
+      }
+    }
+    return out;
+  }
+  // existence-only, memoized equivalent of doorSpots(b,bi,flood).length > 0 —
+  // used by the hot per-candidate sweep for every building EXCEPT the one being
+  // expanded (that one's interior is mid-change, so it keeps the live path)
+  function hasDoorCached(b, bi, flood) {
+    let p = b._portals;
+    if (p == null) p = b._portals = buildPortals(b, bi);
+    for (let i = 0; i < p.length; i++) if (flood[p[i]]) return true;
+    return false;
+  }
+
   // try to commit a room; roll back if it breaks anyone's outside access
   function tryCommit(bi, r) {
     const b = buildings[bi];
@@ -227,7 +264,7 @@ function growSettlement(opts) {
                   (kx < N - 1 && flood[k + 1] && intG[k - 1] === i + 1)) { ok = true; break; }
             }
           if (!ok) return false;
-        } else if (!doorSpots(bb, i, flood).length) return false;
+        } else if (!hasDoorCached(bb, i, flood)) return false; // memoized doorSpots-length>0
       }
       return true;
     })();
