@@ -55,7 +55,7 @@ const EQUIP_CHOICES = {
 //  storage.js:1,8,12,13,14,69,70,71,72,73,74,94,95,96,97,98,99,154,155 world/chunks.js:68
 const player = {
   x: 0, y: 0, px: 0, py: 0, level: 0, moving: null, path: [], goal: null, forced: null,
-  act: null, facing: 1, dir8: "south", character: null, outfit: "Idle", hp: 10, nextAtkAt: 0, lungeT: -9999, lungeDir: [0, 0],
+  act: null, lastSkill: null, facing: 1, dir8: "south", character: null, outfit: "Idle", hp: 10, nextAtkAt: 0, lungeT: -9999, lungeDir: [0, 0],
   style: "melee", stunUntil: 0, buffs: {}, sailing: null,
   skills: {}, inv: new Array(48).fill(null),
   equip: Object.fromEntries(EQUIP_SLOTS.map(s => [s, null])),
@@ -232,6 +232,9 @@ function addSplat(ent, val, delay = 0) { splats.push({ ent, val, t: now + delay 
 // already keep those two text kinds apart.
 let _xpNotifyBatch = 0, _xpNotifyBatchAt = -1;
 function addXp(skill, amt, quiet) {
+  // the skill this self is (or was most recently) practising — split.js reads
+  // this so a new self steps out carrying everything but that skill's tools
+  player.lastSkill = skill;
   if (DEV_MODE) return; // skills are pinned at max (skillLvl) — no xp exists to gain
   // per-character skill aptitude (character-stats.js): a race/class suited to a
   // skill trains it faster (missing skill = 1× = no change).

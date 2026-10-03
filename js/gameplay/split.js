@@ -30,7 +30,7 @@ var Split = (() => {
   // here (inv, equip, bank, quests, kills, tutorial, character, outfit …) is
   // shared by all bodies.
   const SWAP_FIELDS = [
-    "x", "y", "px", "py", "level", "moving", "path", "goal", "forced", "act",
+    "x", "y", "px", "py", "level", "moving", "path", "goal", "forced", "act", "lastSkill",
     "facing", "dir8", "hp", "air", "nextAtkAt", "lungeT", "lungeDir",
     "stunUntil", "buffs", "sailing", "deck", "driftAt", "_pullAcc",
     "dying", "regenAt", "skills", "queue", "num",
@@ -61,6 +61,35 @@ var Split = (() => {
     for (let n = 1; n <= MAX_BODIES; n++) if (!used.has(n)) return n;
     return count() + 1;
   }
+  // ---------- split transfer defaults ----------
+  // which skill the OLD self is (or was most recently) engaged in — addXp
+  // (main/state.js) stamps player.lastSkill on every xp grant, for any skill;
+  // actSkill covers the gap between starting an action and its first tick
+  // actually landing xp (e.g. split the instant after clicking a tree).
+  function actSkill(act) {
+    if (!act) return null;
+    if (act.node) {
+      if (act.node.farm) return "Farming"; // crop category (node.skill) isn't a real skill — agriculture.js
+      const nt = NODE_TYPES[act.node.type];
+      if (nt && nt.skill) return nt.skill;
+    }
+    if (act.recipe && act.recipe.skill) return act.recipe.skill;
+    return null;
+  }
+  function currentSkill() { return actSkill(player.act) || player.lastSkill || null; }
+  // the tool-kind(s) (ITEMS[id].tool) a skill cares about: crafting hand-tools
+  // (production.js TOOL_SKILLS, inverted) + gathering node tools (NODE_TYPES)
+  // + the two farming tools (checked by name elsewhere, not data-driven)
+  function toolKindsForSkill(skill) {
+    const kinds = new Set();
+    if (!skill) return kinds;
+    const craftTools = (typeof skillToolsFor === "function") ? skillToolsFor(skill) : null;
+    if (craftTools) for (const k of craftTools) kinds.add(k);
+    if (typeof NODE_TYPES !== "undefined")
+      for (const nt in NODE_TYPES) if (NODE_TYPES[nt].skill === skill && NODE_TYPES[nt].tool) kinds.add(NODE_TYPES[nt].tool);
+    if (skill === "Farming") { kinds.add("hoe"); kinds.add("watering_can"); }
+    return kinds;
+  }
   function doSplit() {
     if (player.character == null) { log("You need a body before you can divide it — take a form first.", "warn"); return; }
     if (player.dying || player.forced) return;
@@ -86,23 +115,35 @@ var Split = (() => {
     player.skills = mine;
     player.hp = Math.max(1, Math.min(maxHpOf(mine), Math.round(ratio * maxHpOf(mine))));
     const origNum = myNum();
+    // the new self steps out with everything EXCEPT: worn gear (currently in
+    // use — stays on the old self) and tools for whatever skill the old self
+    // is, or was most recently, practising (so splitting off mid-task doesn't
+    // strip the one tool it needs). The share window still opens afterward so
+    // either default can be overridden by hand.
+    const skill = currentSkill();
+    const keepKinds = toolKindsForSkill(skill);
+    const copyInv = player.inv.map((s, i) => {
+      if (s && ITEMS[s.id] && keepKinds.has(ITEMS[s.id].tool)) return null; // stays behind
+      player.inv[i] = null;
+      return s;
+    });
     const copy = {
       num: nextNum(), x: spot[0], y: spot[1], px: PX(spot[0]), py: PX(spot[1]),
-      level: player.level | 0, moving: null, path: [], goal: null, forced: null, act: null,
+      level: player.level | 0, moving: null, path: [], goal: null, forced: null, act: null, lastSkill: null,
       facing: -player.facing, dir8: player.dir8 || "south",
       hp: Math.max(1, Math.min(maxHpOf(theirs), Math.round(ratio * maxHpOf(theirs)))),
       air: undefined, nextAtkAt: 0, lungeT: -9999, lungeDir: [0, 0], stunUntil: 0,
       buffs: {}, sailing: null, deck: true, driftAt: 0, _pullAcc: 0,
       dying: null, regenAt: 0, skills: theirs, queue: [],
-      inv: player.inv.map(() => null), // the copy steps out empty-handed…
-      equip: {}, equipOrder: [],       // …and bare — pass gear through the share window
+      inv: copyInv,               // everything moves across, bar current-skill tools
+      equip: {}, equipOrder: [],  // worn gear is "in use" — stays on the old self
     };
     bodies().push(copy);
     // control passes to the NEW self (user req): the splitter stays behind as
-    // the echo, and you walk on in the copy that just stepped out —
-    // empty-handed, so the share window opens to pass it what it needs
+    // the echo, carrying only its worn gear and current-skill tools
     cycleTo(copy.num);
-    log(`You tear yourself in two — and step onward in the NEW self (№${myNum()} of ${count()}). Its pack is empty: pass what it needs through the share window. Tab switches; X merges; ⇧X re-opens sharing.`, "gold");
+    const skillNote = keepKinds.size ? ` (your other self kept its ${skill} tools)` : "";
+    log(`You tear yourself in two — and step onward in the NEW self (№${myNum()} of ${count()}), carrying everything but your worn gear${skillNote}. The share window can still move things either way. Tab switches; X merges; ⇧X re-opens sharing.`, "gold");
     shareOpen(bodies().find(b => b.num === origNum));
     if (typeof sfx === "function") sfx("levelup", 0.3);
     if (typeof Tele !== "undefined") Tele.ev("split", count());
@@ -623,7 +664,7 @@ var Split = (() => {
     for (const k in raw.skills || {}) if (Number.isFinite(raw.skills[k])) skills[k] = raw.skills[k];
     return {
       num: raw.num || 2, x: raw.x, y: raw.y, px: PX(raw.x), py: PX(raw.y),
-      level: raw.level | 0, moving: null, path: [], goal: null, forced: null, act: null,
+      level: raw.level | 0, moving: null, path: [], goal: null, forced: null, act: null, lastSkill: null,
       facing: 1, dir8: "south",
       hp: Math.max(1, Math.min(maxHpOf(skills), raw.hp | 0 || maxHpOf(skills))),
       air: undefined, nextAtkAt: 0, lungeT: -9999, lungeDir: [0, 0], stunUntil: 0,

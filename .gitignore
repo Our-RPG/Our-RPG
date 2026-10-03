@@ -106,3 +106,6 @@ js/lua/lua-src-gen.js
 
 # our-rpg.com site tree (tools/build_ourrpg_site.sh output) — deploy artifact
 /dist/site/
+
+# Local-only notes (security follow-ups, TODOs) — never commit to the public repo
+*.local.md

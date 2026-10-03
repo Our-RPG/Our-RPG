@@ -167,6 +167,34 @@ function tut_open_charselect() __tut_open_charselect() end
 function tut_open_bestiary()   __tut_open_bestiary() end
 function tut_open_questlog()   __tut_open_questlog() end
 
+-- ---- tutor topic menu (NEW) -------------------------------------------------
+-- A looping Q&A menu so a tutor's lesson is player-paced, not a forced
+-- wall-of-text march: `topics` is {{q=button label, a=answer}, ...} where
+-- `a` is an answer line, a table of several short lines, OR a function (for
+-- a topic that also grants an item/opens a panel as a side effect).
+-- `exit_label` is always the LAST button and is the only way out of the
+-- loop (picking it just returns — call whatever finishing action, e.g.
+-- tut_complete, yourself right after). Topics stay in the menu after being
+-- read, so the player can freely re-ask anything, and the whole menu
+-- reopens on a revisit (go back with questions any time).
+function topic_menu(topics, exit_label)
+  local labels = {}
+  for i, t in ipairs(topics) do labels[i] = t.q end
+  labels[#labels + 1] = exit_label
+  while true do
+    local r = choice(table.unpack(labels))
+    if r == #labels then return end
+    local a = topics[r].a
+    if type(a) == "function" then
+      a()
+    elseif type(a) == "table" then
+      for _, line in ipairs(a) do chatnpc(line) end
+    else
+      chatnpc(a)
+    end
+  end
+end
+
 -- ---- cutscene primitives (NEW; suspending ones save/restore _current) ------
 function fade_out(sec)      local c = _current; __fade(1, sec or 0.6):await(); _current = c end
 function fade_in(sec)       local c = _current; __fade(0, sec or 0.6):await(); _current = c end

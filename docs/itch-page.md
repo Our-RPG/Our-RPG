@@ -91,8 +91,9 @@ maker's name; press **I** and see what the game thinks you love.
 
 ### Yours, forever — that's a feature
 
-Our RPG is **free software**: the entire game — code (GPL-3.0), art and audio
-(CC BY-SA) — lives at
+Our RPG is **free software**: the entire game — code (GPL-3.0), original art
+and writing (CC BY-SA), plus third-party audio under its own separate
+licenses (CC0 effects, CC BY-NC-SA birdsong) — lives at
 **[github.com/dataversion5372/Taiao](https://github.com/dataversion5372/Taiao)**.
 Clone it and it runs from a folder on your machine, offline, for as long as
 computers run JavaScript. No publisher can delist it, no server shutdown can

@@ -13,7 +13,11 @@
 //   weight relative mass                           ∝ h × w²  (a faerie ~0.34, human
 //                                                   ~1, loxodon ~2.2) — deduced, then
 //                                                   feeds speed (heavier slower) & tough
-//   speed  move speed          (faster / slower)   0.60 .. 1.45
+//   speed  move speed          (faster / slower)   0.60 .. 1.45 for NPCs (race/class/
+//                                                   size derived, as below) — but EVERY
+//                                                   playable character is pinned to a
+//                                                   uniform ×1.45 (user request 2026-10-03):
+//                                                   see the CHAR_STATS override below.
 //   tough  incoming-damage soak (0 = none)         0.00 .. 0.45  → takes (1-tough)× dmg
 //   xp     per-skill xp multipliers                0.85 .. 1.60  (missing skill = 1)
 //
@@ -273,11 +277,15 @@
   }
   function deriveStats(desc) { return finalize(rawScores(desc)); }
 
-  const NEUTRAL = { h: 1, w: 1, weight: 1, speed: 1, tough: 0, xp: {} };
+  const PLAYER_SPEED = 1.45; // every playable character moves at the same speed (user request 2026-10-03)
+  const NEUTRAL = { h: 1, w: 1, weight: 1, speed: PLAYER_SPEED, tough: 0, xp: {} };
 
   // Player characters: one stat block per CHAR_LIST entry (folder + name).
+  // Race/class/size still shape height, width, toughness and xp aptitude —
+  // only speed is flattened to a single uniform value across the whole roster.
   const CHAR_STATS = (typeof CHAR_LIST !== "undefined" ? CHAR_LIST : [])
     .map(c => deriveStats((c.folder || "") + " " + (c.name || "")));
+  for (const s of CHAR_STATS) s.speed = PLAYER_SPEED;
 
   // NPC stats are cached per MIX def. We derive from the `title` ONLY ("Race
   // Class in X garb") — NOT the `key`, which is a COMPOSITE of two art prompts

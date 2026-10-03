@@ -1,12 +1,12 @@
-// ===== Taiao Lua — dialogue/choice bar + cutscene UI =====
-// The picker docks exactly where js/net/live-ui.js's #livechat bar sits
-// (bottom-left, below #log) — borderless numbered text lines styled like the
-// log's own .msg lines, never a boxed popup. This is the ONE picker every
-// scripted NPC conversation uses (tutors, traders, bankers, the Weaver,
-// quest-givers) so there's never two differently-styled dialogue surfaces
-// competing for the same corner of the screen. Speech itself (chatnpc/say/
-// dialog's body) goes through npcSay — the overhead bubble + #log, same as
-// any other NPC line; this module only renders the reply OPTIONS.
+// ===== Taiao Lua — dialogue/choice modal + cutscene UI =====
+// The picker is a dim-backdrop panel centered on screen (styled like
+// gameplay/wizard.js's dialog box) — a real choice panel, not a corner
+// text dock. This is the ONE picker every scripted NPC conversation uses
+// (tutors, traders, bankers, the Weaver, quest-givers) so there's never two
+// differently-styled dialogue surfaces competing for the player's attention.
+// Speech itself (chatnpc/say/dialog's body) goes through npcSay — the
+// overhead bubble + #log, same as any other NPC line; this module only
+// renders the reply OPTIONS.
 // Also carries the cutscene primitives (fade, caption, camera zoom). Loaded
 // first: it creates window.__LUA and exposes __LUA.dlgbar / __LUA.cutscene
 // for the host bridge.
@@ -19,48 +19,51 @@
 (function () {
   const L = (window.__LUA = window.__LUA || {});
 
-  let el = null;
+  let backdrop = null, box = null;
   function ensureDom() {
-    if (el) return el;
-    el = document.createElement("div");
-    el.id = "luadlg";
-    // matches js/net/live-ui.js's #livechat dock exactly — same corner of the
-    // screen as the game's own chat bar, never a full-screen catcher
-    el.style.cssText = "display:none;position:fixed;left:10px;bottom:8px;width:72%;max-width:860px;" +
-      "z-index:45;flex-direction:column;gap:2px;font:12px OpenDyslexic, Verdana, sans-serif;";
-    document.body.appendChild(el);
-    el.addEventListener("mousedown", e => e.stopPropagation());
-    el.addEventListener("click", e => e.stopPropagation());
-    return el;
+    if (backdrop) return box;
+    backdrop = document.createElement("div");
+    backdrop.id = "luadlg";
+    backdrop.style.cssText = "display:none;position:fixed;inset:0;z-index:4500;" +
+      "align-items:center;justify-content:center;background:rgba(8,10,16,.55);";
+    box = document.createElement("div");
+    box.id = "luadlg-box";
+    box.style.cssText = "width:min(560px,92vw);max-height:80vh;overflow:auto;" +
+      "background:#161a26;border:1px solid #3a4a6a;border-radius:10px;" +
+      "box-shadow:0 12px 40px rgba(0,0,0,.6);padding:14px 16px;display:flex;" +
+      "flex-direction:column;gap:5px;font:14px OpenDyslexic, Verdana, sans-serif;";
+    backdrop.appendChild(box);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener("mousedown", e => e.stopPropagation());
+    backdrop.addEventListener("click", e => e.stopPropagation());
+    return box;
   }
 
   let liveKey = null;   // the currently-attached keydown listener, if any
   function teardown() {
     if (liveKey) { document.removeEventListener("keydown", liveKey, true); liveKey = null; }
-    if (el) { el.style.display = "none"; el.innerHTML = ""; }
+    if (backdrop) { backdrop.style.display = "none"; box.innerHTML = ""; }
   }
 
   function choose(labels) {
     teardown(); // a stray earlier picker (soft-locked script, hot reload) never stacks
     return new Promise(resolve => {
-      const bar = ensureDom();
+      const panel = ensureDom();
       if (!labels.length) { resolve(1); return; }
       const done = idx => { teardown(); resolve(idx); };
-      bar.innerHTML = "";
+      panel.innerHTML = "";
       labels.forEach((label, i) => {
         const btn = document.createElement("button");
         btn.textContent = `${i + 1}. ${label}`;
-        // matches css/style.css's #log .msg (borderless, left-aligned, the same
-        // dark 4-direction text-shadow outline so it reads over any terrain)
-        btn.style.cssText = "display:block;width:100%;text-align:left;background:none;border:none;" +
-          "padding:1px 0;cursor:pointer;font:inherit;color:#a8ffc9;" +
-          "text-shadow:-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000,1px 1px 0 #000,0 0 3px #000;";
-        btn.onmouseenter = () => (btn.style.color = "#ffe9a8");
-        btn.onmouseleave = () => (btn.style.color = "#a8ffc9");
+        btn.style.cssText = "display:block;width:100%;text-align:left;background:#1f2636;" +
+          "border:1px solid #30405c;border-radius:6px;padding:8px 10px;cursor:pointer;" +
+          "font:inherit;color:#dfe6f2;transition:background .1s,border-color .1s;";
+        btn.onmouseenter = () => { btn.style.background = "#283248"; btn.style.borderColor = "#5a8ad8"; };
+        btn.onmouseleave = () => { btn.style.background = "#1f2636"; btn.style.borderColor = "#30405c"; };
         btn.onclick = e => { e.stopPropagation(); done(i + 1); };
-        bar.appendChild(btn);
+        panel.appendChild(btn);
       });
-      bar.style.display = "flex";
+      backdrop.style.display = "flex";
       liveKey = e => {
         // never steal keystrokes while the player is typing (chat bar, notes)
         const ae = document.activeElement;

@@ -347,6 +347,33 @@ const R3D = (() => {
     atlas.tex.needsUpdate = true;
     return true;
   }
+  // Any sheet pushed into SHEET_KEYS by a js/sprites/*-data.js file (not just
+  // the fixed CORE_SHEET_KEYS set) streams in AFTER boot (main/assets.js
+  // loadAssets) — but the atlas bake above typically starts the moment core
+  // assets are ready, i.e. BEFORE those deferred sheets finish decoding. Any
+  // atlas cell sourced from one (e.g. the five crop growth-stage sheets,
+  // "cg"/"co"/"ch"/"cp"/"cf") bakes blank and silently stays blank forever,
+  // since the atlas is baked exactly once. Re-bake every cell that reads from
+  // a sheet once it actually finishes loading, on every boot (not just when
+  // a community-overlay patch targets one specific key).
+  if (typeof document !== "undefined") {
+    document.addEventListener("taiao-sheet-loaded", e => {
+      const sheet = e.detail && e.detail.sheet;
+      if (!sheet || !atlas) return;
+      const c2 = atlas.canvas.getContext("2d");
+      c2.imageSmoothingEnabled = false;
+      let any = false;
+      for (const key in atlas.cells) {
+        const def = SPR[key];
+        if (!def || def[0] !== sheet) continue;
+        const { cx, cy } = atlas.cells[key];
+        c2.clearRect(cx, cy, CSZ, CSZ);
+        drawSprTo(c2, key, cx, cy);
+        any = true;
+      }
+      if (any) atlas.tex.needsUpdate = true;
+    });
+  }
   function buildAtlas() {
     const P = _planAtlas();
     P.all.forEach((key, i) => _drawAtlasCell(P, key, i));
@@ -8162,6 +8189,7 @@ void main() {
 
   return {
     init, frame, resize, pickTile, buildAtlasAsync, preloadArt, snapshotTile, objArtFor, _diag, _structDetail, _meshLog: meshLog,
+    _atlasCells: () => atlas && atlas.cells, _atlasCanvas: () => atlas && atlas.canvas, // TEMP-VERIFY-REMOVE-ME
     _atmos: () => ({ biome: atmos.biome, dens: atmos.dens, parts: atParts.length, grOn: _grOn,
       fogW: +atmos.fogW.toFixed(3), r: +atmos.r.toFixed(3), sat: +atmos.sat.toFixed(3) }),
     _sunDebug: () => ({ ...sunState, bakeKey: sunBakeKey, mats: _shadowMats.size }),
