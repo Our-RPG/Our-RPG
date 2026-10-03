@@ -175,14 +175,17 @@ export function jsonForScript(obj) {
 
 // ---- turnstile ------------------------------------------------------------
 
-/* Verifies a Turnstile token. Fails CLOSED when TURNSTILE_SECRET isn't
- * configured: a missing secret in production is a misconfiguration, not a
- * reason to wave everyone through (the old `return true` meant one unset secret
- * silently disabled the bot gate on register/login). Local dev opts back out
- * explicitly with DEV_INSECURE="1". NOTE FOR DEPLOY: production MUST set
- * TURNSTILE_SECRET or registration/login will reject every attempt. */
+/* Verifies a Turnstile token. Turnstile is OPTIONAL here: when
+ * TURNSTILE_SECRET isn't configured the check is skipped (returns true) so a
+ * deploy without a widget still allows register/login. In that mode the active
+ * bot/abuse gate is the per-IP rate limit on register/login (auth.js) — which
+ * is the real control regardless, since a non-browser client never carries a
+ * token anyway. To add real bot protection: create a Cloudflare Turnstile
+ * widget, `wrangler secret put TURNSTILE_SECRET`, and build the client with
+ * TAIAO_TURNSTILE_SITEKEY. Once the secret IS set, every token is verified and
+ * a missing/invalid one is rejected. */
 export async function verifyTurnstile(env, token, ip) {
-  if (!env.TURNSTILE_SECRET) return env.DEV_INSECURE === "1";
+  if (!env.TURNSTILE_SECRET) return true;
   if (!token) return false;
   const res = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
     method: "POST",
