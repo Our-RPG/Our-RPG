@@ -12,6 +12,7 @@ import * as saves from "./saves.js";
 import * as xp from "./xp.js";
 import * as workshop from "./workshop.js";
 import * as submissions from "./submissions.js";
+import * as bugs from "./bugs.js";
 import * as gen from "./gen.js";
 import * as profile from "./profile.js";
 import * as npc from "./npc.js";
@@ -80,6 +81,15 @@ const ROUTES = {
   "GET /api/code/pending":              submissions.pending,
   "POST /api/code/review":              submissions.review,
   "POST /api/code/delete":              submissions.remove,
+
+  "POST /api/bugs/report":              bugs.report,
+  "GET /api/bugs/list":                 bugs.list,
+  "GET /api/bugs/item":                 bugs.item,
+  "GET /api/bugs/mine":                 bugs.mine,
+  "POST /api/bugs/vote":                bugs.vote,
+  "POST /api/bugs/comment":             bugs.comment,
+  "POST /api/bugs/flag":                bugs.flag,
+  "POST /api/bugs/review":              bugs.review,
 
   "POST /api/gen/start":                gen.start,
   "POST /api/gen/progress":             gen.progress,

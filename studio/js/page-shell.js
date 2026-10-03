@@ -26,6 +26,7 @@ const STUDIO_TABS = [
   { folder: "quests", label: "Quests" },
   { folder: "ideas", label: "Ideas" },
   { folder: "code", label: "Code" },
+  { folder: "bugs", label: "Bugs" },
   { folder: "sounds", label: "Sounds" },
   { folder: "skills", label: "Skills" },
   { folder: "review", label: "Review", curatorOnly: true },
@@ -41,7 +42,7 @@ const ENTITY_FOLDERS = ["player", "npc", "world-objects", "monsters"];
 // exactly one folder deep under studio/, so links are "../<folder>/…". Detail
 // items resolve to their own per-item page "../<folder>/<slug(key)>.html".
 const Nav = (function () {
-  const ROUTE_FOLDER = { players: "player", npcs: "npc", sprites: "sprites", objects: "world-objects", monsters: "monsters", tiles: "biomes", ui: "items", map: "procgen", zones: "zones", quests: "quests", ideas: "ideas", code: "code", sounds: "sounds", skills: "skills", settings: "settings", profile: "profile" };
+  const ROUTE_FOLDER = { players: "player", npcs: "npc", sprites: "sprites", objects: "world-objects", monsters: "monsters", tiles: "biomes", ui: "items", map: "procgen", zones: "zones", quests: "quests", ideas: "ideas", code: "code", bugs: "bugs", sounds: "sounds", skills: "skills", settings: "settings", profile: "profile" };
   const TYPE_FOLDER = { object: "world-objects", monster: "monsters", tile: "biomes", ui: "items", map: "procgen", sound: "sounds" };
   // filename slug + the item's id (name-based where available), so pages are
   // e.g. player/aeliana.html and items/bronze_sword.html — NOT the source art key.
@@ -241,6 +242,7 @@ const App = (function () {
         case "quests": pageQuests(view, params); break;
         case "ideas": pageIdeas(view); break;
         case "code": pageCode(view); break;
+        case "bugs": pageBugs(view); break;
         case "npc": pageNpc(view, params); break;
         case "settings": pageSettings(view); break;
         case "profile": pageProfile(view); break;

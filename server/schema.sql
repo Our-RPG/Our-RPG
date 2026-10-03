@@ -398,3 +398,44 @@ CREATE TABLE IF NOT EXISTS published_sprites (
 );
 CREATE INDEX IF NOT EXISTS idx_published_sprites_cat ON published_sprites(category, published_at);
 CREATE INDEX IF NOT EXISTS idx_published_sprites_user ON published_sprites(user_id, published_at);
+
+-- Player bug reports (studio/js/pages/bugs.js + server/src/bugs.js). A report is
+-- small text (no R2 payload); other players confirm "me too" (bug_votes,
+-- switchable) and add context (bug_comments). A curator triages status. See
+-- migrations/0014_bug_reports.sql for the authoritative comments.
+CREATE TABLE IF NOT EXISTS bug_reports (
+  id          INTEGER PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  title       TEXT NOT NULL,
+  area        TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open',
+  flags       INTEGER NOT NULL DEFAULT 0,
+  review_note TEXT,
+  reviewed_at INTEGER,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bug_status ON bug_reports(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_bug_area ON bug_reports(area, status);
+CREATE INDEX IF NOT EXISTS idx_bug_user ON bug_reports(user_id, created_at);
+CREATE TABLE IF NOT EXISTS bug_votes (
+  bug_id     INTEGER NOT NULL REFERENCES bug_reports(id),
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (bug_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS bug_comments (
+  id         INTEGER PRIMARY KEY,
+  bug_id     INTEGER NOT NULL REFERENCES bug_reports(id),
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bug_comment_bug ON bug_comments(bug_id, created_at);
+CREATE TABLE IF NOT EXISTS bug_flags (
+  bug_id     INTEGER NOT NULL REFERENCES bug_reports(id),
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (bug_id, user_id)
+);
