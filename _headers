@@ -29,3 +29,24 @@
   Cache-Control: no-cache
 /css/*
   Cache-Control: no-cache
+
+# ── Security headers (global) ───────────────────────────────────────────────
+# Baseline protections for a site that renders user-generated HTML + chat.
+# The CSP ships Report-Only first: a _headers CSP can't be exercised by the
+# local python dev server, so enforcing it blind could break the live game.
+# AFTER deploying to a Pages preview, open the game AND the Workshop, confirm
+# the DevTools console shows no "Content-Security-Policy" violation reports,
+# then rename the header below from `Content-Security-Policy-Report-Only` to
+# `Content-Security-Policy` to enforce it.
+# connect-src is scoped to exactly what the client uses: same-origin API +
+# wss sockets (live/hub), the Workshop BYO endpoints (Anthropic/PixelLab),
+# Turnstile, and the raw.githubusercontent CDN asset fallback (sw.js).
+# microphone/fullscreen/autoplay are intentionally NOT disabled (voice chant
+# casting + fullscreen + game audio depend on them).
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Permissions-Policy: geolocation=(), camera=(), payment=(), usb=(), midi=(), magnetometer=(), gyroscope=(), accelerometer=()
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://raw.githubusercontent.com; media-src 'self' data: blob: https://raw.githubusercontent.com; font-src 'self' data:; connect-src 'self' wss://our-rpg.com https://api.anthropic.com https://api.pixellab.ai https://challenges.cloudflare.com https://raw.githubusercontent.com; frame-src https://challenges.cloudflare.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'

@@ -33,6 +33,7 @@
   document.head.appendChild(st);
 
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const safeUrl = u => /^https?:\/\//i.test(String(u)) ? String(u) : "";
   const when = ms => !ms ? "never" : new Date(ms).toLocaleString();
   let msg = "", msgOk = false;
   const say = (m, ok) => { msg = m || ""; msgOk = !!ok; render(); };
@@ -199,7 +200,7 @@ ${workshopHtml("Open Our RPG Workshop ↗")}
         .map(l => l.replace(/^\s*[-*] /, "").replace(/[*_`#]/g, ""));
       el.innerHTML = (bullets.length ? bullets : [String(d.markdown).split("\n").find(l => l.trim()) || ""])
         .map(b => `<div class="acc-row">· ${esc(b)}</div>`).join("") +
-        (d.posted_url ? `<div class="acc-row"><a href="${esc(d.posted_url)}" target="_blank" rel="noopener">the whole week ↗</a></div>` : "");
+        (safeUrl(d.posted_url) ? `<div class="acc-row"><a href="${esc(safeUrl(d.posted_url))}" target="_blank" rel="noopener">the whole week ↗</a></div>` : "");
     });
     // live transparency line (audit §9: the real number, publicly)
     Server.call("/api/koha/transparency").then(r => {

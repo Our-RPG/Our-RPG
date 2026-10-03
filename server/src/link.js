@@ -19,7 +19,12 @@ export async function makeCode(req, env) {
   if (!await rateLimit(env, `linkcode:${user.id}`, 10, 3600))
     return err("Too many codes requested — try later.", 429);
 
-  const code = randToken(6).replace(/[-_]/g, "x").slice(0, 8).toUpperCase();
+  // 8 chars from a 32-symbol uppercase-safe alphabet (40 bits, no case-folding,
+  // no ambiguous 0/O/1/I). Single-use + 10-min TTL + redeem rate-limit already
+  // make brute force infeasible; this just keeps the stored entropy honest.
+  const ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const rb = crypto.getRandomValues(new Uint8Array(8));
+  const code = Array.from(rb, x => ALPHA[x & 31]).join("");
   await env.DB.prepare("DELETE FROM link_codes WHERE user_id = ?").bind(user.id).run();
   await env.DB.prepare(
     "INSERT INTO link_codes (code_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)"

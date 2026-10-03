@@ -85,8 +85,14 @@
     const events = final ? Q.slice(-600) : Q.splice(0);
     if (final) { Q = Q.slice(0, -600); saveBacklog(); }
     inFlight = true;
+    // Privacy: attach the persistent install id (device) only for ANONYMOUS
+    // traffic. An authed request already identifies the user via its bearer
+    // token, so also sending device would let the server tie this account to
+    // its pre-login anonymous stream. (taiao_session_v1 = serverapi's token key.)
+    let authed = false;
+    try { authed = !!localStorage.getItem("taiao_session_v1"); } catch (e) {}
     const body = {
-      v: 1, device, session, seq: ++batchSeq, now: Date.now(),
+      v: 1, device: authed ? null : device, session, seq: ++batchSeq, now: Date.now(),
       char: typeof player !== "undefined" && player ? (player.character ?? null) : null,
       dev: typeof DEV_MODE !== "undefined" && DEV_MODE ? 1 : 0,
       build: typeof WORLDGEN_SIG !== "undefined" ? WORLDGEN_SIG : "?",

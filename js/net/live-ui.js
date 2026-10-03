@@ -77,7 +77,7 @@
   document.body.appendChild(box);
   const inputEl = box.querySelector("input");
 
-  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   // Route a chat line into the shared message log. sys lines use the log's
   // italic-blue system style; ordinary chat uses the green-name chat style.
   function chatLine(html, sys) {

@@ -142,7 +142,9 @@ export async function registerFinish(req, env) {
   if (!b || !b.response) return err("Bad request body.");
   const cd = checkClientData(env, b.response.clientDataJSON, "webauthn.create");
   if (!cd) return err("Bad client data.", 403);
-  if (!await takeChallenge(env, cd.challenge, "reg")) return err("Challenge expired — try again.", 403);
+  const ch = await takeChallenge(env, cd.challenge, "reg");
+  if (!ch) return err("Challenge expired — try again.", 403);
+  if (ch.user_id !== user.id) return err("Challenge does not belong to this account.", 403);
 
   let att;
   try { att = cborDecode(b64uDecode(b.response.attestationObject)); }
@@ -160,9 +162,14 @@ export async function registerFinish(req, env) {
     return err("Only ES256/P-256 passkeys are supported.");
   const jwk = { kty: "EC", crv: "P-256", x: b64uEncode(cose.get(-2)), y: b64uEncode(cose.get(-3)) };
 
+  const credIdB64 = b64uEncode(credId);
+  const owner = await env.DB.prepare("SELECT user_id FROM passkeys WHERE cred_id = ?")
+    .bind(credIdB64).first();
+  if (owner && owner.user_id !== user.id)
+    return err("That credential is already registered.", 409);
   await env.DB.prepare(
     "INSERT OR REPLACE INTO passkeys (cred_id, user_id, pubkey_jwk, counter, label, created_at) VALUES (?,?,?,?,?,?)"
-  ).bind(b64uEncode(credId), user.id, JSON.stringify(jwk), 0,
+  ).bind(credIdB64, user.id, JSON.stringify(jwk), 0,
          String(b.label || "").slice(0, 40), now()).run();
   return json({ ok: true });
 }
@@ -170,6 +177,8 @@ export async function registerFinish(req, env) {
 // ---- login ----------------------------------------------------------------
 
 export async function loginOptions(req, env) {
+  const ip = clientIp(req);
+  if (!await rateLimit(env, `pk-opt:${ip}`, 60, 3600)) return err("Too many attempts — try later.", 429);
   const b = await readJson(req);
   const challenge = await makeChallenge(env, null, "auth");
   let allowCredentials;

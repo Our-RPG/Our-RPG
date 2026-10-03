@@ -26,8 +26,15 @@ const TYPES = /^(node|decor):-?\d{1,7},-?\d{1,7}$|^heat:-?\d{1,7},-?\d{1,7},\d{1
 const MAX_DELTAS_PER_PUSH = 200;
 const MAX_VALUE_CHARS = 300;
 const MAX_RECORDS = 8000;             // per region — a bound, not a target
+const PER_USER_RECORDS = 1500;        // one account's share of that budget (anti-flood/grief)
 const MAX_EXPIRY_AHEAD = 48 * 3600e3; // nothing shared outlives 48 h
 const COMPACT_EVERY = 3600e3;
+// Changelog: every push also writes a `c:<pad(seq)>` → tile-key entry so an
+// incremental pull can read ONLY the records that changed after the client's
+// cursor instead of scanning the whole region. Keys are zero-padded to sort
+// lexicographically by seq; 16 digits covers the full safe-integer range.
+const SEQ_PAD = 16;
+const pad = n => String(n).padStart(SEQ_PAD, "0");
 
 export class RegionLedger {
   constructor(ctx) {
@@ -56,16 +63,37 @@ export class RegionLedger {
     await this.ctx.storage.transaction(async txn => {
       let seq = (await txn.get("seq")) || 0;
       let count = (await txn.get("count")) || 0;
+      // Per-user share of this region's record budget (anti-flood): every delta
+      // in a push carries the same authenticated `by`, so one counter suffices.
+      // Reconciled hourly in alarm() so expiry can't drift it upward and wrongly
+      // lock a user out.
+      let myCount = by ? ((await txn.get("uc:" + by)) || 0) : 0;
+      // clogFrom: the first seq ever covered by the changelog (undefined on
+      // regions whose last write predates this change — those keep full-scanning
+      // until a push starts their changelog). firstClog is the first seq we
+      // write a c: entry for in THIS push.
+      let clogFrom = await txn.get("clogFrom");
+      let firstClog = null;
       for (const d of body.deltas.slice(0, MAX_DELTAS_PER_PUSH)) {
         const k = String(d?.k || "");
         if (!TYPES.test(k)) continue;
         const key = "r:" + k;
         if (d.v === null) {                       // explicit clear
           const had = await txn.get(key);
-          if (had) { count--; await txn.delete(key); }
+          // Anti-grief: one account can't wipe another's still-live record
+          // (mass-clearing / clearing others' depletions to re-farm). Your own
+          // records, ownerless legacy ones, and already-healed ones stay clearable.
+          if (had && had.by && by && had.by !== by && (had.e || 0) > now) continue;
+          if (had) {
+            count--;
+            if (had.by === by && myCount > 0) myCount--;
+            await txn.delete(key);
+          }
           seq++;
           const rec = { k, seq, t: now, e: now, v: null };
           await txn.put("t:" + k, rec);           // tombstone so pulls see it
+          await txn.put("c:" + pad(seq), k);      // changelog: this seq changed k
+          if (firstClog === null) firstClog = seq;
           stored.push(rec);
           continue;
         }
@@ -74,16 +102,23 @@ export class RegionLedger {
         if (v.length > MAX_VALUE_CHARS) continue;
         const had = await txn.get(key);
         if (!had && count >= MAX_RECORDS) continue;
-        if (!had) count++;
+        if (!had && by && myCount >= PER_USER_RECORDS) continue;   // per-user share cap (anti-flood)
+        if (!had) { count++; if (by) myCount++; }
         seq++;
         const e = Math.min(Math.max(Number(d.e) || now, now), now + MAX_EXPIRY_AHEAD);
         const rec = { k, seq, t: now, e, v: d.v, by };
         await txn.put(key, rec);
         await txn.delete("t:" + k);
+        await txn.put("c:" + pad(seq), k);        // changelog: this seq changed k
+        if (firstClog === null) firstClog = seq;
         stored.push(rec);
       }
       await txn.put("seq", seq);
       await txn.put("count", count);
+      if (by) await txn.put("uc:" + by, Math.max(0, myCount));
+      // stamp where this region's changelog began, once, so pulls know the
+      // lower bound of the fast path (older cursors fall back to the full scan)
+      if (clogFrom == null && firstClog != null) await txn.put("clogFrom", firstClog);
     });
 
     if (!(await this.ctx.storage.getAlarm()))
@@ -100,12 +135,34 @@ export class RegionLedger {
     const seq = (await this.ctx.storage.get("seq")) || 0;
     const deltas = [];
     if (seq > since) {
-      for (const prefix of ["r:", "t:"]) {
-        const map = await this.ctx.storage.list({ prefix });
-        for (const rec of map.values()) {
-          if (rec.seq <= since) continue;
-          if (since === 0 && rec.e <= now) continue;   // healed — irrelevant on a fresh pull
-          deltas.push(rec);
+      // Fast incremental path: when the client's cursor is within the changelog's
+      // coverage, read only the c: entries after it and resolve each to its
+      // CURRENT record (r:/t:) — identical to what the scan would return (latest
+      // per key), but O(changes) instead of O(region). The since===0 login pull
+      // and any cursor predating the changelog (old regions, or a pre-change
+      // last write) fall back to the full r:/t: scan, so no migration is needed.
+      let clogFrom = null;
+      if (since > 0) clogFrom = await this.ctx.storage.get("clogFrom");
+      if (clogFrom != null && since + 1 >= clogFrom) {
+        const clog = await this.ctx.storage.list({ prefix: "c:", start: "c:" + pad(since + 1) });
+        const seen = new Set();
+        for (const k of clog.values()) {           // values are the changed tile keys
+          if (seen.has(k)) continue;               // one current record per key (latest-wins)
+          seen.add(k);
+          // resolve to the key's current state; a key compacted away (both gone)
+          // simply isn't returned, matching the scan path
+          const rec = (await this.ctx.storage.get("r:" + k)) ||
+                      (await this.ctx.storage.get("t:" + k));
+          if (rec && rec.seq > since) deltas.push(rec);
+        }
+      } else {
+        for (const prefix of ["r:", "t:"]) {
+          const map = await this.ctx.storage.list({ prefix });
+          for (const rec of map.values()) {
+            if (rec.seq <= since) continue;
+            if (since === 0 && rec.e <= now) continue;   // healed — irrelevant on a fresh pull
+            deltas.push(rec);
+          }
         }
       }
       deltas.sort((a, b) => a.seq - b.seq);
@@ -118,15 +175,31 @@ export class RegionLedger {
   async alarm() {
     const now = Date.now();
     let removed = 0, remaining = 0;
+    const byCount = new Map();                     // live r: records per owner
     for (const prefix of ["r:", "t:"]) {
       const map = await this.ctx.storage.list({ prefix });
       for (const [key, rec] of map) {
         if (rec.e <= now - 60e3) { await this.ctx.storage.delete(key); removed++; }
-        else if (prefix === "r:") remaining++;
+        else if (prefix === "r:") {
+          remaining++;
+          if (rec.by) byCount.set(rec.by, (byCount.get(rec.by) || 0) + 1);
+        }
       }
     }
     const count = (await this.ctx.storage.get("count")) || 0;
     if (count !== remaining) await this.ctx.storage.put("count", remaining);
+    // Reconcile the per-user share counters (uc:<id>) against reality so expiry
+    // can't drift them upward — a stale over-count would wrongly lock a user out.
+    const ucMap = await this.ctx.storage.list({ prefix: "uc:" });
+    for (const [key, val] of ucMap) {
+      const uid = Number(key.slice(3)) || 0;
+      const real = byCount.get(uid) || 0;
+      byCount.delete(uid);
+      if (real === 0) await this.ctx.storage.delete(key);
+      else if (real !== val) await this.ctx.storage.put(key, real);
+    }
+    for (const [uid, real] of byCount)             // owners without an existing uc: key
+      await this.ctx.storage.put("uc:" + uid, real);
     if (remaining || removed === 0)
       await this.ctx.storage.setAlarm(now + COMPACT_EVERY);
   }

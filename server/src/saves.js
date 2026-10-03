@@ -19,7 +19,7 @@ export async function putSave(req, env) {
     return err("Too many uploads — the vault keeps one every couple of minutes at most.", 429);
   const b = await readJson(req, MAX_BLOB + 256 * 1024);
   if (!b || typeof b.blob !== "string") return err("Bad request body.");
-  const slot = String(b.slot || "main").slice(0, 40);
+  const slot = (String(b.slot || "main").replace(/[^A-Za-z0-9_-]/g, "") || "main").slice(0, 40);
   if (b.blob.length > MAX_BLOB) return err("Save too large.", 413);
   try { JSON.parse(b.blob); } catch { return err("Save blob is not valid JSON."); }
 
@@ -90,7 +90,7 @@ export async function listSaves(req, env) {
 export async function getSaveBlob(req, env, url) {
   const user = await authUser(req, env);
   if (!user) return err("Not logged in.", 401);
-  const slot = String(url.searchParams.get("slot") || "main").slice(0, 40);
+  const slot = (String(url.searchParams.get("slot") || "main").replace(/[^A-Za-z0-9_-]/g, "") || "main").slice(0, 40);
   let version = Number(url.searchParams.get("version") || 0);
   if (!version) {
     const latest = await env.DB.prepare(
