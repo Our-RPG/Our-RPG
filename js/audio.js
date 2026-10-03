@@ -73,6 +73,40 @@ const SFX = (() => {
     return a;
   }
 
+  // Prime the pools so a skill's FIRST action doesn't pay a cold fetch+decode
+  // on the main thread — the reported one-off hitch on the first chop / mine /
+  // craft / hit, which then runs smooth from the pool. We create one pooled
+  // element per variant file and kick off its load(); the first real play()
+  // reuses that already-decoded element. Staggered a few per idle tick so we
+  // don't fire ~80 requests in one burst, and never played (load() needs no
+  // user gesture and doesn't touch the mix). Idempotent: skips files already
+  // pooled, and runs at most once.
+  let warmed = false;
+  function warm() {
+    if (warmed) return;
+    warmed = true;
+    const files = [];
+    for (const name in SOUNDS) {
+      const n = SOUNDS[name];
+      if (n) for (let i = 0; i < n; i++) files.push(name + i + ".ogg");
+      else files.push(name + ".ogg");
+    }
+    const idle = typeof requestIdleCallback === "function"
+      ? cb => requestIdleCallback(cb, { timeout: 2000 })
+      : cb => setTimeout(cb, 60);
+    let i = 0;
+    const pump = () => {
+      for (let k = 0; k < 6 && i < files.length; k++, i++) {
+        const file = files[i];
+        if (pools[file] && pools[file].length) continue; // already primed/played
+        const a = grab(file);
+        if (a) { a.preload = "auto"; try { a.load(); } catch (e) {} }
+      }
+      if (i < files.length) idle(pump);
+    };
+    idle(pump);
+  }
+
   // Same shape as grab(), but pooled per override name+src rather than per
   // built-in filename — SFX_OVERRIDE holds a dataURL/CDN URL, not a BASE-
   // relative variant file.
@@ -240,7 +274,12 @@ const SFX = (() => {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initUi);
   else initUi();
 
-  return { play, step, gather, craft,
+  // Warm the SFX pools once, a few seconds after boot — late enough not to
+  // compete with the (much heavier) world/sprite load, early enough to be done
+  // before the player reaches a node to work.
+  setTimeout(warm, 5000);
+
+  return { play, step, gather, craft, warm,
     natureChain, natureSet,
     gameVol: () => gameVol, natureVol: () => natureVol, musicVol: () => musicVol };
 })();
